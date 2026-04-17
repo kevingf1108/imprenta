@@ -414,12 +414,27 @@
       }
     }
   </style>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 </head>
 
 <body>
   <div id="root"></div>
   <script>
     'use strict';
+    // ── Firebase ────────────────────────────────────────
+    firebase.initializeApp({
+      apiKey: "AIzaSyB40xYmdLxTlIFyPbP3sqnru35WMNpHs_0",
+      authDomain: "imprenta-10c73.firebaseapp.com",
+      databaseURL: "https://imprenta-10c73-default-rtdb.firebaseio.com",
+      projectId: "imprenta-10c73",
+      storageBucket: "imprenta-10c73.firebasestorage.app",
+      messagingSenderId: "80250247267",
+      appId: "1:80250247267:web:36ee4b66a593feba630056"
+    });
+    const _db = firebase.database();
+    const _ref = _db.ref('imprenta');
     // ═══════════════════════════════════════════════════
     //  CONSTANTES
     // ═══════════════════════════════════════════════════
@@ -580,8 +595,40 @@
     const SHEET_IMP = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIlfUFRnj_VYEvovfEKY4Gj44uRgb1VOr9VVc3F1tlS2aHwHA4pJ-vib1SbHhJq0pR_PbHSs853ImS/pub?gid=438428152&single=true&output=csv';
     const SHEET_ACAB = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIlfUFRnj_VYEvovfEKY4Gj44uRgb1VOr9VVc3F1tlS2aHwHA4pJ-vib1SbHhJq0pR_PbHSs853ImS/pub?gid=1109183930&single=true&output=csv';
 
-    function loadS() { try { const o = localStorage.getItem('imp_o'), c = localStorage.getItem('imp_c'); orders = o ? JSON.parse(o) : JSON.parse(JSON.stringify(SAMPLE)); cfg = c ? JSON.parse(c) : JSON.parse(JSON.stringify(CFG0)); } catch { orders = JSON.parse(JSON.stringify(SAMPLE)); cfg = JSON.parse(JSON.stringify(CFG0)); } }
-    function saveS() { try { localStorage.setItem('imp_o', JSON.stringify(orders)); localStorage.setItem('imp_c', JSON.stringify(cfg)); } catch { } }
+    function loadS() {
+      document.getElementById('root').innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0f172a">
+          <div style="text-align:center;color:#60a5fa">
+            <div style="font-size:52px;margin-bottom:14px">🖨️</div>
+            <div style="font-size:18px;font-weight:700;margin-bottom:6px">Conectando...</div>
+            <div style="font-size:13px;color:#475569">Sincronizando con Firebase</div>
+          </div>
+        </div>`;
+      _ref.on('value', snap => {
+        const data = snap.val();
+        if (data && data.orders) {
+          const raw = data.orders;
+          orders = (Array.isArray(raw) ? raw : Object.values(raw)).filter(Boolean);
+          cfg = data.cfg ? { ...JSON.parse(JSON.stringify(CFG0)), ...data.cfg } : JSON.parse(JSON.stringify(CFG0));
+        } else {
+          orders = [];
+          cfg = JSON.parse(JSON.stringify(CFG0));
+        }
+        autoMergeCheck();
+        render();
+      }, err => {
+        console.error('Firebase error:', err);
+        // Fallback a localStorage si no hay conexión
+        try { const o = localStorage.getItem('imp_o'), c = localStorage.getItem('imp_c'); orders = o ? JSON.parse(o) : []; cfg = c ? JSON.parse(c) : JSON.parse(JSON.stringify(CFG0)); } catch { orders = []; cfg = JSON.parse(JSON.stringify(CFG0)); }
+        autoMergeCheck(); render();
+      });
+    }
+    function saveS() {
+      _ref.set({ orders, cfg }).catch(e => {
+        // Fallback a localStorage si no hay conexión
+        try { localStorage.setItem('imp_o', JSON.stringify(orders)); localStorage.setItem('imp_c', JSON.stringify(cfg)); } catch {}
+      });
+    }
 
     // ═══════════════════════════════════════════════════
     //  UTILIDADES
@@ -1897,7 +1944,7 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
     // ═══════════════════════════════════════════════════
     //  INICIO
     // ═══════════════════════════════════════════════════
-    loadS(); autoMergeCheck(); render();
+    loadS();
   </script>
 </body>
 
