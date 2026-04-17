@@ -1,0 +1,1904 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Producción — Imprenta</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #1e293b
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 3px
+    }
+
+    .board {
+      display: flex;
+      gap: 10px;
+      padding: 14px;
+      overflow-x: auto;
+      min-height: calc(100vh - 68px);
+      align-items: flex-start
+    }
+
+    .col {
+      min-width: 245px;
+      max-width: 245px;
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 11px;
+      flex-shrink: 0
+    }
+
+    .col.union-col {
+      min-width: 280px;
+      max-width: 280px;
+      background: #1a1500
+    }
+
+    .col-hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 2px 9px;
+      border-bottom: 2px solid;
+      margin-bottom: 8px
+    }
+
+    .card {
+      background: #0f172a;
+      border-radius: 8px;
+      padding: 10px;
+      border-left: 3px solid #334155;
+      cursor: pointer;
+      transition: background .15s;
+      margin-bottom: 7px
+    }
+
+    .card:hover {
+      background: #162032
+    }
+
+    .card.urg {
+      background: #160808
+    }
+
+    .card.int-card {
+      border-left-color: #818cf8
+    }
+
+    .card.port-card {
+      border-left-color: #c084fc
+    }
+
+    .card.union-card {
+      border-left-color: #f59e0b;
+      background: #1a1000
+    }
+
+    .card.merged-card {
+      border-left-color: #4ade80;
+      background: #061a0c
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600
+    }
+
+    .btn {
+      padding: 9px 18px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: opacity .15s
+    }
+
+    .btn:hover {
+      opacity: .88
+    }
+
+    .btn-p {
+      background: #3b82f6;
+      color: #fff
+    }
+
+    .btn-d {
+      background: #ef4444;
+      color: #fff
+    }
+
+    .btn-g {
+      background: transparent;
+      color: #94a3b8;
+      border: 1px solid #334155
+    }
+
+    .btn-sm {
+      padding: 5px 12px;
+      font-size: 12px;
+      border-radius: 6px
+    }
+
+    .btn-merge {
+      background: #f59e0b;
+      color: #0a0a00;
+      font-weight: 800;
+      font-size: 13px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 6px;
+      animation: pulse 1.5s infinite
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        box-shadow: 0 0 0 0 #f59e0b66
+      }
+
+      50% {
+        box-shadow: 0 0 0 6px transparent
+      }
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, .78);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 16px
+    }
+
+    .modal {
+      background: #1e293b;
+      border-radius: 16px;
+      padding: 24px;
+      width: 100%;
+      max-width: 600px;
+      max-height: 93vh;
+      overflow-y: auto
+    }
+
+    .inp {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 9px 12px;
+      color: #e2e8f0;
+      font-size: 14px;
+      margin-top: 4px
+    }
+
+    .inp:focus {
+      outline: 2px solid #3b82f6;
+      border-color: transparent
+    }
+
+    .lbl {
+      display: block;
+      font-size: 13px;
+      color: #94a3b8;
+      margin-top: 12px;
+      font-weight: 500
+    }
+
+    .g2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px
+    }
+
+    .g3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px
+    }
+
+    .bico {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 3px 7px;
+      border-radius: 4px;
+      font-size: 15px;
+      line-height: 1;
+      color: #94a3b8
+    }
+
+    .bico:hover {
+      background: #334155
+    }
+
+    .ell {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis
+    }
+
+    .step {
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 9px;
+      background: #0f172a;
+      border-radius: 6px;
+      font-size: 12px;
+      margin-bottom: 3px
+    }
+
+    .est-box {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 14px;
+      margin-top: 12px
+    }
+
+    .kcard {
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 12px
+    }
+
+    .capbar {
+      height: 10px;
+      background: #334155;
+      border-radius: 999px;
+      overflow: hidden
+    }
+
+    .tv-wrap {
+      position: fixed;
+      inset: 0;
+      background: #020617;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      padding: 14px 18px
+    }
+
+    .tv-col {
+      flex: 1;
+      background: #0f172a;
+      border-radius: 16px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      overflow: hidden
+    }
+
+    .seg {
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      background: #0f172a;
+      color: #94a3b8
+    }
+
+    .gantt-bar {
+      position: absolute;
+      height: 26px;
+      top: 5px;
+      border-radius: 5px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      padding: 0 6px;
+      font-size: 11px;
+      font-weight: 700;
+      overflow: hidden;
+      white-space: nowrap
+    }
+
+    .gantt-bar:hover {
+      opacity: .82;
+      z-index: 10
+    }
+
+    .gantt-row {
+      display: flex;
+      align-items: stretch;
+      border-bottom: 1px solid #1e293b;
+      min-height: 36px
+    }
+
+    .gantt-label {
+      width: 160px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #94a3b8;
+      border-right: 1px solid #1e293b;
+      background: #0a0f1e
+    }
+
+    .gantt-track {
+      position: relative;
+      flex: 1;
+      min-height: 36px
+    }
+
+    .split-toggle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 14px;
+      padding: 12px;
+      background: #0a0f1e;
+      border-radius: 10px;
+      border: 1px solid #334155;
+      cursor: pointer
+    }
+
+    .split-toggle.on {
+      border-color: #f59e0b;
+      background: #1a1200
+    }
+
+    .acab-col {
+      min-width: 185px;
+      max-width: 185px;
+      background: #130a2e
+    }
+
+    .card {
+      cursor: grab
+    }
+
+    .card:active {
+      cursor: grabbing
+    }
+
+    .card.dragging {
+      opacity: .4;
+      transform: scale(.97)
+    }
+
+    .col.drag-over {
+      outline: 2px dashed #f59e0b;
+      background: #1a1200
+    }
+
+    .col.drag-over-ok {
+      outline: 2px dashed #4ade80;
+      background: #061a0c
+    }
+
+    @media(max-width:600px) {
+
+      .g2,
+      .g3 {
+        grid-template-columns: 1fr
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script>
+    'use strict';
+    // ═══════════════════════════════════════════════════
+    //  CONSTANTES
+    // ═══════════════════════════════════════════════════
+    // 6 etapas: flujo normal (imp→acabados→empaque→listo)
+    // Flujo split: imp → pre_union (int/port) → union → acabados → empaque → listo
+    const ETAPAS = [
+      { id: 'impresion', label: 'Impresión', full: 'Impresión', icon: '🖨️', color: '#fb923c' },
+      { id: 'empaque', label: 'Empaque', full: 'Termo · Empaque', icon: '📦', color: '#14b8a6' },
+      { id: 'listo', label: 'Listo', full: 'Listo para Entrega', icon: '✅', color: '#4ade80' },
+    ];
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    //  SUB-PASOS DE ACABADOS
+    //  Flujos reales por encuadernación y tipo de sub-orden:
+    //
+    //  NORMAL / ENGRAPADO / ESPIRAL:
+    //    INT:   ci
+    //    PORT:  pl → ci  (+ cc+ap si pasta_dura / ponchado si espiral)
+    //    UNION: pg → cf → te  (engrapado: en → te; espiral: es → te)
+    //
+    //  PASTA DURA:
+    //    INT:   ci → pg → cf → cdc
+    //    PORT:  pl → ci → cc → ap
+    //    UNION: ms → te
+    // ─────────────────────────────────────────────────────────────────────────────
+    const ACAB_STEPS = [
+      { id: 'acab_pl', label: 'Plastificado', icon: '🪄', color: '#818cf8' },
+      { id: 'acab_ci', label: 'Corte Inicial', icon: '✂️', color: '#c084fc' },
+      { id: 'acab_pg', label: 'Pegado', icon: '📎', color: '#f97316' },
+      { id: 'acab_cf', label: 'Corte Final', icon: '🔪', color: '#fb923c' },
+      { id: 'acab_cdc', label: 'Cinta Doble Cara', icon: '🩹', color: '#e879f9' },
+      { id: 'acab_cc', label: 'Corte Cartón', icon: '📐', color: '#a78bfa' },
+      { id: 'acab_ap', label: 'Armado Portada', icon: '🛠️', color: '#f59e0b' },
+      { id: 'acab_ms', label: 'Mesa de Trabajo', icon: '🔗', color: '#4ade80' },
+      { id: 'acab_pi', label: 'Ponchado Int', icon: '🔩', color: '#38bdf8' },
+      { id: 'acab_pp', label: 'Ponchado Port', icon: '🔩', color: '#22d3ee' },
+      { id: 'acab_en', label: 'Engrapado', icon: '📌', color: '#facc15' },
+      { id: 'acab_es', label: 'Espiralado', icon: '🌀', color: '#2dd4bf' },
+      { id: 'acab_te', label: 'Termo', icon: '🌡️', color: '#14b8a6' },
+    ];
+
+    // Devuelve la secuencia exacta de pasos para una orden según tipo y encuadernación
+    function getAcabFlow(o) {
+      const enc = o.tipoEncuadernacion || 'normal';
+      const tipo = o.tipo || 'normal';
+      const isInt = tipo === 'int_sub';
+      const isPort = tipo === 'port_sub';
+      const isUnion = tipo === 'union_result';
+
+      // ── INTERIORES ──────────────────────────────────────────────
+      if (isInt) {
+        if (enc === 'pasta_dura') return ['acab_ci', 'acab_pg', 'acab_cf', 'acab_cdc'];
+        if (enc === 'espiral' || enc === 'espiral_pd') return ['acab_ci', 'acab_pi'];
+        return ['acab_ci']; // normal, engrapado
+      }
+
+      // ── PORTADA ─────────────────────────────────────────────────
+      if (isPort) {
+        if (enc === 'pasta_dura') return ['acab_pl', 'acab_ci', 'acab_cc', 'acab_ap'];
+        if (enc === 'espiral_pd') return ['acab_pl', 'acab_ci', 'acab_cc', 'acab_ap', 'acab_pp'];
+        if (enc === 'espiral') return ['acab_pl', 'acab_ci', 'acab_pp'];
+        return ['acab_pl', 'acab_ci']; // normal, engrapado
+      }
+
+      // ── FLUJO COMPLETO (union_result y órdenes normales sin separar) ─
+      // El union_result usa el mismo flujo completo que normal para poder
+      // regresar a Plastificado / Corte Inicial si se necesita corregir algo.
+      if (enc === 'pasta_dura') return ['acab_pl', 'acab_ci', 'acab_pg', 'acab_cf', 'acab_cdc', 'acab_cc', 'acab_ap', 'acab_ms', 'acab_te'];
+      if (enc === 'engrapado') return ['acab_pl', 'acab_ci', 'acab_en', 'acab_te'];
+      if (enc === 'espiral_pd') return ['acab_pl', 'acab_ci', 'acab_pi', 'acab_cc', 'acab_ap', 'acab_pp', 'acab_es', 'acab_te'];
+      if (enc === 'espiral') return ['acab_pl', 'acab_ci', 'acab_pi', 'acab_pp', 'acab_es', 'acab_te'];
+      return ['acab_pl', 'acab_ci', 'acab_pg', 'acab_cf', 'acab_te']; // normal/rústica
+    }
+
+    // Etapa actual de acabados: primera que corresponde al stepActual de la orden
+    // Si etapa es 'acab_*' lo gestionamos aparte
+    function isAcabEtapa(id) { return id && id.startsWith('acab_'); }
+    function allEtapas(ordList) {
+      // Muestra TODAS las columnas de acabados por las que cualquier orden activa pasará,
+      // incluyendo pasos futuros y anteriores, para que no desaparezcan al mover tarjetas
+      const relevantAcab = new Set();
+      ordList.filter(o => o.etapa !== 'listo' && !o._merged).forEach(o => {
+        // Agregar todos los pasos del flujo completo de esta orden
+        getAcabFlow(o).forEach(s => relevantAcab.add(s));
+      });
+      return [
+        ...ETAPAS.slice(0, 1),
+        ...ACAB_STEPS.filter(s => relevantAcab.has(s.id)),
+        ...ETAPAS.slice(1),
+      ];
+    }
+    const TIPOS_ENC = [
+      { id: 'normal', label: 'Rústica / Normal', icon: '📖', color: '#94a3b8' },
+      { id: 'pasta_dura', label: 'Pasta dura pegada', icon: '📕', color: '#f97316' },
+      { id: 'engrapado', label: 'Engrapado', icon: '📌', color: '#facc15' },
+      { id: 'espiral', label: 'Espiral / Wire', icon: '🔩', color: '#38bdf8' },
+      { id: 'espiral_pd', label: 'Espiral + Pasta dura', icon: '🔩', color: '#a78bfa' },
+    ];
+    const MAQUINAS = [
+      { id: 'oce6320', label: 'OCE 6320', steps: ['iib'], grupo: '🖨️ Impresión B&N' },
+      { id: 'titan', label: 'Titan 6180', steps: ['iib'], grupo: '🖨️ Impresión B&N' },
+      { id: 'c1352', label: 'Color 1352', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
+      { id: 'c1351', label: 'Color 1351', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
+      { id: 'c10010', label: 'Color 10010', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
+      { id: 'plast', label: 'Plastificadora', steps: ['pl'], grupo: '✂️ Acabados' },
+      { id: 'ci1', label: 'Cortadora Ini.1', steps: ['ci', 'cp'], grupo: '✂️ Acabados' },
+      { id: 'ci2', label: 'Cortadora Ini.2', steps: ['ci', 'cp'], grupo: '✂️ Acabados' },
+      { id: 'peg1', label: 'Pegadora 1', steps: ['pg'], grupo: '✂️ Acabados' },
+      { id: 'peg2', label: 'Pegadora 2', steps: ['pg'], grupo: '✂️ Acabados' },
+      { id: 'peg3', label: 'Pegadora 3', steps: ['pg'], grupo: '✂️ Acabados' },
+      { id: 'cf1', label: 'Corte Final 1', steps: ['cf'], grupo: '✂️ Acabados' },
+      { id: 'cf2', label: 'Corte Final 2', steps: ['cf'], grupo: '✂️ Acabados' },
+      { id: 'ponch', label: 'Ponchadora', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
+      { id: 'engr', label: 'Engrapadora', steps: ['en'], grupo: '✂️ Acabados' },
+      { id: 'espir', label: 'Espiraladora', steps: ['es'], grupo: '✂️ Acabados' },
+      { id: 'cortC', label: 'Corte Cartón', steps: ['cc'], grupo: '✂️ Acabados' },
+      { id: 'armd', label: 'Armado PD/Mesa', steps: ['ap', 'ms', 'cdc'], grupo: '✂️ Acabados' },
+      { id: 'termo', label: 'Termo Empaque', steps: ['te'], grupo: '📦 Empaque' },
+    ];
+    const ORD_COLORS = ['#3b82f6', '#22c55e', '#f97316', '#a855f7', '#ec4899', '#14b8a6', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#84cc16', '#f43f5e'];
+    const CFG0 = {
+      nombreImprenta: 'Mi Imprenta', horasDia: 10, startHour: 8, pptDefault: 8, portaPptDefault: 2,
+      scriptUrl: '', // URL del Google Apps Script Web App para marcar Listo en Sheets
+      maq: {
+        byn_fast: 150, byn_slow: 80, color_normal: 50, color_grueso: 25, color_slow_n: 40, color_slow_g: 20,
+        corteInicial: 200, plast_vel: 5, plast_hoja: 0.475,
+        pegado_150: 2, pegado_500: 1, cf_150: 6, cf_500: 3,
+        ponchadora: 200, engrapadora: 2, corte_carton: 10, armado_pd: 0.33, mesa_trabajo: 0.5, espiralado: 2, termo: 10
+      },
+      setup: { byn: 4, color: 7, plastificado: 3, pegado: 15, corteFinal: 5, corteInicial: 0, termo: 0 },
+    };
+
+    // tipo: 'normal' | 'int_sub' | 'port_sub' | 'union_result'
+    // grupoId: shared ID for split orders
+    const SAMPLE = [
+      // Órdenes normales (flujo completo sin separar)
+      { id: 'ORD-001', tipo: 'normal', cliente: 'Patricia León', titulo: 'Cuaderno de Ejercicios', cantidad: 1000, paginas: 80, ppt: 8, portaPpt: 2, tipoInteriores: 'byn', gramaje: 'normal', tipoEncuadernacion: 'engrapado', fechaLimite: '2026-04-30', etapa: 'impresion', urgente: false, notas: '' },
+      { id: 'ORD-002', tipo: 'normal', cliente: 'Carlos Ruiz', titulo: 'Historia Local', cantidad: 100, paginas: 280, ppt: 8, portaPpt: 2, tipoInteriores: 'byn', gramaje: 'normal', tipoEncuadernacion: 'normal', fechaLimite: '2026-04-25', etapa: 'acab_ci', urgente: false, notas: '' },
+      { id: 'ORD-003', tipo: 'normal', cliente: 'Elena Vega', titulo: 'Catálogo de Arte 2026', cantidad: 300, paginas: 160, ppt: 8, portaPpt: 2, tipoInteriores: 'color', gramaje: 'normal', tipoEncuadernacion: 'normal', fechaLimite: '2026-04-28', etapa: 'listo', urgente: false, notas: '' },
+      // Orden separada en proceso (int en pre_union, port en impresion)
+      { id: 'ORD-004', tipo: 'int_sub', grupoId: 'GRP-01', baseTitulo: 'Recetas de la Abuela', cliente: 'Ana Torres', titulo: 'INT — Recetas de la Abuela', cantidad: 300, paginas: 200, ppt: 8, portaPpt: 2, tipoInteriores: 'byn', gramaje: 'normal', tipoEncuadernacion: 'pasta_dura', fechaLimite: '2026-04-18', etapa: 'acab_ci', urgente: true, notas: '¡Boda el sábado!' },
+      { id: 'ORD-005', tipo: 'port_sub', grupoId: 'GRP-01', baseTitulo: 'Recetas de la Abuela', cliente: 'Ana Torres', titulo: 'PORT — Recetas de la Abuela', cantidad: 300, paginas: 200, ppt: 8, portaPpt: 2, tipoInteriores: 'color', gramaje: 'grueso', tipoEncuadernacion: 'pasta_dura', fechaLimite: '2026-04-18', etapa: 'impresion', urgente: true, notas: 'Tapa dura premium' },
+      // Otra orden separada — INT en acabados, PORT llegando
+      { id: 'ORD-006', tipo: 'int_sub', grupoId: 'GRP-02', baseTitulo: 'Tesis Doctoral', cliente: 'Roberto Soto', titulo: 'INT — Tesis Doctoral', cantidad: 5, paginas: 400, ppt: 4, portaPpt: 1, tipoInteriores: 'byn', gramaje: 'normal', tipoEncuadernacion: 'pasta_dura', fechaLimite: '2026-04-17', etapa: 'acab_ci', urgente: true, notas: '' },
+      { id: 'ORD-007', tipo: 'port_sub', grupoId: 'GRP-02', baseTitulo: 'Tesis Doctoral', cliente: 'Roberto Soto', titulo: 'PORT — Tesis Doctoral', cantidad: 5, paginas: 400, ppt: 4, portaPpt: 1, tipoInteriores: 'color', gramaje: 'grueso', tipoEncuadernacion: 'pasta_dura', fechaLimite: '2026-04-17', etapa: 'impresion', urgente: true, notas: '' },
+      // Orden ya unida — continúa en acabados
+      { id: 'ORD-008', tipo: 'union_result', grupoId: 'GRP-03', baseTitulo: 'Manual de Programación', cliente: 'Javier Cruz', titulo: 'Manual de Programación', cantidad: 150, paginas: 320, ppt: 8, portaPpt: 2, tipoInteriores: 'byn', gramaje: 'normal', tipoEncuadernacion: 'normal', fechaLimite: '2026-04-20', etapa: 'acab_ci', urgente: false, notas: '' },
+    ];
+
+    // ═══════════════════════════════════════════════════
+    //  ESTADO
+    // ═══════════════════════════════════════════════════
+    let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0));
+    let modalId = undefined, showCfg = false, showSync = false, tvTimer = null, tvSub = 'gantt', ganttZoom = 60;
+    let searchQ = '';
+
+    // URLs pre-configuradas de Google Sheets
+    const SHEET_IMP = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIlfUFRnj_VYEvovfEKY4Gj44uRgb1VOr9VVc3F1tlS2aHwHA4pJ-vib1SbHhJq0pR_PbHSs853ImS/pub?gid=438428152&single=true&output=csv';
+    const SHEET_ACAB = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIlfUFRnj_VYEvovfEKY4Gj44uRgb1VOr9VVc3F1tlS2aHwHA4pJ-vib1SbHhJq0pR_PbHSs853ImS/pub?gid=1109183930&single=true&output=csv';
+
+    function loadS() { try { const o = localStorage.getItem('imp_o'), c = localStorage.getItem('imp_c'); orders = o ? JSON.parse(o) : JSON.parse(JSON.stringify(SAMPLE)); cfg = c ? JSON.parse(c) : JSON.parse(JSON.stringify(CFG0)); } catch { orders = JSON.parse(JSON.stringify(SAMPLE)); cfg = JSON.parse(JSON.stringify(CFG0)); } }
+    function saveS() { try { localStorage.setItem('imp_o', JSON.stringify(orders)); localStorage.setItem('imp_c', JSON.stringify(cfg)); } catch { } }
+
+    // ═══════════════════════════════════════════════════
+    //  UTILIDADES
+    // ═══════════════════════════════════════════════════
+    function e(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+    function mStr(m) { m = Math.round(m); if (m < 60) return m + ' min'; const h = Math.floor(m / 60), r = m % 60; return r ? `${h}h ${r}m` : `${h}h`; }
+    function fDate(s) { if (!s) return '—'; return new Date(s + 'T12:00:00').toLocaleDateString('es', { day: '2-digit', month: 'short' }); }
+    function isOD(s) { return s && new Date(s + 'T23:59:59') < new Date(); }
+    function isSoon(s) { if (!s || isOD(s)) return false; const l = new Date(); l.setDate(l.getDate() + 2); return new Date(s + 'T23:59:59') <= l; }
+    function nextId() { const ns = orders.map(o => parseInt(o.id.replace(/\D/g, ''), 10)).filter(n => !isNaN(n)); return `ORD-${String((ns.length ? Math.max(...ns) : 0) + 1).padStart(3, '0')}`; }
+    function nextGrpId() { const ns = orders.filter(o => o.grupoId).map(o => parseInt(o.grupoId.replace('GRP-', ''), 10)).filter(n => !isNaN(n)); return `GRP-${String((ns.length ? Math.max(...ns) : 0) + 1).padStart(2, '0')}`; }
+    function encOf(id) { return TIPOS_ENC.find(t => t.id === id) || TIPOS_ENC[0]; }
+    function etOf(id) { return ETAPAS.find(et => et.id === id) || ACAB_STEPS.find(s => s.id === id) || ETAPAS[0]; }
+    function addDias(base, totMin, hpd) { const mpd = hpd * 60, d = Math.ceil(totMin / mpd); const dt = new Date(base); let n = 0; while (n < d) { dt.setDate(dt.getDate() + 1); if (dt.getDay() && dt.getDay() < 6) n++; } return dt; }
+    function prioSort(a, b) { if (a.urgente && !b.urgente) return -1; if (!a.urgente && b.urgente) return 1; const od = x => isOD(x.fechaLimite) ? 0 : isSoon(x.fechaLimite) ? 1 : 2; if (od(a) !== od(b)) return od(a) - od(b); if (a.fechaLimite && b.fechaLimite) return a.fechaLimite.localeCompare(b.fechaLimite); return 0; }
+
+    // ═══════════════════════════════════════════════════
+    //  CÁLCULO DE TIEMPOS — consciente del tipo de orden
+    // ═══════════════════════════════════════════════════
+    function calcT(o, c) {
+      const Q = +o.cantidad || 0;
+      const tipo = o.tipo || 'normal', enc = o.tipoEncuadernacion || 'normal';
+      const m = c.maq, s = c.setup, ps = [];
+      const rnd = v => Math.round(v * 10) / 10;
+      const add = (id, nom, min, maq, fase) => ps.push({ id, nom, min: rnd(min), maq, fase });
+      const col = o.tipoInteriores === 'color', gru = o.gramaje === 'grueso';
+      const portPpt = +(o.portaPpt || c.portaPptDefault || 2);
+      // Usar tabloides directamente desde la hoja si están disponibles
+      // int_sub y port_sub tienen su propio tabloidesSrc
+      const P = +o.paginas || 0;
+      const ppt = +(o.ppt || c.pptDefault || 8);
+      const esPort = (tipo === 'port_sub');
+      // Tabloides: usar valor directo de la hoja si existe, si no calcular desde páginas
+      const tabInt = esPort ? 0 : (o.tabloidesSrc || (P > 0 ? Math.ceil(Q * P / ppt) : 0));
+      const tabPort = esPort ? (o.tabloidesSrc || Math.ceil(Q / portPpt)) : Math.ceil(Q / portPpt);
+      if (!Q || (!tabInt && tipo !== 'port_sub' && tipo !== 'union_result')) return { pasos: [], total: 0, paralelo: 0, tabInt: 0, tabPort: 0 };
+      const ppmI = col ? (gru ? m.color_grueso : m.color_normal) : m.byn_fast;
+      const ppmP = gru ? m.color_grueso : m.color_normal;
+      const sidI = col ? 'iic' : 'iib';
+      const rP = v => Math.max(0.4, m.pegado_150 - (v - 150) / (500 - 150) * (m.pegado_150 - m.pegado_500));
+      const rC = v => Math.max(1, m.cf_150 - (v - 150) / (500 - 150) * (m.cf_150 - m.cf_500));
+
+      if (tipo === 'int_sub') {
+        // Solo pasos de interiores
+        add(sidI, 'Impresión interiores', s[col ? 'color' : 'byn'] + tabInt / ppmI, `${col ? 'Color' : 'OCE 6320'} (${ppmI} ppm)`, 'imp');
+        add('ci', 'Corte inicial — interiores', tabInt / (m.corteInicial / 4), 'Cortadora inicial', 'acab');
+        if (enc === 'pasta_dura') {
+          add('pg', 'Pegado (bloque)', s.pegado + Q / rP(P), 'Pegadora', 'acab');
+          add('cf', 'Corte final (bloque)', s.corteFinal + Q / rC(P), 'Cortadora final', 'acab');
+          add('cdc', 'Cinta doble cara', Q * 0.08, 'Mesa trabajo', 'acab');
+        }
+        if (enc === 'espiral' || enc === 'espiral_pd')
+          add('pi', 'Ponchado — interiores', Q * Math.ceil(P / 2) / m.ponchadora, 'Ponchadora', 'acab');
+      }
+      else if (tipo === 'port_sub') {
+        // Solo pasos de portada
+        add('ip', 'Impresión portada', s.color + tabPort / ppmP, `Color (${ppmP} ppm)`, 'imp');
+        add('pl', 'Plastificado portada', s.plastificado + (tabPort * m.plast_hoja) / m.plast_vel, 'Plastificadora', 'acab');
+        add('cp', 'Corte inicial — portada', tabPort / m.corteInicial, 'Cortadora inicial', 'acab');
+        if (enc === 'pasta_dura') {
+          add('cc', 'Corte de cartón', Q / m.corte_carton, 'Cortadora cartón', 'acab');
+          add('ap', 'Armado portada pasta dura', Q / m.armado_pd, 'Manual', 'acab');
+        }
+        if (enc === 'espiral_pd') {
+          add('cc', 'Corte de cartón', Q / m.corte_carton, 'Cortadora cartón', 'acab');
+          add('ap', 'Armado portada pasta dura', Q / m.armado_pd, 'Manual', 'acab');
+          add('pp', 'Ponchado — portada', Q / m.ponchadora, 'Ponchadora', 'acab');
+        }
+        if (enc === 'espiral')
+          add('pp', 'Ponchado — portada', Q / m.ponchadora, 'Ponchadora', 'acab');
+      }
+      else if (tipo === 'union_result') {
+        // Solo pasos POST-UNIÓN
+        if (enc === 'normal') {
+          add('pg', 'Pegado', s.pegado + Q / rP(P), 'Pegadora', 'acab');
+          add('cf', 'Corte final', s.corteFinal + Q / rC(P), 'Cortadora final', 'acab');
+        }
+        if (enc === 'pasta_dura') add('ms', 'Pegado portada a libro', Q / m.mesa_trabajo, 'Mesa trabajo', 'acab');
+        if (enc === 'engrapado') add('en', 'Engrapado', Q / m.engrapadora, 'Engrapadora', 'acab');
+        if (enc === 'espiral' || enc === 'espiral_pd') add('es', 'Espiralado / Wire', Q / m.espiralado, 'Espiraladora', 'acab');
+        add('te', 'Termo empaque', Q / m.termo, 'Termo empaque', 'emp');
+      }
+      else {
+        // NORMAL: todos los pasos (flujo completo)
+        add(sidI, 'Impresión interiores', s[col ? 'color' : 'byn'] + tabInt / ppmI, `${col ? 'Color' : 'OCE 6320'} (${ppmI} ppm)`, 'imp');
+        add('ip', 'Impresión portada', s.color + tabPort / ppmP, `Color (${ppmP} ppm)`, 'imp');
+        add('pl', 'Plastificado portada', s.plastificado + (tabPort * m.plast_hoja) / m.plast_vel, 'Plastificadora', 'acab');
+        add('ci', 'Corte inicial — interiores', tabInt / (m.corteInicial / 4), 'Cortadora inicial', 'acab');
+        add('cp', 'Corte inicial — portada', tabPort / m.corteInicial, 'Cortadora inicial', 'acab');
+        if (enc === 'normal' || enc === 'pasta_dura') {
+          add('pg', 'Pegado', s.pegado + Q / rP(P), 'Pegadora', 'acab');
+          add('cf', 'Corte final', s.corteFinal + Q / rC(P), 'Cortadora final', 'acab');
+          if (enc === 'pasta_dura') { add('cc', 'Corte de cartón', Q / m.corte_carton, 'Cortadora cartón', 'acab'); add('ap', 'Armado portada pasta dura', Q / m.armado_pd, 'Manual', 'acab'); add('ms', 'Pegado portada a libro', Q / m.mesa_trabajo, 'Mesa trabajo', 'acab'); }
+        }
+        if (enc === 'engrapado') add('en', 'Engrapado', Q / m.engrapadora, 'Engrapadora', 'acab');
+        if (enc === 'espiral' || enc === 'espiral_pd') {
+          add('pi', 'Ponchado — interiores', Q * Math.ceil(P / 2) / m.ponchadora, 'Ponchadora', 'acab');
+          add('pp', 'Ponchado — portada', Q / m.ponchadora, 'Ponchadora', 'acab');
+          if (enc === 'espiral_pd') { add('cc', 'Corte de cartón', Q / m.corte_carton, 'Cortadora cartón', 'acab'); add('ap', 'Armado portada pasta dura', Q / m.armado_pd, 'Manual', 'acab'); }
+          add('es', 'Espiralado / Wire', Q / m.espiralado, 'Espiraladora', 'acab');
+        }
+        add('te', 'Termo empaque', Q / m.termo, 'Termo empaque', 'emp');
+        // Paralelo: máx(camino int, camino port) + acabados post-unión
+        const tII = (ps.find(p => p.id === sidI)?.min || 0) + (ps.find(p => p.id === 'ci')?.min || 0);
+        const tIP = (ps.find(p => p.id === 'ip')?.min || 0) + (ps.find(p => p.id === 'pl')?.min || 0) + (ps.find(p => p.id === 'cp')?.min || 0);
+        const tR = ps.filter(p => ![sidI, 'ip', 'pl', 'ci', 'cp'].includes(p.id)).reduce((s, p) => s + p.min, 0);
+        const total = Math.round(ps.reduce((s, p) => s + p.min, 0));
+        return { pasos: ps, total, paralelo: Math.round(Math.max(tII, tIP) + tR), tabInt, tabPort, ppt, portPpt };
+      }
+      const total = Math.round(ps.reduce((s, p) => s + p.min, 0));
+      return { pasos: ps, total, paralelo: total, tabInt, tabPort, ppt, portPpt };
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  ACCIONES DE ÓRDENES SPLIT
+    // ═══════════════════════════════════════════════════
+    function createSplitOrders(f) {
+      const grupoId = nextGrpId(), hoy = new Date().toISOString().split('T')[0];
+      const base = { ...f, grupoId, fechaCreacion: hoy, etapa: 'impresion' };
+      const idI = nextId();
+      orders.push({ ...base, id: idI, tipo: 'int_sub', titulo: `INT — ${f.baseTitulo || f.titulo}` });
+      orders.push({ ...base, id: nextId(), tipo: 'port_sub', titulo: `PORT — ${f.baseTitulo || f.titulo}`, tipoInteriores: 'color' });
+      saveS(); modalId = undefined; render();
+    }
+
+    // Paso donde empieza un union_result después de unir INT+PORT
+    function getUnionStartStep(enc) {
+      if (enc === 'pasta_dura') return 'acab_ms';
+      if (enc === 'engrapado') return 'acab_en';
+      if (enc === 'espiral' || enc === 'espiral_pd') return 'acab_es';
+      return 'acab_pg'; // normal/rústica
+    }
+
+    function mergeOrders(grupoId) {
+      const intSub = orders.find(o => o.grupoId === grupoId && o.tipo === 'int_sub' && isAcabEtapa(o.etapa));
+      const portSub = orders.find(o => o.grupoId === grupoId && o.tipo === 'port_sub' && isAcabEtapa(o.etapa));
+      if (!intSub || !portSub) return false;
+      const enc = intSub.tipoEncuadernacion || 'normal';
+      const startStep = getUnionStartStep(enc);
+      orders.push({
+        ...intSub, id: nextId(), tipo: 'union_result',
+        titulo: intSub.baseTitulo || intSub.titulo.replace('INT — ', ''), etapa: startStep
+      });
+      orders = orders.map(o => (o.id === intSub.id || o.id === portSub.id) ? { ...o, etapa: 'listo', _merged: true } : o);
+      return true;
+    }
+
+    // Revisa si algún grupo tiene ambas (INT + PORT) en Acabados y las une automáticamente
+    function autoMergeCheck() {
+      const inAcab = orders.filter(o => isAcabEtapa(o.etapa) && !o._merged && (o.tipo === 'int_sub' || o.tipo === 'port_sub'));
+      const grupos = {};
+      inAcab.forEach(o => { if (o.grupoId) { if (!grupos[o.grupoId]) grupos[o.grupoId] = []; grupos[o.grupoId].push(o); } });
+      let merged = false;
+      Object.entries(grupos).forEach(([gid, ords]) => {
+        if (ords.some(o => o.tipo === 'int_sub') && ords.some(o => o.tipo === 'port_sub')) {
+          if (mergeOrders(gid)) merged = true;
+        }
+      });
+      return merged;
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  SCHEDULER PARA GANTT
+    // ═══════════════════════════════════════════════════
+    function scheduleMachines(ordList, c) {
+      const machAvail = {}; MAQUINAS.forEach(m => machAvail[m.id] = 0);
+      const ordState = {}, blocks = [], colorMap = {};
+      const sorted = [...ordList].filter(o => o.etapa !== 'listo' && !o._merged).sort(prioSort);
+      sorted.forEach((o, oi) => { colorMap[o.id] = ORD_COLORS[oi % ORD_COLORS.length]; });
+      const etapaFaseStart = { impresion: 0, empaque: 2, listo: 3 };
+      ACAB_STEPS.forEach(s => { etapaFaseStart[s.id] = 1; });
+
+      // Detectar grupos hermanos: órdenes que comparten los primeros 5 dígitos del ID
+      // (ej. 276871-A y 276872-A forman el mismo trabajo)
+      const JOIN_STEPS = new Set(['pg', 'cf', 'ms', 'en', 'es', 'te']);
+      const buddyKey = {}; // ordId → groupKey
+      const buddyGroups = {};
+      sorted.forEach(o => {
+        const digits = o.id.replace(/\D/g, '');
+        if (digits.length >= 5) {
+          const key = digits.slice(0, 5);
+          if (!buddyGroups[key]) buddyGroups[key] = [];
+          buddyGroups[key].push(o.id);
+        }
+      });
+      Object.entries(buddyGroups).forEach(([k, ids]) => {
+        if (ids.length >= 2) ids.forEach(id => { buddyKey[id] = k; });
+      });
+
+      // Pre-calcular tiempo mínimo de pasos pre-unión por grupo (suma de duraciones)
+      // Así cada miembro espera al más lento de su grupo antes de entrar a la pegadora
+      const groupPreJoinMin = {}; // groupKey → max(suma pre-join de cada miembro)
+      sorted.forEach(o => {
+        if (!buddyKey[o.id]) return;
+        const t = calcT(o, c);
+        const fi = etapaFaseStart[o.etapa] ?? 0;
+        const fo = ['imp', 'acab', 'emp'];
+        const preJoinDur = t.pasos.filter(p => fo.indexOf(p.fase) >= fi && !JOIN_STEPS.has(p.id))
+          .reduce((s, p) => s + p.min, 0);
+        const gkey = buddyKey[o.id];
+        groupPreJoinMin[gkey] = Math.max(groupPreJoinMin[gkey] || 0, preJoinDur);
+      });
+
+      // groupJoinSlot[gkey_stepId] = { start, end } — slot compartido ya programado por el líder del grupo
+      const groupJoinSlot = {};
+      // groupTitles[gkey] = lista de títulos de los miembros del grupo
+      const groupTitles = {};
+      sorted.forEach(o => {
+        if (!buddyKey[o.id]) return;
+        const gkey = buddyKey[o.id];
+        if (!groupTitles[gkey]) groupTitles[gkey] = [];
+        groupTitles[gkey].push(o.titulo || o.id);
+      });
+
+      sorted.forEach(o => {
+        const t = calcT(o, c), color = colorMap[o.id];
+        const fi = etapaFaseStart[o.etapa] ?? 0;
+        const fo = ['imp', 'acab', 'emp'];
+        const remaining = t.pasos.filter(p => fo.indexOf(p.fase) >= fi);
+        ordState[o.id] = { intEnd: 0, portEnd: 0, mainEnd: 0 };
+        const INT_IDS = ['iib', 'iic', 'ci', 'pg', 'cf', 'cdc', 'pi'];
+        const PORT_IDS = ['ip', 'pl', 'cp', 'cc', 'ap', 'pp'];
+        const JOIN_IDS = ['pg', 'cf', 'ms', 'en', 'es', 'te'];
+        remaining.forEach(step => {
+          const cands = MAQUINAS.filter(m => m.steps.includes(step.id));
+          if (!cands.length) return;
+
+          // Grupos hermanos en pasos de unión: reutilizar el slot del líder, no crear nueva barra
+          if (JOIN_STEPS.has(step.id) && buddyKey[o.id]) {
+            const gkey = buddyKey[o.id];
+            const slotKey = gkey + '_' + step.id;
+            if (groupJoinSlot[slotKey]) {
+              // Soy secundario: heredar tiempos del líder, sin nueva barra ni consumo de máquina
+              const { end: je } = groupJoinSlot[slotKey];
+              ordState[o.id].mainEnd = Math.max(ordState[o.id].mainEnd, je);
+              return;
+            }
+            // Soy el líder: programar normalmente y guardar el slot
+          }
+
+          const mach = cands.reduce((best, m) => machAvail[m.id] < machAvail[best.id] ? m : best);
+          let earliest = machAvail[mach.id];
+          if (INT_IDS.includes(step.id)) earliest = Math.max(earliest, ordState[o.id].intEnd);
+          if (PORT_IDS.includes(step.id)) earliest = Math.max(earliest, ordState[o.id].portEnd);
+          if (JOIN_IDS.includes(step.id) && o.tipo === 'normal') earliest = Math.max(earliest, ordState[o.id].intEnd, ordState[o.id].portEnd, ordState[o.id].mainEnd);
+          if (o.tipo === 'union_result' || o.tipo === 'int_sub' || o.tipo === 'port_sub') earliest = Math.max(earliest, ordState[o.id].mainEnd);
+          // Líder del grupo hermano: esperar al miembro más lento antes de unir
+          if (JOIN_STEPS.has(step.id) && buddyKey[o.id]) {
+            earliest = Math.max(earliest, groupPreJoinMin[buddyKey[o.id]] || 0);
+          }
+          const start = earliest, end = start + step.min;
+          machAvail[mach.id] = end;
+          if (INT_IDS.includes(step.id)) ordState[o.id].intEnd = Math.max(ordState[o.id].intEnd, end);
+          if (PORT_IDS.includes(step.id)) ordState[o.id].portEnd = Math.max(ordState[o.id].portEnd, end);
+          if (JOIN_IDS.includes(step.id) || !INT_IDS.includes(step.id) && !PORT_IDS.includes(step.id)) ordState[o.id].mainEnd = Math.max(ordState[o.id].mainEnd, end);
+
+          // Guardar slot si es líder de grupo en paso de unión
+          let barTitulo = o.titulo, barOrdId = o.id;
+          if (JOIN_STEPS.has(step.id) && buddyKey[o.id]) {
+            const gkey = buddyKey[o.id];
+            groupJoinSlot[gkey + '_' + step.id] = { start, end };
+            const n = buddyGroups[gkey].length;
+            barTitulo = `Grupo ${gkey} (${n} partes)`;
+            barOrdId = gkey;
+          }
+
+          blocks.push({
+            ordId: barOrdId, titulo: barTitulo, cliente: o.cliente, tipo: o.tipo || 'normal',
+            stepId: step.id, stepNom: step.nom, machId: mach.id, machLabel: mach.label,
+            start, end, dur: step.min, color, urgente: o.urgente, fechaLimite: o.fechaLimite,
+            buddyGroup: buddyKey[o.id] || null,
+          });
+        });
+      });
+      return { blocks, colorMap };
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  SINCRONIZACIÓN CON GOOGLE SHEETS
+    // ═══════════════════════════════════════════════════
+
+    // Parser CSV robusto (maneja comas dentro de comillas)
+    function parseCSV(text) {
+      const lines = text.split('\n').filter(l => l.trim());
+      if (!lines.length) return [];
+      const parseRow = row => { const r = []; let cur = '', inQ = false; for (const c of row) { if (c === '"') { inQ = !inQ; } else if (c === ',' && !inQ) { r.push(cur.trim()); cur = ''; } else cur += c; } r.push(cur.trim()); return r; };
+      const headers = parseRow(lines[0]);
+      return lines.slice(1).map(line => {
+        const vals = parseRow(line);
+        const obj = {};
+        headers.forEach((h, i) => obj[h.toLowerCase().trim()] = (vals[i] || '').trim());
+        return obj;
+      }).filter(r => Object.values(r).some(v => v));
+    }
+
+    // Busca un valor de columna por múltiples nombres posibles
+    function col(row, ...names) { for (const n of names) { const v = row[n.toLowerCase()]; if (v !== undefined && v !== '') return v; } return ''; }
+
+    // Convierte fecha "16/4/2026" o "16/04/2026" a "2026-04-16"
+    function parseDMDate(s) {
+      if (!s) return '';
+      const p = s.split('/');
+      if (p.length !== 3) return '';
+      return `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
+    }
+
+    // Detecta tipo de encuadernación desde descripción/actividades
+    function detectEnc(desc, acab) {
+      const d = (desc + ' ' + (acab || '')).toLowerCase();
+      if (d.includes('pasta dura') || /[hg]v?\d+\.8/.test(d)) return 'pasta_dura';
+      if (d.includes('engrap') || d.includes('d06')) return 'engrapado';
+      if (d.includes('espiral') || d.includes('wire')) return 'espiral';
+      return 'normal';
+    }
+
+    // Detecta gramaje desde nombre de papel (≤170g = normal, >170g = grueso)
+    function detectGramaje(papel) {
+      const m = (papel || '').match(/(\d+)\s*g/i);
+      return m && parseInt(m[1]) >= 170 ? 'grueso' : 'normal';
+    }
+
+    // Mapea una fila de la hoja de IMPRESIÓN a una orden
+    function mapImpRow(row) {
+      const nombre = col(row, 'nombre', 'name', 'titulo');
+      const itemNum = col(row, '# item', 'item', '#item', 'numero', 'order');
+      const po = col(row, 'p_o', 'tipo', 'interior', 'portada');
+      const urg = col(row, 'urgencia', 'urgency', 'prioridad');
+      const entrega = col(row, 'entrega', 'delivery', 'fecha entrega', 'f. entrega');
+      const listo = col(row, 'listo', 'done', 'ready').toLowerCase() === 'true';
+      const desc = col(row, 'description', 'descripcion', 'desc');
+      const colorBn = col(row, 'color_bn', 'color', 'tipo color');
+      const papel = col(row, 'papel', 'paper', 'papel/cartulina');
+      const tabs = parseInt(col(row, 'hojas', 'tabloides', 'tabs', 'tabloids')) || 0;
+      const cantidad = parseInt(col(row, 'cantidad', 'quantity', 'qty', 'cant')) || 0;
+
+      if (!nombre || !itemNum) return null;
+
+      const esInt = po.toLowerCase().includes('int');
+      const tipo = esInt ? 'int_sub' : 'port_sub';
+      const enc = detectEnc(desc, '');
+      // listo=true en impresión → entra al primer paso de acabados de su flujo
+      const _impFlow = getAcabFlow({ tipo, tipoEncuadernacion: enc });
+      const etapa = listo ? (_impFlow[0] || 'empaque') : 'impresion';
+
+      return {
+        id: `${itemNum}-${esInt ? 'I' : 'P'}`,
+        grupoId: `${itemNum}`,
+        tipo, baseTitulo: nombre,
+        titulo: `${esInt ? 'INT' : 'PORT'} — ${nombre}`,
+        cliente: '', cantidad,
+        tabloidesSrc: tabs, ppt: 8, portaPpt: 2,
+        tipoInteriores: colorBn.toLowerCase().includes('bn') || colorBn.toLowerCase().includes('b/n') ? 'byn' : 'color',
+        gramaje: detectGramaje(papel),
+        tipoEncuadernacion: enc,
+        fechaLimite: parseDMDate(entrega),
+        etapa, urgente: urg.toLowerCase().includes('urgente'),
+        notas: desc.substring(0, 120),
+        _fromSheets: true,
+        fechaCreacion: new Date().toISOString().split('T')[0],
+      };
+    }
+
+    // Mapea una fila de la hoja de ACABADOS a una orden
+    function mapAcabRow(row) {
+      const nombre = col(row, 'nombre', 'name', 'titulo');
+      const itemNum = col(row, '# item', 'item', '#item');
+      const urg = col(row, 'urgencia', 'urgency', 'prioridad');
+      const entrega = col(row, 'entrega', 'delivery');
+      const listo = col(row, 'listo', 'done', 'ready').toLowerCase() === 'true';
+      const qty = parseInt(col(row, 'quantity', 'cantidad', 'qty')) || 0;
+      const acab = col(row, 'acabados', 'terminados', 'actividades');
+      const hojas = parseInt(col(row, 'hojas', 'sheets', 'tabloides', 'tabs')) || 0;
+      const status = col(row, 'status', 'estado');
+
+      if (!nombre || !itemNum) return null;
+
+      // Determina si es INT o PORT desde el status o asumimos "union_result" si solo hay 1 fila
+      // En acabados normalmente ya vienen como trabajo unido
+      const enc = detectEnc(acab, '');
+      // Órdenes de acabados empiezan siempre en Plastificado (primer paso del flujo)
+      const etapa = listo ? 'listo' : 'acab_pl';
+
+      return {
+        id: `${itemNum}-A`,
+        grupoId: `${itemNum}`,
+        tipo: 'union_result', baseTitulo: nombre, titulo: nombre,
+        cliente: '', cantidad: qty,
+        paginas: hojas * 2, tabloidesSrc: hojas, ppt: 8, portaPpt: 2,
+        tipoInteriores: 'byn', gramaje: 'normal',
+        tipoEncuadernacion: enc,
+        fechaLimite: parseDMDate(entrega),
+        etapa, urgente: urg.toLowerCase().includes('urgente'),
+        notas: acab.substring(0, 120),
+        _fromSheets: true,
+        fechaCreacion: new Date().toISOString().split('T')[0],
+      };
+    }
+
+    // Marca Listo=TRUE en Google Sheets cuando se avanza una orden
+    function markListoInSheets(order, fromEtapa) {
+      if (!cfg.scriptUrl || !order._fromSheets) return;
+      const itemNum = (order.grupoId || '');
+      if (!itemNum) return;
+      const hoja = fromEtapa === 'impresion' ? 'impresion' : 'acabados';
+      const po = order.tipo === 'int_sub' ? 'interior' : order.tipo === 'port_sub' ? 'portada' : '';
+      const url = `${cfg.scriptUrl}?item=${encodeURIComponent(itemNum)}&hoja=${encodeURIComponent(hoja)}&po=${encodeURIComponent(po)}`;
+      fetch(url, { mode: 'no-cors' }).then(() => showToast(`✅ Listo marcado en Sheets: ${order.titulo.substring(0, 30)}`)).catch(() => showToast('⚠️ No se pudo conectar con Sheets'));
+    }
+
+    // Toast de notificación rápida
+    function showToast(msg) {
+      let t = document.getElementById('toast');
+      if (!t) { t = document.createElement('div'); t.id = 'toast'; t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:999;transition:opacity .3s;pointer-events:none'; document.body.appendChild(t); }
+      t.textContent = msg; t.style.opacity = '1';
+      clearTimeout(t._to); t._to = setTimeout(() => { t.style.opacity = '0'; }, 3000);
+    }
+
+    // Función principal de sincronización
+    async function runSync() {
+      const btn = document.getElementById('sync-btn');
+      const log = document.getElementById('sync-log');
+      if (btn) btn.disabled = true;
+      if (log) log.textContent = '⏳ Conectando con Google Sheets...';
+
+      try {
+        // Intenta varios proxies CORS en orden hasta que uno funcione
+        async function fetchCSV(url) {
+          const proxies = [
+            u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+            u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+            u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+          ];
+          for (const mk of proxies) {
+            try {
+              const r = await fetch(mk(url), { cache: 'no-cache' });
+              if (r && r.ok) return r;
+            } catch { }
+          }
+          return null;
+        }
+        const [respImp, respAcab] = await Promise.all([
+          fetchCSV(SHEET_IMP),
+          fetchCSV(SHEET_ACAB),
+        ]);
+
+        let newOrders = [];
+        let countImp = 0, countAcab = 0;
+
+        // Procesa hoja de Impresión
+        if (respImp && respImp.ok) {
+          const text = await respImp.text();
+          const rows = parseCSV(text);
+          rows.forEach(row => {
+            const o = mapImpRow(row);
+            if (o) newOrders.push(o);
+          });
+          countImp = newOrders.length;
+        }
+
+        // Procesa hoja de Acabados
+        if (respAcab && respAcab.ok) {
+          const text = await respAcab.text();
+          const rows = parseCSV(text);
+          const qtyMap = {}; // item -> quantity
+          rows.forEach(row => {
+            const itemNum = col(row, '# item', 'item', '#item');
+            const qty = parseInt(col(row, 'quantity', 'cantidad', 'qty')) || 0;
+            if (itemNum && qty) qtyMap[itemNum] = qty;
+            const o = mapAcabRow(row);
+            if (o) newOrders.push(o);
+          });
+          countAcab = newOrders.length - countImp;
+          // Actualiza cantidades en órdenes de Impresión
+          newOrders = newOrders.map(o => {
+            if (o._fromSheets && o.grupoId) {
+              const itemKey = o.grupoId;
+              if (qtyMap[itemKey]) return { ...o, cantidad: qtyMap[itemKey] };
+            }
+            return o;
+          });
+        }
+
+        if (!newOrders.length) {
+          const impOk = respImp && respImp.ok, acabOk = respAcab && respAcab.ok;
+          let msg = '<span style="color:#ef4444">⚠️ No se encontraron órdenes.</span><br><br>';
+          if (!impOk && !acabOk) {
+            msg += '<span style="color:#f97316">❌ No se pudo conectar a ninguna hoja. Posibles causas:</span><br>';
+            msg += '<span style="color:#94a3b8;font-size:12px">• La hoja no está publicada como CSV<br>• La URL del spreadsheet cambió<br>• Problema de red o CORS</span><br><br>';
+          } else {
+            msg += '<span style="color:#f97316">Las hojas conectaron pero no tienen filas con datos válidos.</span><br>';
+            msg += '<span style="color:#94a3b8;font-size:12px">Verifica que las columnas tengan encabezados: <b>nombre, # item, p_o, listo, entrega</b></span><br><br>';
+          }
+          msg += '<span style="color:#64748b;font-size:11px">Para publicar: Archivo → Compartir → Publicar en la web → selecciona la hoja → formato CSV → Publicar.</span>';
+          if (log) log.innerHTML = msg;
+          if (btn) btn.disabled = false;
+          return;
+        }
+
+        // Cargar historial de IDs ya vistos (para detectar nuevas vs ya conocidas)
+        let seenIds = new Set();
+        try { seenIds = new Set(JSON.parse(localStorage.getItem('imp_seen') || '[]')); } catch { }
+
+        const manual = orders.filter(o => !o._fromSheets);
+        const existingSheets = orders.filter(o => o._fromSheets);
+
+        let countNuevas = 0, countActualizadas = 0, countSinCambio = 0;
+
+        newOrders = newOrders.map(newO => {
+          const prev = existingSheets.find(x => x.id === newO.id);
+          const yaVista = seenIds.has(newO.id);
+
+          if (!yaVista) {
+            countNuevas++;
+            seenIds.add(newO.id);
+          } else if (prev && prev.etapa !== 'impresion' && !prev._merged) {
+            // Ya existe y avanzó → conservar posición, no perder progreso
+            countSinCambio++;
+            return { ...newO, etapa: prev.etapa };
+          } else {
+            countActualizadas++;
+          }
+          return newO;
+        });
+
+        // Guardar historial actualizado
+        try { localStorage.setItem('imp_seen', JSON.stringify([...seenIds])); } catch { }
+
+        orders = [...manual, ...newOrders];
+        autoMergeCheck();
+        saveS();
+
+        const ahora = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+        if (log) log.innerHTML = `
+          <span style="color:#4ade80;font-weight:700">✅ Sincronizado a las ${ahora}</span><br>
+          <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;font-size:12px">
+            <span style="background:#0a2e1a;border:1px solid #166534;padding:4px 10px;border-radius:6px;color:#4ade80">🆕 ${countNuevas} nuevas</span>
+            <span style="background:#0a1f3a;border:1px solid #1d4ed8;padding:4px 10px;border-radius:6px;color:#60a5fa">🔄 ${countActualizadas} actualizadas</span>
+            <span style="background:#0f172a;border:1px solid #334155;padding:4px 10px;border-radius:6px;color:#64748b">✓ ${countSinCambio} sin cambio</span>
+          </div>
+          <div style="margin-top:6px;font-size:11px;color:#475569">Total en sistema: ${newOrders.length} · Historial acumulado: ${seenIds.size} órdenes</div>`;
+        setTimeout(() => { showSync = false; render(); }, 3000);
+
+      } catch (err) {
+        if (log) log.innerHTML = `<span style="color:#ef4444">❌ Error al conectar: ${err.message}</span><br><br>` +
+          `<span style="color:#94a3b8;font-size:12px">Si el archivo está abierto localmente (file://), el navegador bloquea las peticiones a Google Sheets. ` +
+          `Sube el archivo a un servidor o úsalo en Claude.ai.</span>`;
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    function syncHTML() {
+      return `<div class="overlay" onclick="if(event.target===this)closeSync()">
+    <div class="modal" style="max-width:500px" onclick="event.stopPropagation()">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <h2 style="font-size:17px;font-weight:700">🔄 Sincronizar con Google Sheets</h2>
+        <button class="bico" onclick="closeSync()" style="font-size:20px;color:#94a3b8">✕</button>
+      </div>
+      <div style="background:#0f172a;border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px">
+        <div style="color:#60a5fa;font-weight:700;margin-bottom:8px">📋 Hojas configuradas:</div>
+        <div style="color:#94a3b8;margin-bottom:4px">🖨️ <b style="color:#fb923c">Impresión</b> — gid=438428152</div>
+        <div style="color:#94a3b8">✂️ <b style="color:#c084fc">Acabados</b> — gid=1109183930</div>
+        <div style="color:#475569;font-size:11px;margin-top:8px">Las URLs están guardadas en el sistema. Para cambiarlas edita las constantes SHEET_IMP y SHEET_ACAB en ⚙️ Configuración.</div>
+      </div>
+      <div style="background:#0a1f0a;border-radius:10px;padding:12px;margin-bottom:16px;font-size:12px;color:#64748b">
+        <b style="color:#4ade80">Cómo funciona:</b><br>
+        • Órdenes en Impresión con <b>Listo=FALSE</b> → etapa "Impresión"<br>
+        • Órdenes en Impresión con <b>Listo=TRUE</b> → etapa "Acabados"<br>
+        • Órdenes en Acabados con <b>Listo=FALSE</b> → etapa "Acabados"<br>
+        • INT + PORT del mismo número → se unen automáticamente<br>
+        • Los <b>tiempos los calcula nuestro sistema</b> con las velocidades configuradas
+      </div>
+      <div style="background:#0a0f1e;border-radius:10px;padding:12px;margin-bottom:14px">
+        <div style="font-size:12px;color:#f59e0b;font-weight:700;margin-bottom:8px">⚡ Para activar "marcar Listo automático" al mover órdenes:</div>
+        <div style="font-size:11px;color:#64748b;line-height:1.7">
+          1. Abre tu Google Sheet → <b style="color:#94a3b8">Extensiones → Apps Script</b><br>
+          2. Borra todo el código y pega el script que está abajo<br>
+          3. <b style="color:#94a3b8">Implementar → Nueva implementación → App web</b><br>
+          4. "Ejecutar como": <b style="color:#94a3b8">Yo</b> · "Quién tiene acceso": <b style="color:#94a3b8">Cualquier usuario</b><br>
+          5. Copia la URL y pégala en <b style="color:#94a3b8">⚙️ Configuración → URL Apps Script</b>
+        </div>
+        <div style="margin-top:10px;background:#020617;border-radius:6px;padding:10px;font-size:11px;color:#4ade80;font-family:monospace;white-space:pre-wrap;max-height:160px;overflow-y:auto">function doGet(e){
+  try{
+    const ss=SpreadsheetApp.getActiveSpreadsheet();
+    const item=e.parameter.item||'';
+    const hoja=e.parameter.hoja||'';
+    const po=e.parameter.po||'';
+    if(!item)return r('ERROR:falta item');
+    const sheets={impresion:findSheet(ss,['impres','impresi']),acabados:findSheet(ss,['acabad'])};
+    const sh=sheets[hoja.toLowerCase()];
+    if(!sh)return r('ERROR:hoja no encontrada');
+    const data=sh.getDataRange().getValues();
+    const hdrs=data[0].map(h=>h.toString().toLowerCase());
+    const iItem=hdrs.findIndex(h=>h.includes('item'));
+    const iListo=hdrs.findIndex(h=>h.includes('listo'));
+    const iPo=hdrs.findIndex(h=>h==='p_o');
+    let n=0;
+    for(let i=1;i&lt;data.length;i++){
+      const rItem=data[i][iItem]?.toString().trim();
+      const rPo=iPo>=0?data[i][iPo]?.toString().toLowerCase():'';
+      if(rItem===item&&(!po||iPo&lt;0||rPo.includes(po))&&iListo>=0){
+        sh.getRange(i+1,iListo+1).setValue(true);n++;
+      }
+    }
+    return r('OK:'+n);
+  }catch(e){return r('ERROR:'+e.message);}
+}
+function findSheet(ss,words){
+  return ss.getSheets().find(s=>words.some(w=>s.getName().toLowerCase().includes(w)))||null;
+}
+function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentService.MimeType.TEXT);}</div>
+      </div>
+      <div id="sync-log" style="min-height:24px;font-size:13px;margin-bottom:14px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-g" onclick="closeSync()">Cancelar</button>
+        <button id="sync-btn" class="btn btn-p" onclick="runSync()" style="font-size:15px">🔄 Sincronizar ahora</button>
+      </div>
+    </div>
+  </div>`;
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  RENDER PRINCIPAL
+    // ═══════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════
+    //  DRAG & DROP
+    // ═══════════════════════════════════════════════════
+    let _dragId = null;
+
+    function onDragStart(ev, id) {
+      _dragId = id;
+      ev.dataTransfer.effectAllowed = 'move';
+      ev.currentTarget.classList.add('dragging');
+    }
+    function onDragEnd(ev) {
+      ev.currentTarget.classList.remove('dragging');
+      document.querySelectorAll('.col').forEach(c => c.classList.remove('drag-over', 'drag-over-ok'));
+    }
+    function onDragOver(ev, colId) {
+      ev.preventDefault();
+      const o = orders.find(x => x.id === _dragId);
+      if (!o) return;
+      // Solo permite mover dentro del flujo propio de la orden
+      const flow = [ETAPAS[0], ...getAcabFlow(o).map(s => ACAB_STEPS.find(x => x.id === s)).filter(Boolean), ETAPAS[1], ETAPAS[2]];
+      const fromIdx = flow.findIndex(s => s && s.id === o.etapa);
+      const toIdx = flow.findIndex(s => s && s.id === colId);
+      document.querySelectorAll('.col').forEach(c => c.classList.remove('drag-over', 'drag-over-ok'));
+      const col = document.getElementById('col_' + colId);
+      if (col) {
+        if (toIdx < 0) return; // columna no pertenece al flujo de esta orden
+        if (toIdx === fromIdx + 1) col.classList.add('drag-over-ok');
+        else col.classList.add('drag-over');
+      }
+    }
+    function onDragLeave(ev) {
+      ev.currentTarget.classList.remove('drag-over', 'drag-over-ok');
+    }
+    function onDrop(ev, colId) {
+      ev.preventDefault();
+      ev.currentTarget.classList.remove('drag-over', 'drag-over-ok');
+      if (!_dragId) return;
+      const o = orders.find(x => x.id === _dragId);
+      if (!o) return;
+      // Solo permite mover dentro del flujo propio de la orden (hacia adelante O atrás)
+      const flow = [ETAPAS[0], ...getAcabFlow(o).map(s => ACAB_STEPS.find(x => x.id === s)).filter(Boolean), ETAPAS[1], ETAPAS[2]];
+      const fromIdx = flow.findIndex(s => s && s.id === o.etapa);
+      const toIdx = flow.findIndex(s => s && s.id === colId);
+      if (toIdx < 0 || toIdx === fromIdx) return;
+      const fromEtapa = o.etapa;
+      const idx = orders.findIndex(x => x.id === _dragId);
+      orders[idx] = { ...orders[idx], etapa: colId };
+      if (toIdx > fromIdx) markListoInSheets(orders[idx], fromEtapa);
+      autoMergeCheck(); saveS(); render();
+      _dragId = null;
+    }
+
+    function render() {
+      if (tvTimer) { clearInterval(tvTimer); tvTimer = null; }
+      const root = document.getElementById('root');
+      if (V === 'tv') { root.innerHTML = tvHTML(); startTV(); return; }
+      root.innerHTML = `
+    <div style="background:#1e293b;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #334155;position:sticky;top:0;z-index:50">${hdrHTML()}</div>
+    <div id="mc">${V === 'kpi' ? kpiHTML() : boardHTML()}</div>
+    ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}`;
+    }
+
+    function hdrHTML() {
+      const active = orders.filter(o => o.etapa !== 'listo' && !o._merged);
+      const totMin = active.reduce((s, o) => s + calcT(o, cfg).paralelo, 0);
+      const cp = Math.min(100, Math.round(totMin / (cfg.horasDia * 60 * 5) * 100));
+      const cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
+      const cl = cp < 60 ? '✅ Aceptar más' : cp < 85 ? '⚠️ Limitado' : '🔴 Al límite';
+      return `
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span>
+    <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
+      ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;background:#0f172a;border-radius:8px;padding:6px 12px;flex:1;min-width:170px;max-width:290px">
+      <div style="flex:1"><div style="font-size:10px;color:#64748b;margin-bottom:3px">CAPACIDAD EN COLA</div>
+        <div class="capbar"><div style="height:100%;border-radius:999px;width:${cp}%;background:${cc}"></div></div></div>
+      <div style="font-size:11px;color:${cc};white-space:nowrap;font-weight:700">${cl}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:4px 10px;flex:1;min-width:160px;max-width:260px">
+      <span style="color:#475569;font-size:14px">🔍</span>
+      <input id="searchInput" type="text" placeholder="Buscar orden…" value="${e(searchQ)}"
+        oninput="searchQ=this.value;renderBoard()"
+        style="background:transparent;border:none;outline:none;color:#f1f5f9;font-size:13px;width:100%;font-family:inherit"
+      />
+      ${searchQ ? `<button onclick="searchQ='';document.getElementById('searchInput').value='';renderBoard()" style="background:none;border:none;color:#475569;cursor:pointer;font-size:14px;padding:0;line-height:1">✕</button>` : ''}
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button class="btn btn-g btn-sm" onclick="openCfg()">⚙️</button>
+      <button class="btn btn-sm" onclick="openSync()" style="background:#1e3a5f;color:#60a5fa;border:1px solid #1d4ed8;white-space:nowrap">🔄 Sheets</button>
+      <div title="Escáner listo: escanea el código de barras de una orden para avanzarla al siguiente paso" style="display:flex;align-items:center;gap:5px;background:#0a1f0a;border:1px solid #166534;border-radius:8px;padding:5px 10px;font-size:11px;color:#4ade80;white-space:nowrap;cursor:default">📷 Escáner listo</div>
+      <button class="btn btn-p" onclick="openNew()" style="white-space:nowrap">+ Nueva Orden</button>
+    </div>`;
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  KANBAN
+    // ═══════════════════════════════════════════════════
+    function renderBoard() {
+      const mc = document.getElementById('mc');
+      if (mc && V === 'kanban') mc.innerHTML = boardHTML();
+    }
+    function matchSearch(o) {
+      if (!searchQ) return true;
+      const q = searchQ.toLowerCase();
+      return (o.id || '').toLowerCase().includes(q)
+        || (o.titulo || '').toLowerCase().includes(q)
+        || (o.cliente || '').toLowerCase().includes(q)
+        || (o.notas || '').toLowerCase().includes(q);
+    }
+    function boardHTML() {
+      // Build visible columns: impresion + acab steps that have orders + empaque + listo
+      const etapas = allEtapas(orders);
+      return `<div class="board">${etapas.map((et, ei) => colHTML(et, ei, etapas)).join('')}</div>`;
+    }
+    function colHTML(et, ei, etapas) {
+      const allTotal = orders.filter(o => o.etapa === et.id && !o._merged);
+      const all = allTotal.filter(o => matchSearch(o));
+      const isAcab = isAcabEtapa(et.id);
+      const badgeLabel = searchQ && all.length !== allTotal.length ? `${all.length}/${allTotal.length}` : `${allTotal.length}`;
+      return `<div class="col${isAcab ? ' acab-col' : ''}" id="col_${et.id}" ondragover="onDragOver(event,'${et.id}')" ondragleave="onDragLeave(event)" ondrop="onDrop(event,'${et.id}')">
+    <div class="col-hdr" style="border-color:${et.color}">
+      <div style="display:flex;align-items:center;gap:6px"><span style="font-size:18px">${et.icon}</span>
+        <div>
+          <div style="font-weight:700;font-size:13px;color:#f1f5f9">${et.label}</div>
+          <div style="font-size:10px;color:#475569">${isAcab ? 'Acabados' : (et.full || '')}</div>
+        </div>
+      </div>
+      <span class="badge" style="background:${et.color}33;color:${et.color}">${badgeLabel}</span>
+    </div>
+    ${all.length === 0 ? `<div style="color:#334155;font-size:12px;text-align:center;padding:20px 0;border:2px dashed #1e293b;border-radius:8px;margin:4px 0">${searchQ ? '🔍 Sin resultados' : (isAcab ? 'Arrastra aquí' : 'Sin órdenes')}</div>` : all.map(o => cardHTML(o, et, ei, false, etapas)).join('')}
+  </div>`;
+    }
+
+    function cardHTML(o, et, ei, compact = false, etapas) {
+      const t = calcT(o, cfg);
+      const enc = encOf(o.tipoEncuadernacion);
+      const od = isOD(o.fechaLimite), sn = isSoon(o.fechaLimite);
+      const tipo = o.tipo || 'normal';
+      const tipoBadge = tipo === 'int_sub' ? `<span class="badge" style="background:#818cf855;color:#818cf8">📄 INT</span>`
+        : tipo === 'port_sub' ? `<span class="badge" style="background:#c084fc55;color:#c084fc">🎨 PORT</span>`
+          : tipo === 'union_result' ? `<span class="badge" style="background:#4ade8033;color:#4ade80">🔗 Unido</span>` : '';
+      const cardCls = tipo === 'int_sub' ? 'int-card' : tipo === 'port_sub' ? 'port-card' : tipo === 'union_result' ? 'merged-card' : '';
+      return `<div class="card ${cardCls}${o.urgente ? ' urg' : ''}" onclick="openOrd('${e(o.id)}')" draggable="true" ondragstart="onDragStart(event,'${e(o.id)}')" ondragend="onDragEnd(event)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+      <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:11px;color:#475569;font-weight:600">${e(o.id)}</span>
+        ${tipoBadge}
+        ${o.urgente ? `<span class="badge" style="background:#ef444433;color:#ef4444">⚡</span>` : ''}
+      </div>
+      ${!compact ? `<div style="display:flex;gap:1px">
+        ${ei > 0 ? `<button class="bico" onclick="event.stopPropagation();mvOrd('${e(o.id)}',-1)" title="Paso anterior">◀</button>` : ''}
+        ${(etapas ? etapas.length - 1 : 99) > ei ? `<button class="bico" onclick="event.stopPropagation();mvOrd('${e(o.id)}',1)" style="color:${et.color}" title="Siguiente paso">▶</button>` : ''}
+      </div>`: ''}
+    </div>
+    <div style="font-weight:700;font-size:13px;color:#f1f5f9" class="ell">${e(o.titulo)}</div>
+    <div style="font-size:11px;color:#94a3b8" class="ell">${e(o.cliente)}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:5px">
+      <span class="badge" style="background:#1e293b;color:#94a3b8">📦 ${e(o.cantidad)}</span>
+      <span class="badge" style="background:#1e293b;color:#94a3b8">${o.tabloidesSrc ? '📋 ' + e(o.tabloidesSrc) + ' tabs' : '📄 ' + e(o.paginas || '?') + 'p'}</span>
+      <span class="badge" style="background:${enc.color}22;color:${enc.color}">${enc.icon}</span>
+    </div>
+    ${isAcabEtapa(o.etapa) ? `<div style="margin-top:6px">${(() => { const flow = getAcabFlow(o); const ci = flow.indexOf(o.etapa); return flow.map((s, i) => { const st = ACAB_STEPS.find(x => x.id === s); return `<span title="${st ? st.label : s}" style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:2px;background:${i < ci ? '#4ade80' : i === ci ? (st ? st.color : '#f59e0b') : '#334155'}"></span>`; }).join(''); })()}</div>` : ''}
+    <div style="display:flex;justify-content:space-between;margin-top:6px;padding-top:6px;border-top:1px solid #1e293b;font-size:11px">
+      <span style="color:${od ? '#ef4444' : sn ? '#f59e0b' : '#64748b'}">${od ? '🔴' : sn ? '🟡' : '📅'} ${fDate(o.fechaLimite)}</span>
+      <span style="color:#94a3b8">⏱ <b>${mStr(t.paralelo)}</b></span>
+    </div>
+  </div>`;
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  MODAL DE ORDEN
+    // ═══════════════════════════════════════════════════
+    function getFormOrder() {
+      const g = id => document.getElementById(id)?.value || '';
+      const gc = id => document.getElementById(id)?.checked || false;
+      return {
+        baseTitulo: g('f_tit'), titulo: g('f_tit'),
+        cliente: g('f_cli'), cantidad: +g('f_qty') || 0, paginas: +g('f_pag') || 0,
+        ppt: +g('f_ppt') || 8, portaPpt: +g('f_portappt') || 2,
+        tipoInteriores: g('f_tint'), gramaje: g('f_gram'), tipoEncuadernacion: g('f_enc'),
+        fechaLimite: g('f_dl'), urgente: gc('f_urg'), notas: g('f_not'),
+        _split: gc('f_split'),
+      };
+    }
+    function modalHTML() {
+      const isNew = modalId === null;
+      const ord = isNew ? { cliente: '', titulo: '', cantidad: 100, paginas: 200, ppt: 8, portaPpt: 2, tipoInteriores: 'byn', gramaje: 'normal', tipoEncuadernacion: 'normal', fechaLimite: '', urgente: false, notas: '' } : orders.find(o => o.id === modalId) || {};
+      const segBtns = (name, opts, val) => opts.map(([v, l, c]) => `<button class="seg${val === v ? ' on' : ''}" id="seg_${name}_${v}" style="${val === v ? `background:${c || '#3b82f6'};color:#0f172a;border-color:transparent` : ''}" onclick="setSeg('${name}','${v}')">${l}</button>`).join('');
+      const tipo = ord.tipo || 'normal';
+      const tipoLabel = tipo === 'int_sub' ? '📄 Interiores' : tipo === 'port_sub' ? '🎨 Portada' : tipo === 'union_result' ? '🔗 Unido' : '🖨️ Normal';
+      return `<div class="overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="font-size:17px;font-weight:700">${isNew ? '+ Nueva Orden' : `✏️ ${e(ord.id || '')} <span style="font-size:13px;color:#64748b">${tipoLabel}</span>`}</h2>
+        <button class="bico" onclick="closeModal()" style="font-size:20px;color:#94a3b8">✕</button>
+      </div>
+      <div class="g2">
+        <div><span class="lbl" style="margin-top:0">Cliente *</span><input class="inp" id="f_cli" value="${e(ord.cliente || '')}" oninput="updEst()"></div>
+        <div><span class="lbl" style="margin-top:0">Título del libro *</span><input class="inp" id="f_tit" value="${e(ord.baseTitulo || ord.titulo || '')}" oninput="updEst()"></div>
+      </div>
+      <div class="g3">
+        <div><span class="lbl">Cantidad *</span><input class="inp" id="f_qty" type="number" min="1" value="${e(ord.cantidad || 100)}" oninput="updEst()"></div>
+        <div><span class="lbl">Páginas *</span><input class="inp" id="f_pag" type="number" min="1" value="${e(ord.paginas || 200)}" oninput="updEst()"></div>
+        <div><span class="lbl">Fecha límite</span><input class="inp" id="f_dl" type="date" value="${e(ord.fechaLimite || '')}"></div>
+      </div>
+      <div class="g2">
+        <div><span class="lbl">📐 Páginas por tabloide</span><input class="inp" id="f_ppt" type="number" min="1" max="32" value="${e(ord.ppt || 8)}" oninput="updEst()"><div style="font-size:10px;color:#475569;margin-top:2px">4 por cara × 2 caras = 8</div></div>
+        <div><span class="lbl">📐 Portadas por tabloide</span><input class="inp" id="f_portappt" type="number" min="1" max="8" value="${e(ord.portaPpt || 2)}" oninput="updEst()"></div>
+      </div>
+      <span class="lbl">Tipo de interiores</span>
+      <div style="display:flex;gap:6px;margin-top:6px"><input type="hidden" id="f_tint" value="${e(ord.tipoInteriores || 'byn')}">
+        ${segBtns('tint', [['byn', '⬜ B&N', '#94a3b8'], ['color', '🎨 Color', '#fb923c']], ord.tipoInteriores || 'byn')}</div>
+      <span class="lbl">Gramaje</span>
+      <div style="display:flex;gap:6px;margin-top:6px"><input type="hidden" id="f_gram" value="${e(ord.gramaje || 'normal')}">
+        ${segBtns('gram', [['normal', '≤ 150g', '#60a5fa'], ['grueso', '> 200g', '#f97316']], ord.gramaje || 'normal')}</div>
+      <span class="lbl">Tipo de encuadernación</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><input type="hidden" id="f_enc" value="${e(ord.tipoEncuadernacion || 'normal')}">
+        ${TIPOS_ENC.map(t => `<button class="seg${(ord.tipoEncuadernacion || 'normal') === t.id ? ' on' : ''}" id="seg_enc_${t.id}" style="${(ord.tipoEncuadernacion || 'normal') === t.id ? `background:${t.color};color:#0f172a;border-color:transparent` : ''}" onclick="setSeg('enc','${t.id}')">${t.icon} ${t.label}</button>`).join('')}
+      </div>
+      <span class="lbl">Notas</span>
+      <textarea class="inp" id="f_not" rows="2" style="resize:vertical">${e(ord.notas || '')}</textarea>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:12px">
+        <input type="checkbox" id="f_urg" ${ord.urgente ? 'checked' : ''} style="width:16px;height:16px;accent-color:#ef4444">
+        <label for="f_urg" style="font-size:13px;color:#ef4444;cursor:pointer;font-weight:600">⚡ Urgente</label>
+      </div>
+      ${isNew ? `<div class="split-toggle" id="split-toggle" onclick="toggleSplit()">
+        <input type="checkbox" id="f_split" style="width:16px;height:16px;accent-color:#f59e0b">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#f59e0b">🔗 Separar en Interiores y Portada</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px">Crea dos órdenes paralelas que se unen en el punto de unión del flujo</div>
+        </div>
+      </div>`: ''}
+      <div id="est-area"></div>
+      <div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end;flex-wrap:wrap">
+        ${modalId !== null ? `<button class="btn btn-d btn-sm" onclick="delOrd()">🗑 Eliminar</button>` : ''}
+        <button class="btn btn-g" onclick="closeModal()">Cancelar</button>
+        <button class="btn btn-p" onclick="saveOrd()">${isNew ? '✅ Crear' : '💾 Guardar'}</button>
+      </div>
+    </div>
+  </div>`;
+    }
+
+    function toggleSplit() {
+      const cb = document.getElementById('f_split'), tg = document.getElementById('split-toggle');
+      if (cb) { cb.checked = !cb.checked; tg.classList.toggle('on', cb.checked); }
+    }
+
+    function updEst() {
+      const o = getFormOrder(), el = document.getElementById('est-area');
+      if (!el) return; if (!o.cantidad || (!(o.tabloidesSrc || o.paginas))) { el.innerHTML = ''; return; }
+      const t = calcT({ ...o, tipo: 'normal' }, cfg); if (!t.total) { el.innerHTML = ''; return; }
+      const isSplit = document.getElementById('f_split')?.checked;
+      const active = orders.filter(x => x.etapa !== 'listo' && !x._merged && x.id !== modalId);
+      const qMin = active.reduce((s, x) => s + calcT(x, cfg).paralelo, 0);
+      const qDias = Math.round(qMin / (cfg.horasDia * 60) * 10) / 10;
+      const fecha = addDias(new Date(), qMin + t.paralelo, cfg.horasDia);
+      const fmtF = fecha.toLocaleDateString('es', { weekday: 'long', day: '2-digit', month: 'long' });
+      const fases = [{ id: 'imp', label: '🖨️ Impresión', color: '#fb923c' }, { id: 'acab', label: '✂️ Acabados', color: '#c084fc' }, { id: 'emp', label: '📦 Empaque', color: '#2dd4bf' }];
+      const impBox = `<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:9px 10px;margin-bottom:10px;font-size:12px">
+    <span style="color:#60a5fa;font-weight:700">📐 Imposición: </span>
+    <span style="color:#94a3b8">Interiores <b style="color:#f1f5f9">${t.tabInt} tab</b> · Portada <b style="color:#f1f5f9">${t.tabPort} tab</b></span>
+  </div>`;
+      const pasosHTML = fases.map(f => { const ps = t.pasos.filter(p => p.fase === f.id); if (!ps.length) return ''; return `<div style="margin-bottom:7px"><div style="font-size:11px;color:${f.color};font-weight:700;margin-bottom:3px">${f.label}</div>${ps.map(p => `<div class="step"><span style="color:#94a3b8">${e(p.nom)}</span><span style="color:#f1f5f9;font-weight:700">${mStr(p.min)}</span></div>`).join('')}</div>`; }).join('');
+      el.innerHTML = `<div class="est-box">${impBox}${pasosHTML}
+    <div style="display:flex;justify-content:space-between;padding:9px 12px;background:#0a2040;border-radius:8px;border:1px solid #3b82f6;margin-top:8px">
+      <div><div style="font-size:12px;color:#93c5fd;font-weight:700">⚡ Tiempo de producción${isSplit ? ' (amb. líneas paralelas)' : ' con paralelismo'}</div></div>
+      <span style="font-weight:800;color:#60a5fa;font-size:16px">${mStr(t.paralelo)}</span>
+    </div>
+    <div style="margin-top:8px;padding:9px;background:#0a1f0a;border-radius:8px;border-left:3px solid #22c55e">
+      <div style="font-size:12px;color:#94a3b8">📋 Cola: ~${qDias} días hábiles</div>
+      <div style="color:#4ade80;font-weight:700;margin-top:4px;font-size:13px">📅 Entrega estimada: ${fmtF}</div>
+    </div>
+    ${isSplit ? `<div style="margin-top:8px;padding:9px;background:#1a1200;border-radius:8px;border:1px solid #f59e0b;font-size:12px;color:#f59e0b">
+      🔗 Se crearán <b>2 órdenes separadas</b>: INT (${t.pasos.filter(p => ['iib', 'iic', 'ci', 'pg', 'cf', 'cdc', 'pi'].includes(p.id)).length} pasos) + PORT (${t.pasos.filter(p => ['ip', 'pl', 'cp', 'cc', 'ap', 'pp'].includes(p.id)).length} pasos). Se unirán cuando ambas lleguen a la columna Unión.
+    </div>`: ''}
+  </div>`;
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  KPI
+    // ═══════════════════════════════════════════════════
+    function kpiHTML() {
+      const active = orders.filter(o => o.etapa !== 'listo' && !o._merged);
+      const done = orders.filter(o => o.etapa === 'listo' && !o._merged);
+      const urg = active.filter(o => o.urgente), od = active.filter(o => isOD(o.fechaLimite)), sn = active.filter(o => isSoon(o.fechaLimite));
+      const totMin = active.reduce((s, o) => s + calcT(o, cfg).paralelo, 0), avg = active.length ? Math.round(totMin / active.length) : 0;
+      const cp = Math.min(100, Math.round(totMin / (cfg.horasDia * 60 * 5) * 100)), cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
+      const _allEt = [...ETAPAS.slice(0, 1), ...ACAB_STEPS, ...ETAPAS.slice(1)];
+      const byEt = _allEt.map(et => ({ ...et, cnt: orders.filter(o => o.etapa === et.id && !o._merged).length }));
+      const bott = byEt.slice(0, 5).reduce((a, b) => b.cnt > a.cnt ? b : a, byEt[0]);
+      const kpis = [['📦', 'Activas', active.length, '#60a5fa'], ['✅', 'Completadas', done.length, '#4ade80'], ['⚡', 'Urgentes', urg.length, '#f59e0b'], ['🔴', 'Vencidas', od.length, '#ef4444'], ['🟡', 'Vencen 48h', sn.length, '#f97316'], ['⏱', 'T promedio', mStr(avg), '#c084fc']];
+      return `<div style="padding:20px;max-width:1100px;margin:0 auto">
+    <h2 style="font-size:20px;font-weight:800;margin-bottom:16px">📊 Indicadores de Producción</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">
+      ${kpis.map(([ic, lb, vl, co]) => `<div class="kcard" style="border-top:3px solid ${co}"><div style="font-size:22px">${ic}</div><div style="font-size:26px;font-weight:800;color:${co};line-height:1.1;margin-top:2px">${vl}</div><div style="font-size:11px;color:#64748b;margin-top:3px">${lb}</div></div>`).join('')}
+    </div>
+    <div class="g2" style="gap:12px;margin-bottom:12px">
+      <div class="kcard"><div style="font-size:12px;color:#64748b;font-weight:700">📊 CARGA SEMANAL</div>
+        <div style="font-size:34px;font-weight:800;color:${cc};margin-top:4px">${cp}%</div>
+        <div class="capbar" style="height:12px;margin-top:6px"><div style="height:100%;border-radius:999px;width:${cp}%;background:${cc}"></div></div>
+        <div style="font-size:13px;color:${cc};font-weight:700;margin-top:5px">${cp < 60 ? '✅ Podemos aceptar más' : cp < 85 ? '⚠️ Espacio limitado' : '🔴 Al límite'}</div>
+      </div>
+      <div class="kcard"><div style="font-size:12px;color:#64748b;font-weight:700">🚧 CUELLO DE BOTELLA</div>
+        ${bott && bott.cnt > 0 ? `<div style="display:flex;align-items:center;gap:10px;margin-top:10px"><span style="font-size:36px">${bott.icon}</span><div><div style="font-size:17px;font-weight:800;color:${bott.color}">${bott.full}</div><div style="font-size:14px;color:#94a3b8">${bott.cnt} órdenes</div></div></div>` : '<div style="color:#475569;margin-top:12px">Sin cuello detectado</div>'}
+      </div>
+    </div>
+    <div class="kcard" style="margin-bottom:12px"><div style="font-size:12px;color:#64748b;font-weight:700;margin-bottom:12px">📋 POR ETAPA</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${byEt.map(et => `<div style="flex:1;min-width:80px;background:#0f172a;border-radius:10px;padding:12px;border-top:3px solid ${et.color}"><div style="font-size:26px;font-weight:800;color:${et.color}">${et.cnt}</div><div style="font-size:11px;color:#94a3b8;margin-top:3px">${et.icon} ${et.label}</div></div>`).join('')}</div>
+    </div>
+    ${(od.length || sn.length) ? `<div class="kcard" style="border-left:3px solid #ef4444"><div style="font-size:12px;color:#ef4444;font-weight:700;margin-bottom:10px">🚨 EN RIESGO</div>${[...od, ...sn].map(o => `<div style="display:flex;justify-content:space-between;padding:8px 10px;background:#0f172a;border-radius:8px;margin-bottom:6px;gap:8px"><div><span style="font-weight:700;color:#f1f5f9">${e(o.titulo)}</span><span style="color:#64748b;font-size:12px"> · ${e(o.cliente)} · ${etOf(o.etapa).full}</span></div><span style="color:${isOD(o.fechaLimite) ? '#ef4444' : '#f59e0b'};font-weight:700;font-size:12px;white-space:nowrap">${isOD(o.fechaLimite) ? '🔴 VENCIDA' : '🟡'} ${fDate(o.fechaLimite)}</span></div>`).join('')}</div>` : ''}
+  </div>`;
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  TV — GANTT
+    // ═══════════════════════════════════════════════════
+    function tvHTML() {
+      const ts = v => `padding:6px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:700;background:${tvSub === v ? '#3b82f6' : 'transparent'};color:${tvSub === v ? '#fff' : '#94a3b8'}`;
+      return `<div class="tv-wrap">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:22px;font-weight:800;color:#f1f5f9">🖨️ Tablero de Producción</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="background:#0f172a;border-radius:10px;padding:4px;display:flex;gap:2px">
+          <button style="${ts('gantt')}" onclick="setTVSub('gantt')">📊 Gantt</button>
+          <button style="${ts('kanban')}" onclick="setTVSub('kanban')">🗂 Kanban</button>
+        </div>
+        ${tvSub === 'gantt' ? `<button onclick="ganttZoom=Math.min(ganttZoom*1.5,240);render()" class="btn btn-g btn-sm">🔍+</button><button onclick="ganttZoom=Math.max(ganttZoom/1.5,20);render()" class="btn btn-g btn-sm">🔍−</button>` : ''}
+        <div id="tv-clock" style="font-size:26px;font-weight:700;color:#60a5fa;font-variant-numeric:tabular-nums">--:--</div>
+        <button class="btn btn-g btn-sm" onclick="exitTV()">✕ Salir</button>
+      </div>
+    </div>
+    ${tvSub === 'gantt' ? ganttHTML() : tvKanbanHTML()}
+  </div>`;
+    }
+
+    function ganttHTML() {
+      const { blocks, colorMap } = scheduleMachines(orders, cfg);
+      if (!blocks.length) return `<div style="color:#334155;text-align:center;padding:60px;font-size:20px">Sin órdenes activas</div>`;
+      const pxM = ganttZoom / 60;
+      const hpd = cfg.horasDia || 10;          // horas laborales por día (default 10 = 8am-6pm)
+      const startH = cfg.startHour || 8;       // hora de inicio de jornada
+      const endH = startH + hpd;               // hora de fin (ej. 18)
+      const mpd = hpd * 60;                    // minutos laborales por día
+      // Posición "AHORA" en minutos laborales desde inicio de jornada hoy
+      const nowDate = new Date();
+      const todayStart = new Date(nowDate); todayStart.setHours(startH, 0, 0, 0);
+      const nowWmin = Math.max(0, Math.min((nowDate - todayStart) / 60000, mpd));
+      const nowPx = nowWmin * pxM;
+      const maxEnd = Math.max(...blocks.map(b => b.end), mpd) + 120;
+      const totalW = Math.round(maxEnd * pxM) + 80;
+      // Marcadores de tiempo: cuadrícula por jornada laboral
+      const numDays = Math.ceil(maxEnd / mpd) + 1;
+      const markers = [];
+      for (let d = 0; d < numDays; d++) {
+        const dayWmS = d * mpd;
+        const dayDate = new Date(todayStart); dayDate.setDate(dayDate.getDate() + d);
+        const dayLbl = dayDate.toLocaleDateString('es', { weekday: 'short', day: '2-digit', month: 'short' });
+        // Línea y etiqueta de inicio de jornada
+        markers.push(`<div style="position:absolute;left:${dayWmS * pxM}px;top:0;bottom:0;border-left:2px solid #3b4f6b;pointer-events:none"><div style="position:absolute;top:0;left:3px;font-size:11px;color:#60a5fa;white-space:nowrap;font-weight:700;background:#060d1a;padding:0 3px">${dayLbl} ${String(startH).padStart(2, '0')}:00</div></div>`);
+        // Marcadores horarios dentro del día
+        for (let h = 1; h <= hpd; h++) {
+          const wm = dayWmS + h * 60;
+          if (wm > maxEnd + 60) break;
+          const hh = startH + h;
+          const isEndOfDay = hh === endH;
+          markers.push(`<div style="position:absolute;left:${wm * pxM}px;top:0;bottom:0;border-left:1px solid ${isEndOfDay ? '#3b4f6b' : '#1e293b'};pointer-events:none"><div style="position:absolute;top:0;left:2px;font-size:10px;color:${isEndOfDay ? '#60a5fa' : '#334155'};white-space:nowrap;background:#060d1a;padding:0 1px">${String(hh).padStart(2, '0')}:00${isEndOfDay ? ' ◀fin' : ''}</div></div>`);
+        }
+      }
+      const timeMarkers = markers.join('');
+      const sorted = orders.filter(o => o.etapa !== 'listo' && !o._merged).sort(prioSort);
+      // Leyenda con nombre completo de la orden
+      const legend = sorted.map(o => `<div style="display:flex;align-items:center;gap:5px;white-space:nowrap"><div style="width:12px;height:12px;border-radius:2px;background:${colorMap[o.id] || '#666'};flex-shrink:0"></div><span style="font-size:11px;color:#94a3b8"><b style="color:#f1f5f9">${e(o.id)}</b> ${e(o.titulo.substring(0, 28))}${o.titulo.length > 28 ? '…' : ''}</span></div>`).join('');
+      const usedIds = new Set(blocks.map(b => b.machId));
+      const usedM = MAQUINAS.filter(m => usedIds.has(m.id));
+      let lastG = '';
+      const rows = usedM.map(mach => {
+        const mb = blocks.filter(b => b.machId === mach.id);
+        const bars = mb.map(b => {
+          // Posición = minutos laborales directamente (0 = inicio de jornada)
+          const x = b.start * pxM, w = Math.max(b.dur * pxM, 6);
+          const brd = isOD(b.fechaLimite) ? 'border:2px solid #ef4444' : isSoon(b.fechaLimite) ? 'border:2px solid #f59e0b' : '';
+          const tipoBadge = b.tipo === 'int_sub' ? 'I·' : b.tipo === 'port_sub' ? 'P·' : b.tipo === 'union_result' ? '🔗' : '';
+          const buddyBadge = b.buddyGroup ? '🔗' : '';
+          // Siempre mostrar ID de orden; mostrar nombre completo si hay espacio
+          const shortId = e(b.ordId);
+          const shortTit = b.titulo.length > 20 ? b.titulo.substring(0, 18) + '…' : b.titulo;
+          const barLabel = w > 90 ? `${tipoBadge}${buddyBadge}${shortId} ${e(shortTit)}` : w > 38 ? `${tipoBadge}${buddyBadge}${shortId}` : tipoBadge || buddyBadge;
+          const buddyTip = b.buddyGroup ? `&#10;🔗 Grupo: ${b.buddyGroup} (espera piezas del mismo trabajo)` : '';
+          return `<div class="gantt-bar" style="left:${x}px;width:${w}px;background:${b.color};${brd};overflow:hidden;text-overflow:clip" title="${e(b.ordId)}: ${e(b.titulo)}&#10;${e(b.stepNom)} · ${mStr(b.dur)}${b.urgente ? '&#10;⚡ URGENTE' : ''}${buddyTip}">${barLabel}</div>`;
+        }).join('');
+        const gh = mach.grupo !== lastG ? `<div style="display:flex;border-bottom:1px solid #334155;background:#060d1a"><div style="width:160px;flex-shrink:0;padding:3px 10px;font-size:10px;color:#475569;font-weight:700;border-right:1px solid #1e293b">${e(mach.grupo)}</div><div style="flex:1"></div></div>` : '';
+        lastG = mach.grupo;
+        return gh + `<div class="gantt-row"><div class="gantt-label">${e(mach.label)}</div><div class="gantt-track">${bars}</div></div>`;
+      }).join('');
+      return `<div style="flex:1;overflow:hidden;display:flex;flex-direction:column;gap:8px">
+    <div style="background:#0f172a;border-radius:8px;padding:7px 12px;display:flex;flex-wrap:wrap;gap:8px">${legend}</div>
+    <div style="background:#0a0f1e;border-radius:12px;flex:1;overflow:auto">
+      <div style="display:flex"><div style="width:160px;flex-shrink:0;position:sticky;left:0;z-index:20;background:#060d1a;border-bottom:1px solid #334155;border-right:1px solid #1e293b"><div style="padding:6px 10px;font-size:11px;color:#64748b;font-weight:700">MÁQUINA</div></div>
+        <div style="position:relative;height:30px;flex:1;min-width:${totalW}px;border-bottom:1px solid #334155;background:#060d1a">${timeMarkers}</div>
+      </div>
+      <div style="position:relative">${rows}
+        <div style="position:absolute;top:0;left:${160 + nowPx}px;bottom:0;width:2px;background:#ef4444;z-index:5;pointer-events:none">
+          <div style="position:absolute;top:2px;left:4px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;white-space:nowrap">AHORA</div>
+        </div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:#475569;text-align:center">🕗 Jornada: ${String(startH).padStart(2, '0')}:00–${String(endH).padStart(2, '0')}:00 · I=Interiores · P=Portada · 🔗=Unido · Cursor sobre barra = detalle</div>
+  </div>`;
+    }
+
+    function tvKanbanHTML() {
+      return `<div style="display:flex;gap:8px;flex:1;overflow:hidden">
+    ${[ETAPAS[0], ...ACAB_STEPS, ...ETAPAS.slice(1)].filter(et => et.id !== 'listo').map(et => {
+        const cols = orders.filter(o => o.etapa === et.id && !o._merged); return `
+      <div class="tv-col" style="border-top:3px solid ${et.color}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:20px;font-weight:800;color:${et.color}">${et.icon} ${et.label}</div>
+          <span class="badge" style="background:${et.color}33;color:${et.color};font-size:18px;padding:3px 12px">${cols.length}</span>
+        </div>
+        ${cols.length === 0 ? `<div style="color:#334155;font-size:18px;text-align:center;padding:20px 0">Libre ✓</div>` :
+            `<div style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;flex:1">
+            ${cols.slice(0, 6).map(o => {
+              const enc = encOf(o.tipoEncuadernacion); const tipo = o.tipo || 'normal'; return `
+              <div style="background:#1e293b;border-radius:9px;padding:10px 12px;border-left:3px solid ${o.urgente ? '#ef4444' : tipo === 'int_sub' ? '#818cf8' : tipo === 'port_sub' ? '#c084fc' : tipo === 'union_result' ? '#4ade80' : et.color}">
+                <div style="display:flex;justify-content:space-between"><span style="font-size:16px;font-weight:700;color:#f1f5f9">${o.urgente ? '⚡ ' : ''} ${e(o.titulo.substring(0, 25))}</span>${isOD(o.fechaLimite) ? '<span style="color:#ef4444;font-weight:700;font-size:12px">🔴VENC</span>' : isSoon(o.fechaLimite) ? '<span style="color:#f59e0b;font-size:12px">🟡HOY</span>' : ''}</div>
+                <div style="font-size:12px;color:#94a3b8;margin-top:3px">${e(o.cliente)} · ${e(o.cantidad)} ejs · ${enc.icon}</div>
+              </div>`;
+            }).join('')}
+            ${cols.length > 6 ? `<div style="color:#475569;text-align:center;padding:5px">+ ${cols.length - 6} más</div>` : ''}
+          </div>`}
+      </div>`;
+      }).join('')}
+    <div class="tv-col" style="max-width:190px;border-top:3px solid #4ade80">
+      <div style="font-size:20px;font-weight:800;color:#4ade80;margin-bottom:8px">✅ Listos</div>
+      ${orders.filter(o => o.etapa === 'listo' && !o._merged).slice(0, 10).map(o => `
+        <div style="background:#0a2e1a;border-radius:7px;padding:8px 10px;border:1px solid #14532d;margin-bottom:5px">
+          <div style="font-size:13px;color:#f1f5f9;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(o.titulo)}</div>
+          <div style="font-size:10px;color:#64748b">${e(o.cliente)}</div>
+        </div>`).join('')}
+    </div>
+  </div>`;
+    }
+
+    function startTV() { const upd = () => { const el = document.getElementById('tv-clock'); if (el) el.textContent = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }); }; upd(); tvTimer = setInterval(upd, 10000); }
+    function setTVSub(s) { tvSub = s; render(); }
+
+    // ═══════════════════════════════════════════════════
+    //  CONFIG MODAL
+    // ═══════════════════════════════════════════════════
+    function cfgHTML() {
+      const inp = (lbl, path, step) => { const ks = path.split('.'), val = ks.reduce((o, k) => o?.[k], cfg) ?? 0; return `<div><div style="font-size:12px;color:#64748b;margin-top:10px">${lbl}</div><input class="inp" type="number" step="${step || 1}" min="0" data-cfg="${path}" value="${val}" oninput="updCfg(this)" style="margin-top:3px"></div>`; };
+      const secs = [
+        { title: '🖨️ IMPRESIÓN (ppm 330×475)', color: '#fb923c', items: [['OCE 6320 B&N', 'maq.byn_fast'], ['Titan 6180 B&N', 'maq.byn_slow'], ['1352/1351 Color ≤150g', 'maq.color_normal'], ['1352/1351 Color >200g', 'maq.color_grueso'], ['10010 ≤150g', 'maq.color_slow_n'], ['10010 >200g', 'maq.color_slow_g']] },
+        { title: '📐 IMPOSICIÓN', color: '#60a5fa', items: [['Páginas por tabloide (default)', 'pptDefault'], ['Portadas por tabloide (default)', 'portaPptDefault']] },
+        { title: '⚙️ SETUP (min)', color: '#94a3b8', items: [['B&N', 'setup.byn'], ['Color', 'setup.color'], ['Plastificado', 'setup.plastificado'], ['Pegado', 'setup.pegado'], ['Corte final', 'setup.corteFinal']] },
+        { title: '✂️ ACABADOS', color: '#c084fc', items: [['Corte inicial (pág/min)', 'maq.corteInicial'], ['Plastificado (m/min)', 'maq.plast_vel', '0.1'], ['Hoja plast. (m)', 'maq.plast_hoja', '0.01'], ['Pegado 150p', 'maq.pegado_150', '0.1'], ['Pegado 500p', 'maq.pegado_500', '0.1'], ['Corte final 150p', 'maq.cf_150', '0.1'], ['Corte final 500p', 'maq.cf_500', '0.1'], ['Ponchadora (h/min)', 'maq.ponchadora'], ['Engrapadora', 'maq.engrapadora', '0.1'], ['Corte cartón', 'maq.corte_carton', '0.1'], ['Armado PD (port/min)', 'maq.armado_pd', '0.01'], ['Mesa trabajo', 'maq.mesa_trabajo', '0.1'], ['Espiralado', 'maq.espiralado', '0.1']] },
+        { title: '📦 EMPAQUE', color: '#2dd4bf', items: [['Termo (lib/min)', 'maq.termo', '0.1']] },
+      ];
+      return `<div class="overlay" onclick="if(event.target===this)closeCfg()">
+    <div class="modal" style="max-width:620px" onclick="event.stopPropagation()">
+      <div style="display:flex;justify-content:space-between;margin-bottom:16px"><h2 style="font-size:17px;font-weight:700">⚙️ Configuración de Máquinas</h2><button class="bico" onclick="closeCfg()" style="font-size:20px;color:#94a3b8">✕</button></div>
+      <span class="lbl" style="margin-top:0">Nombre de la imprenta</span>
+      <input class="inp" value="${e(cfg.nombreImprenta)}" oninput="cfg.nombreImprenta=this.value;saveS()">
+      <div class="g2">
+        <div><span class="lbl">Hora inicio jornada</span><input class="inp" type="number" min="0" max="23" value="${cfg.startHour || 8}" oninput="cfg.startHour=+this.value;saveS()"><div style="font-size:10px;color:#475569;margin-top:2px">Ej: 8 = 8:00 am</div></div>
+        <div><span class="lbl">Horas de trabajo por día</span><input class="inp" type="number" min="1" max="24" value="${cfg.horasDia}" oninput="cfg.horasDia=+this.value;saveS()"><div style="font-size:10px;color:#475569;margin-top:2px">Ej: 10 = termina a las 18:00</div></div>
+      </div>
+      <div style="background:#0a1200;border:1px solid #166534;border-radius:10px;padding:14px;margin-top:16px">
+        <div style="font-size:12px;color:#4ade80;font-weight:700;margin-bottom:8px">🔗 CONEXIÓN CON GOOGLE SHEETS</div>
+        <span class="lbl" style="margin-top:0;color:#64748b">URL del Google Apps Script Web App</span>
+        <input class="inp" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.scriptUrl || '')}" oninput="cfg.scriptUrl=this.value;saveS()">
+        <div style="font-size:11px;color:#475569;margin-top:6px">Cuando avances una orden con ▶, automáticamente marcará <b style="color:#4ade80">Listo = TRUE</b> en tu hoja de Google Sheets.</div>
+        <div style="font-size:11px;color:#166534;margin-top:4px">📋 Ver instrucciones para crear el script → botón 🔄 Sheets → "Cómo configurar"</div>
+      </div>
+      ${secs.map(sec => `<div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px"><div style="font-size:12px;color:${sec.color};font-weight:700;letter-spacing:.5px;margin-bottom:4px">${sec.title}</div><div class="g2">${sec.items.map(([l, p, s]) => inp(l, p, s)).join('')}</div></div>`).join('')}
+      <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn btn-g" onclick="closeCfg()">Cerrar</button></div>
+    </div>
+  </div>`;
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  ACCIONES
+    // ═══════════════════════════════════════════════════
+    function setV(v) { V = v; render(); }
+    function exitTV() { V = 'kanban'; render(); }
+    function openNew() { modalId = null; render(); setTimeout(updEst, 50); }
+    function openOrd(id) { modalId = id; render(); setTimeout(updEst, 50); }
+    function closeModal() { modalId = undefined; render(); }
+    function setSeg(name, val) {
+      document.getElementById(`f_${name}`).value = val;
+      document.querySelectorAll(`[id^="seg_${name}_"]`).forEach(btn => {
+        const bv = btn.id.replace(`seg_${name}_`, ''), enc = TIPOS_ENC.find(t => t.id === bv);
+        if (bv === val) { btn.classList.add('on'); btn.style.background = enc ? enc.color : '#3b82f6'; btn.style.color = '#0f172a'; btn.style.borderColor = 'transparent'; }
+        else { btn.classList.remove('on'); btn.style.background = '#0f172a'; btn.style.color = '#94a3b8'; btn.style.borderColor = '#334155'; }
+      }); updEst();
+    }
+    function saveOrd() {
+      const o = getFormOrder(); if (!o.cliente || !o.titulo || !o.cantidad) { alert('Completa los campos obligatorios (*)'); return; }
+      if (o._split && modalId === null) { createSplitOrders(o); return; }
+      const ord = { ...o, tipo: o._split ? 'normal' : 'normal' };
+      if (modalId === null) { orders.push({ ...ord, tipo: 'normal', id: nextId(), etapa: 'impresion', fechaCreacion: new Date().toISOString().split('T')[0] }); }
+      else { const idx = orders.findIndex(x => x.id === modalId); if (idx >= 0) orders[idx] = { ...orders[idx], ...ord }; }
+      saveS(); modalId = undefined; render();
+    }
+    function delOrd() { if (!confirm('¿Eliminar esta orden?')) return; orders = orders.filter(o => o.id !== modalId); saveS(); modalId = undefined; render(); }
+    function mvOrd(id, dir) {
+      const idx = orders.findIndex(o => o.id === id); if (idx < 0) return;
+      const o = orders[idx];
+      const fromEtapa = o.etapa;
+      // Flujo natural de esta orden
+      const flow = [
+        ETAPAS[0],
+        ...getAcabFlow(o).map(sid => ACAB_STEPS.find(s => s.id === sid)).filter(Boolean),
+        ETAPAS[1],
+        ETAPAS[2],
+      ];
+      let ei = flow.findIndex(et => et && et.id === o.etapa);
+      if (ei < 0) {
+        // La orden fue movida a un paso fuera de su flujo natural → usar columnas del tablero
+        const boardEt = allEtapas(orders);
+        const bi = boardEt.findIndex(et => et && et.id === o.etapa);
+        if (bi < 0) return;
+        const target = boardEt[bi + dir];
+        if (!target) return;
+        orders[idx] = { ...orders[idx], etapa: target.id };
+        if (dir > 0) markListoInSheets(orders[idx], fromEtapa);
+        autoMergeCheck(); saveS(); render(); return;
+      }
+      const ni = ei + dir;
+      if (ni < 0 || ni >= flow.length) return;
+      orders[idx] = { ...orders[idx], etapa: flow[ni].id };
+      if (dir > 0) markListoInSheets(orders[idx], fromEtapa);
+      autoMergeCheck();
+      saveS(); render();
+    }
+    function openCfg() { showCfg = true; render(); }
+    function closeCfg() { showCfg = false; render(); }
+    function openSync() { showSync = true; render(); }
+    function closeSync() { showSync = false; render(); }
+    function updCfg(el) { const path = el.dataset.cfg, val = +el.value, ks = path.split('.'); let o = cfg; for (let i = 0; i < ks.length - 1; i++)o = o[ks[i]]; o[ks[ks.length - 1]] = val; saveS(); }
+
+    // ═══════════════════════════════════════════════════
+    //  ESCÁNER DE CÓDIGO DE BARRAS
+    //  Los escáneres envían los caracteres muy rápido (<80ms entre teclas) + Enter al final.
+    //  El código impreso en cada orden debe ser su ID (ej: ORD-001 o 123-I).
+    // ═══════════════════════════════════════════════════
+    let _scanBuf = '', _scanTs = 0;
+
+    document.addEventListener('keydown', ev => {
+      // Ignorar si el foco está en un input, textarea o modal abierto
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(ev.target.tagName)) return;
+      if (modalId !== undefined || showCfg || showSync) return;
+      const now = Date.now();
+      // Si pasaron más de 150ms desde la última tecla, resetear buffer (escritura manual)
+      if (now - _scanTs > 150) _scanBuf = '';
+      _scanTs = now;
+      if (ev.key === 'Enter') {
+        if (_scanBuf.length >= 3) handleScan(_scanBuf.trim());
+        _scanBuf = '';
+        ev.preventDefault();
+      } else if (ev.key.length === 1) {
+        _scanBuf += ev.key;
+      }
+    });
+
+    // Tiempos de inicio por orden: { ordId: timestamp }
+    // ── Mapa de prefijos de proceso → etapa interna ─────────────────
+    // Orden: de más largo a más corto para evitar ambigüedad (CDC antes que CC; EM antes que E)
+    const SCAN_PROC = [
+      { pre: 'CDC', etapa: 'acab_cdc', label: 'Cinta Doble Cara' },
+      { pre: 'PL', etapa: 'acab_pl', label: 'Plastificado' },
+      { pre: 'CI', etapa: 'acab_ci', label: 'Corte Inicial' },
+      { pre: 'CF', etapa: 'acab_cf', label: 'Corte Final' },
+      { pre: 'CC', etapa: 'acab_cc', label: 'Corte Cartón' },
+      { pre: 'PD', etapa: 'acab_ap', label: 'Armado Portada' },
+      { pre: 'MT', etapa: 'acab_ms', label: 'Mesa de Trabajo' },
+      { pre: 'EM', etapa: 'empaque', label: 'Empaque' },
+      { pre: 'PI', etapa: 'acab_pi', label: 'Ponchado Int' },
+      { pre: 'PP', etapa: 'acab_pp', label: 'Ponchado Port' },
+      { pre: 'ES', etapa: 'acab_es', label: 'Espiralado' },
+      { pre: 'E', etapa: 'acab_en', label: 'Engrapado' },
+      { pre: 'T', etapa: 'acab_te', label: 'Termo' },
+      { pre: 'H', etapa: null, label: 'Hotmelt' }, // prefijo genérico hotmelt
+    ];
+
+    const _scanTimers = {};
+
+    function handleScan(raw) {
+      // ── 1. Parsear sufijo i/p ────────────────────────────────────
+      // i = Inicia (llega a este paso, arranca timer)
+      // p = Pasa   (terminó este paso, avanza al siguiente)
+      const raw2 = raw.trim().toUpperCase();
+      const suffix = raw2.slice(-1);
+      const isInicio = suffix === 'I';
+      const isPaso = suffix === 'P';
+      const cuerpo = (isInicio || isPaso) ? raw2.slice(0, -1) : raw2;
+
+      // ── 2. Detectar prefijo de proceso ───────────────────────────
+      let proc = null, ordId = cuerpo;
+      for (const p of SCAN_PROC) {
+        if (cuerpo.startsWith(p.pre)) {
+          proc = p;
+          ordId = cuerpo.slice(p.pre.length);
+          break;
+        }
+      }
+
+      // ── 3. Buscar la orden ───────────────────────────────────────
+      // El ID en el sistema puede ser minúsculas/mayúsculas; buscar sin distinción
+      const o = orders.find(x => x.id.toUpperCase() === ordId || x.id === ordId);
+      if (!o) {
+        showToast('❌ No encontrada: ' + ordId + (proc ? ' [' + proc.label + ']' : ''));
+        return;
+      }
+      if (o.etapa === 'listo' || o._merged) {
+        showToast('✅ Ya lista: ' + o.titulo.substring(0, 28));
+        return;
+      }
+
+      const procLabel = proc ? proc.label : (ACAB_STEPS.find(s => s.id === o.etapa)?.label || o.etapa);
+      const timerKey = o.id + (proc ? '_' + proc.pre : '');
+
+      // ── 4. INICIA: mueve la orden A este paso y arranca timer ────
+      if (isInicio) {
+        _scanTimers[timerKey] = Date.now();
+        // Si el proceso tiene etapa definida, mover la orden a esa etapa
+        if (proc && proc.etapa) {
+          const idx = orders.findIndex(x => x.id === o.id);
+          orders[idx] = { ...orders[idx], etapa: proc.etapa };
+          saveS(); render();
+        }
+        showToast('⏱ Iniciando ' + procLabel + ': ' + o.titulo.substring(0, 22));
+        showScanFlash(o.titulo, '⏱ ' + procLabel, '#60a5fa');
+        return;
+      }
+
+      // ── 5. PASA: avanza al siguiente paso ────────────────────────
+      // Si el proceso tiene etapa definida, posicionar ahí primero (corrección automática)
+      const idx = orders.findIndex(x => x.id === o.id);
+      if (proc && proc.etapa && o.etapa !== proc.etapa) {
+        orders[idx] = { ...orders[idx], etapa: proc.etapa };
+      }
+
+      const oActual = orders[idx];
+      const flow = [
+        ETAPAS[0],
+        ...getAcabFlow(oActual).map(sid => ACAB_STEPS.find(s => s.id === sid)).filter(Boolean),
+        ETAPAS[1],
+        ETAPAS[2],
+      ];
+      const ei = flow.findIndex(et => et && et.id === oActual.etapa);
+      if (ei < 0 || ei >= flow.length - 1) {
+        showToast('⚠️ ' + oActual.titulo.substring(0, 25) + ' ya está al final');
+        return;
+      }
+      const nextStep = flow[ei + 1];
+      const fromEtapa = oActual.etapa;
+
+      // Duración si hay timer de inicio
+      let durTxt = '';
+      if (_scanTimers[timerKey]) {
+        const mins = Math.round((Date.now() - _scanTimers[timerKey]) / 60000);
+        durTxt = mins > 0 ? ' · ' + mins + ' min' : '';
+        delete _scanTimers[timerKey];
+      }
+
+      orders[idx] = { ...orders[idx], etapa: nextStep.id };
+      markListoInSheets(orders[idx], fromEtapa);
+      autoMergeCheck(); saveS(); render();
+      showToast('✅ ' + oActual.titulo.substring(0, 20) + ' → ' + nextStep.label + durTxt);
+      showScanFlash(oActual.titulo, nextStep.label + durTxt, nextStep.color || '#f59e0b');
+    }
+
+    function showScanFlash(titulo, etapa, color) {
+      let el = document.getElementById('scan-flash');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'scan-flash';
+        el.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e293b;border:3px solid #f59e0b;color:#f1f5f9;padding:22px 32px;border-radius:16px;font-size:18px;font-weight:700;z-index:9999;text-align:center;transition:opacity .4s;pointer-events:none;box-shadow:0 0 40px #f59e0b44';
+        document.body.appendChild(el);
+      }
+      el.style.borderColor = color;
+      el.style.boxShadow = `0 0 40px ${color}44`;
+      el.innerHTML = `<div style="font-size:28px;margin-bottom:6px">📦</div><div style="font-size:14px;color:#94a3b8;margin-bottom:4px">${e(titulo.substring(0, 32))}</div><div style="color:${color}">→ ${e(etapa)}</div>`;
+      el.style.opacity = '1';
+      clearTimeout(el._to);
+      el._to = setTimeout(() => { el.style.opacity = '0'; }, 2500);
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  INICIO
+    // ═══════════════════════════════════════════════════
+    loadS(); autoMergeCheck(); render();
+  </script>
+</body>
+
+</html>
