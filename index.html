@@ -325,7 +325,7 @@
       padding: 0 6px;
       font-size: 11px;
       font-weight: 700;
-      overflow: visible;
+      overflow: hidden;
       white-space: nowrap
     }
 
@@ -357,8 +357,7 @@
     .gantt-track {
       position: relative;
       flex: 1;
-      min-height: 36px;
-      overflow: visible
+      min-height: 36px
     }
 
     .split-toggle {
@@ -1714,11 +1713,12 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
           const brd = isOD(b.fechaLimite) ? 'border:2px solid #ef4444' : isSoon(b.fechaLimite) ? 'border:2px solid #f59e0b' : '';
           const tipoBadge = b.tipo === 'int_sub' ? 'I·' : b.tipo === 'port_sub' ? 'P·' : b.tipo === 'union_result' ? '🔗' : '';
           const buddyBadge = b.buddyGroup ? '🔗' : '';
+          // Siempre mostrar ID de orden; mostrar nombre completo si hay espacio
           const shortId = e(b.ordId);
           const shortTit = b.titulo.length > 20 ? b.titulo.substring(0, 18) + '…' : b.titulo;
-          const insideLabel = w > 90 ? `${tipoBadge}${buddyBadge}${shortId} ${e(shortTit)}` : `${tipoBadge}${buddyBadge}${shortId}`;
+          const barLabel = w > 90 ? `${tipoBadge}${buddyBadge}${shortId} ${e(shortTit)}` : w > 38 ? `${tipoBadge}${buddyBadge}${shortId}` : tipoBadge || buddyBadge;
           const buddyTip = b.buddyGroup ? `&#10;🔗 Grupo: ${b.buddyGroup} (espera piezas del mismo trabajo)` : '';
-          return `<div class="gantt-bar" style="left:${x}px;width:${w}px;background:${b.color};${brd};overflow:visible;white-space:nowrap" title="${e(b.ordId)}: ${e(b.titulo)}&#10;${e(b.stepNom)} · ${mStr(b.dur)}${b.urgente ? '&#10;⚡ URGENTE' : ''}${buddyTip}">${insideLabel}</div>`;
+          return `<div class="gantt-bar" style="left:${x}px;width:${w}px;background:${b.color};${brd};overflow:hidden;text-overflow:clip" title="${e(b.ordId)}: ${e(b.titulo)}&#10;${e(b.stepNom)} · ${mStr(b.dur)}${b.urgente ? '&#10;⚡ URGENTE' : ''}${buddyTip}">${barLabel}</div>`;
         }).join('');
         const gh = mach.grupo !== lastG ? `<div style="display:flex;border-bottom:1px solid #334155;background:#060d1a"><div style="width:160px;flex-shrink:0;padding:3px 10px;font-size:10px;color:#475569;font-weight:700;border-right:1px solid #1e293b">${e(mach.grupo)}</div><div style="flex:1"></div></div>` : '';
         lastG = mach.grupo;
