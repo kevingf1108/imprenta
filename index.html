@@ -590,6 +590,7 @@
     let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0));
     let modalId = undefined, showCfg = false, showSync = false, tvTimer = null, tvSub = 'gantt', ganttZoom = 60;
     let searchQ = '';
+    let autoSync = false, _autoSyncInt = null;
 
     // URLs pre-configuradas de Google Sheets
     const SHEET_IMP = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIlfUFRnj_VYEvovfEKY4Gj44uRgb1VOr9VVc3F1tlS2aHwHA4pJ-vib1SbHhJq0pR_PbHSs853ImS/pub?gid=438428152&single=true&output=csv';
@@ -1299,7 +1300,7 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
       if (V === 'tv') { root.innerHTML = tvHTML(); startTV(); return; }
       root.innerHTML = `
     <div style="background:#1e293b;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #334155;position:sticky;top:0;z-index:50">${hdrHTML()}</div>
-    <div id="mc">${V === 'kpi' ? kpiHTML() : boardHTML()}</div>
+    <div id="mc">${V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : boardHTML()}</div>
     ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}`;
     }
 
@@ -1312,7 +1313,7 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
       return `
     <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
-      ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
+      ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
     <div style="display:flex;align-items:center;gap:8px;background:#0f172a;border-radius:8px;padding:6px 12px;flex:1;min-width:170px;max-width:290px">
       <div style="flex:1"><div style="font-size:10px;color:#64748b;margin-bottom:3px">CAPACIDAD EN COLA</div>
@@ -1330,9 +1331,81 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
     <div style="margin-left:auto;display:flex;gap:8px">
       <button class="btn btn-g btn-sm" onclick="openCfg()">⚙️</button>
       <button class="btn btn-sm" onclick="openSync()" style="background:#1e3a5f;color:#60a5fa;border:1px solid #1d4ed8;white-space:nowrap">🔄 Sheets</button>
+      <button onclick="setAutoSync(!autoSync)" style="padding:5px 10px;border-radius:8px;border:1px solid ${autoSync ? '#166534' : '#334155'};background:${autoSync ? '#0a2e1a' : 'transparent'};color:${autoSync ? '#4ade80' : '#64748b'};font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap" title="Sincronizar automáticamente con Sheets cada 5 minutos">${autoSync ? '🔁 Auto ON' : '🔁 Auto'}</button>
       <div title="Escáner listo: escanea el código de barras de una orden para avanzarla al siguiente paso" style="display:flex;align-items:center;gap:5px;background:#0a1f0a;border:1px solid #166534;border-radius:8px;padding:5px 10px;font-size:11px;color:#4ade80;white-space:nowrap;cursor:default">📷 Escáner listo</div>
       <button class="btn btn-p" onclick="openNew()" style="white-space:nowrap">+ Nueva Orden</button>
     </div>`;
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  STATS
+    // ═══════════════════════════════════════════════════
+    function statsHTML() {
+      const rows = [];
+      orders.forEach(o => {
+        if (!o.tiemposReales || !o.tiemposReales.length) return;
+        o.tiemposReales.forEach(t => {
+          if (!t.mins || t.mins <= 0) return;
+          const hojas = o.tabloidesSrc || 0;
+          rows.push({
+            ordId: o.id, titulo: o.titulo || o.baseTitulo || o.id,
+            etapa: t.etapa, label: t.label || t.etapa,
+            mins: t.mins, cantidad: o.cantidad || 0, hojas, ts: t.ts,
+          });
+        });
+      });
+      if (!rows.length) return `<div style="padding:60px;text-align:center">
+        <div style="font-size:48px;margin-bottom:16px">⏱</div>
+        <div style="font-size:18px;font-weight:700;color:#64748b">Sin datos de escaneo aún</div>
+        <div style="font-size:13px;color:#475569;margin-top:8px">Escanea órdenes con <b style="color:#4ade80">I</b> (inicio) y <b style="color:#f59e0b">P</b> (fin) para registrar tiempos reales por estación</div>
+      </div>`;
+
+      const byStation = {};
+      rows.forEach(r => { if (!byStation[r.label]) byStation[r.label] = []; byStation[r.label].push(r); });
+
+      const stationBlocks = Object.entries(byStation).map(([label, items]) => {
+        const avg = items.reduce((s, r) => s + (r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : 0), 0) / items.length;
+        const isPeg = label.toLowerCase().includes('peg') || items[0]?.etapa?.includes('pg') || label.toLowerCase().includes('encuad');
+        const tableRows = items.map(r => {
+          const lpm = r.cantidad > 0 && r.mins > 0 ? (r.cantidad / r.mins).toFixed(2) : '—';
+          return `<tr style="border-top:1px solid #0f172a">
+            <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(r.titulo.substring(0,32))}</td>
+            <td style="padding:6px 8px;text-align:right;color:#f1f5f9;font-weight:600">${r.cantidad}</td>
+            ${isPeg ? `<td style="padding:6px 8px;text-align:right;color:#c084fc">${r.hojas || '—'}</td>` : ''}
+            <td style="padding:6px 8px;text-align:right;color:#60a5fa">${r.mins} min</td>
+            <td style="padding:6px 8px;text-align:right;color:#4ade80;font-weight:700">${lpm}</td>
+            <td style="padding:6px 8px;text-align:right;color:#475569;font-size:11px">${new Date(r.ts).toLocaleDateString('es',{day:'2-digit',month:'short'})}</td>
+          </tr>`;
+        }).join('');
+        return `<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+            <div style="font-size:15px;font-weight:800;color:#f1f5f9">${e(label)}</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <span style="background:#0a2040;border:1px solid #1d4ed8;padding:3px 10px;border-radius:6px;font-size:12px;color:#60a5fa">${items.length} registros</span>
+              <span style="background:#0a2e1a;border:1px solid #166534;padding:3px 10px;border-radius:6px;font-size:12px;color:#4ade80;font-weight:700">Prom: ${avg.toFixed(2)} lib/min</span>
+            </div>
+          </div>
+          <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <tr style="color:#475569;font-size:11px;border-bottom:1px solid #334155">
+              <td style="padding:4px 8px">Orden</td>
+              <td style="padding:4px 8px;text-align:right">Libros</td>
+              ${isPeg ? `<td style="padding:4px 8px;text-align:right;color:#c084fc">Hojas</td>` : ''}
+              <td style="padding:4px 8px;text-align:right">Tiempo</td>
+              <td style="padding:4px 8px;text-align:right">Lib/min</td>
+              <td style="padding:4px 8px;text-align:right">Fecha</td>
+            </tr>
+            ${tableRows}
+          </table>
+          </div>
+        </div>`;
+      }).join('');
+
+      return `<div style="padding:20px;max-width:1100px;margin:0 auto">
+        <h2 style="font-size:20px;font-weight:800;margin-bottom:4px">⏱ Stats de Producción</h2>
+        <div style="font-size:13px;color:#475569;margin-bottom:20px">Rendimiento real por estación — registrado con el escáner (libros/minuto)</div>
+        ${stationBlocks}
+      </div>`;
     }
 
     // ═══════════════════════════════════════════════════
@@ -1796,6 +1869,12 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
     function closeCfg() { showCfg = false; render(); }
     function openSync() { showSync = true; render(); }
     function closeSync() { showSync = false; render(); }
+    function setAutoSync(v) {
+      autoSync = v;
+      if (_autoSyncInt) { clearInterval(_autoSyncInt); _autoSyncInt = null; }
+      if (autoSync) { runSync(); _autoSyncInt = setInterval(runSync, 5 * 60 * 1000); }
+      render();
+    }
     function updCfg(el) { const path = el.dataset.cfg, val = +el.value, ks = path.split('.'); let o = cfg; for (let i = 0; i < ks.length - 1; i++)o = o[ks[i]]; o[ks[ks.length - 1]] = val; saveS(); }
 
     // ═══════════════════════════════════════════════════
