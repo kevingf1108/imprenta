@@ -1009,8 +1009,8 @@
       // Determina si es INT o PORT desde el status o asumimos "union_result" si solo hay 1 fila
       // En acabados normalmente ya vienen como trabajo unido
       const enc = detectEnc(acab, '');
-      // Órdenes de acabados empiezan siempre en Plastificado (primer paso del flujo)
-      const etapa = listo ? 'listo' : 'acab_pl';
+      // listo=TRUE en acabados → pasó a empaque (no terminado completamente)
+      const etapa = listo ? 'empaque' : 'acab_pl';
 
       return {
         id: `${itemNum}-A`,
