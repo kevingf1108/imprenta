@@ -1214,29 +1214,18 @@
     const ss=SpreadsheetApp.getActiveSpreadsheet();
     const item=e.parameter.item||'';
     const hoja=e.parameter.hoja||'';
-    const po=e.parameter.po||'';
     if(!item)return r('ERROR:falta item');
-    const sheets={impresion:findSheet(ss,['impres','impresi']),acabados:findSheet(ss,['acabad'])};
-    const sh=sheets[hoja.toLowerCase()];
+    const nombreHoja=hoja.toLowerCase()==='impresion'?'Impresion org':'Acabado org';
+    const sh=ss.getSheets().find(s=>s.getName().trim()===nombreHoja);
     if(!sh)return r('ERROR:hoja no encontrada');
     const data=sh.getDataRange().getValues();
-    const hdrs=data[0].map(h=>h.toString().toLowerCase());
-    const iItem=hdrs.findIndex(h=>h.includes('item'));
-    const iListo=hdrs.findIndex(h=>h.includes('listo'));
-    const iPo=hdrs.findIndex(h=>h==='p_o');
     let n=0;
-    for(let i=1;i&lt;data.length;i++){
-      const rItem=data[i][iItem]?.toString().trim();
-      const rPo=iPo>=0?data[i][iPo]?.toString().toLowerCase():'';
-      if(rItem===item&&(!po||iPo&lt;0||rPo.includes(po))&&iListo>=0){
-        sh.getRange(i+1,iListo+1).setValue(true);n++;
-      }
+    for(let i=data.length-1;i>=1;i--){
+      const rItem=data[i][3]?.toString().trim();
+      if(rItem===item){sh.deleteRow(i+1);n++;}
     }
     return r('OK:'+n);
   }catch(e){return r('ERROR:'+e.message);}
-}
-function findSheet(ss,words){
-  return ss.getSheets().find(s=>words.some(w=>s.getName().toLowerCase().includes(w)))||null;
 }
 function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentService.MimeType.TEXT);}</div>
       </div>
@@ -1485,6 +1474,22 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
         </div>
       </div>`: ''}
       <div id="est-area"></div>
+      ${!isNew && ord.tiemposReales && ord.tiemposReales.length ? `
+      <div style="margin-top:16px;background:#0a1200;border:1px solid #166534;border-radius:8px;padding:12px">
+        <div style="font-size:12px;color:#4ade80;font-weight:700;margin-bottom:8px">⏱ Tiempos reales por etapa</div>
+        <table style="width:100%;font-size:12px;border-collapse:collapse">
+          <tr style="color:#475569;border-bottom:1px solid #1e3a1e">
+            <td style="padding:3px 6px">Etapa</td>
+            <td style="padding:3px 6px;text-align:right">Minutos</td>
+            <td style="padding:3px 6px;text-align:right">Fecha</td>
+          </tr>
+          ${ord.tiemposReales.map(t => `<tr style="border-top:1px solid #1e3a1e">
+            <td style="padding:4px 6px;color:#94a3b8">${e(t.label||t.etapa)}</td>
+            <td style="padding:4px 6px;text-align:right;color:#4ade80;font-weight:700">${t.mins} min</td>
+            <td style="padding:4px 6px;text-align:right;color:#475569">${new Date(t.ts).toLocaleDateString('es',{day:'2-digit',month:'short'})}</td>
+          </tr>`).join('')}
+        </table>
+      </div>` : ''}
       <div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end;flex-wrap:wrap">
         ${modalId !== null ? `<button class="btn btn-d btn-sm" onclick="delOrd()">🗑 Eliminar</button>` : ''}
         <button class="btn btn-g" onclick="closeModal()">Cancelar</button>
@@ -1861,7 +1866,8 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
 
       // ── 3. Buscar la orden ───────────────────────────────────────
       // El ID en el sistema puede ser minúsculas/mayúsculas; buscar sin distinción
-      const o = orders.find(x => x.id.toUpperCase() === ordId || x.id === ordId);
+      // También busca por grupoId (número de item del Sheet, ej: 276454)
+      const o = orders.find(x => !x._merged && (x.id.toUpperCase() === ordId || x.id === ordId || (x.grupoId && x.grupoId === ordId)));
       if (!o) {
         showToast('❌ No encontrada: ' + ordId + (proc ? ' [' + proc.label + ']' : ''));
         return;
@@ -1915,6 +1921,10 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
       if (_scanTimers[timerKey]) {
         const mins = Math.round((Date.now() - _scanTimers[timerKey]) / 60000);
         durTxt = mins > 0 ? ' · ' + mins + ' min' : '';
+        // Guardar tiempo real en la orden
+        const tiempos = [...(orders[idx].tiemposReales || [])];
+        tiempos.push({ etapa: fromEtapa, label: procLabel, mins, ts: Date.now() });
+        orders[idx] = { ...orders[idx], tiemposReales: tiempos };
         delete _scanTimers[timerKey];
       }
 
