@@ -588,7 +588,7 @@
     //  ESTADO
     // ═══════════════════════════════════════════════════
     let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0));
-    let modalId = undefined, showCfg = false, showSync = false, tvTimer = null, tvSub = 'gantt', ganttZoom = 60;
+    let modalId = undefined, showCfg = false, showSync = false, tvTimer = null, tvSub = 'gantt', ganttZoom = 180;
     let searchQ = '';
     let autoSync = false, _autoSyncInt = null;
 
@@ -1725,7 +1725,6 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
         return gh + `<div class="gantt-row"><div class="gantt-label">${e(mach.label)}</div><div class="gantt-track">${bars}</div></div>`;
       }).join('');
       return `<div style="flex:1;overflow:hidden;display:flex;flex-direction:column;gap:8px">
-    <div style="background:#0f172a;border-radius:8px;padding:7px 12px;display:flex;flex-wrap:wrap;gap:8px">${legend}</div>
     <div style="background:#0a0f1e;border-radius:12px;flex:1;overflow:auto">
       <div style="display:flex"><div style="width:160px;flex-shrink:0;position:sticky;left:0;z-index:20;background:#060d1a;border-bottom:1px solid #334155;border-right:1px solid #1e293b"><div style="padding:6px 10px;font-size:11px;color:#64748b;font-weight:700">MÁQUINA</div></div>
         <div style="position:relative;height:30px;flex:1;min-width:${totalW}px;border-bottom:1px solid #334155;background:#060d1a">${timeMarkers}</div>
