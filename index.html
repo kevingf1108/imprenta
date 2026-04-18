@@ -1706,18 +1706,22 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
       const usedM = MAQUINAS.filter(m => usedIds.has(m.id));
       let lastG = '';
       const rows = usedM.map(mach => {
-        const mb = blocks.filter(b => b.machId === mach.id);
-        const bars = mb.map(b => {
+        const mb = blocks.filter(b => b.machId === mach.id).sort((a, b) => a.start - b.start);
+        const bars = mb.map((b, bi) => {
           // Posición = minutos laborales directamente (0 = inicio de jornada)
           const x = b.start * pxM, w = Math.max(b.dur * pxM, 6);
           const brd = isOD(b.fechaLimite) ? 'border:2px solid #ef4444' : isSoon(b.fechaLimite) ? 'border:2px solid #f59e0b' : '';
           const tipoBadge = b.tipo === 'int_sub' ? 'I·' : b.tipo === 'port_sub' ? 'P·' : b.tipo === 'union_result' ? '🔗' : '';
           const buddyBadge = b.buddyGroup ? '🔗' : '';
-          // Siempre mostrar ID de orden; mostrar nombre completo si hay espacio
           const shortId = e(b.ordId);
           const shortTit = b.titulo.length > 20 ? b.titulo.substring(0, 18) + '…' : b.titulo;
-          const barLabel = w > 90 ? `${tipoBadge}${buddyBadge}${shortId} ${e(shortTit)}` : w > 38 ? `${tipoBadge}${buddyBadge}${shortId}` : tipoBadge || buddyBadge;
           const buddyTip = b.buddyGroup ? `&#10;🔗 Grupo: ${b.buddyGroup} (espera piezas del mismo trabajo)` : '';
+          // Primera barra y es muy angosta → etiqueta a la izquierda
+          if (bi === 0 && w <= 38) {
+            const leftLabel = `<div style="position:absolute;left:${x - 4}px;top:50%;transform:translate(-100%,-50%);font-size:10px;color:#e2e8f0;white-space:nowrap;pointer-events:none;font-weight:700;background:#0f172a;padding:0 3px;border-radius:3px">${tipoBadge}${buddyBadge}${shortId}</div>`;
+            return leftLabel + `<div class="gantt-bar" style="left:${x}px;width:${w}px;background:${b.color};${brd};overflow:hidden;text-overflow:clip" title="${e(b.ordId)}: ${e(b.titulo)}&#10;${e(b.stepNom)} · ${mStr(b.dur)}${b.urgente ? '&#10;⚡ URGENTE' : ''}${buddyTip}"></div>`;
+          }
+          const barLabel = w > 90 ? `${tipoBadge}${buddyBadge}${shortId} ${e(shortTit)}` : w > 38 ? `${tipoBadge}${buddyBadge}${shortId}` : tipoBadge || buddyBadge;
           return `<div class="gantt-bar" style="left:${x}px;width:${w}px;background:${b.color};${brd};overflow:hidden;text-overflow:clip" title="${e(b.ordId)}: ${e(b.titulo)}&#10;${e(b.stepNom)} · ${mStr(b.dur)}${b.urgente ? '&#10;⚡ URGENTE' : ''}${buddyTip}">${barLabel}</div>`;
         }).join('');
         const gh = mach.grupo !== lastG ? `<div style="display:flex;border-bottom:1px solid #334155;background:#060d1a"><div style="width:160px;flex-shrink:0;padding:3px 10px;font-size:10px;color:#475569;font-weight:700;border-right:1px solid #1e293b">${e(mach.grupo)}</div><div style="flex:1"></div></div>` : '';
