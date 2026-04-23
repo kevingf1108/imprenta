@@ -1946,75 +1946,74 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
         }
       }
 
-      // ── 3. Buscar la orden ───────────────────────────────────────
-      // El ID en el sistema puede ser minúsculas/mayúsculas; buscar sin distinción
-      // También busca por grupoId (número de item del Sheet, ej: 276454)
-      const o = orders.find(x => !x._merged && (x.id.toUpperCase() === ordId || x.id === ordId || (x.grupoId && x.grupoId === ordId)));
-      if (!o) {
+      // ── 3. Buscar orden(es) ──────────────────────────────────────
+      // Primero busca coincidencia exacta por id o grupoId
+      // Si no encuentra, usa los primeros 5 dígitos del ordId para encontrar todas las órdenes del grupo
+      let matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
+        (x.id.toUpperCase() === ordId || x.id === ordId || (x.grupoId && x.grupoId === ordId)));
+
+      if (!matches.length) {
+        const prefix5 = ordId.replace(/\D/g, '').slice(0, 5);
+        if (prefix5.length === 5) {
+          matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
+            ((x.grupoId && x.grupoId.toString().startsWith(prefix5)) ||
+             x.id.replace(/\D/g, '').startsWith(prefix5)));
+        }
+      }
+
+      if (!matches.length) {
         showToast('❌ No encontrada: ' + ordId + (proc ? ' [' + proc.label + ']' : ''));
         return;
       }
-      if (o.etapa === 'listo' || o._merged) {
-        showToast('✅ Ya lista: ' + o.titulo.substring(0, 28));
-        return;
-      }
 
-      const procLabel = proc ? proc.label : (ACAB_STEPS.find(s => s.id === o.etapa)?.label || o.etapa);
-      const timerKey = o.id + (proc ? '_' + proc.pre : '');
+      const procLabel = proc ? proc.label : (ACAB_STEPS.find(s => s.id === matches[0].etapa)?.label || matches[0].etapa);
 
-      // ── 4. INICIA: mueve la orden A este paso y arranca timer ────
+      // ── 4. INICIA: mueve todas las órdenes del grupo a este paso ─
       if (isInicio) {
-        _scanTimers[timerKey] = Date.now();
-        // Si el proceso tiene etapa definida, mover la orden a esa etapa
-        if (proc && proc.etapa) {
-          const idx = orders.findIndex(x => x.id === o.id);
+        matches.forEach(o => {
+          const timerKey = o.id + (proc ? '_' + proc.pre : '');
+          _scanTimers[timerKey] = Date.now();
+          if (proc && proc.etapa) {
+            const idx = orders.findIndex(x => x.id === o.id);
+            orders[idx] = { ...orders[idx], etapa: proc.etapa };
+          }
+        });
+        saveS(); render();
+        showToast('⏱ Iniciando ' + procLabel + ': ' + matches.map(o => o.titulo.substring(0, 15)).join(', '));
+        showScanFlash(matches[0].titulo, '⏱ ' + procLabel + (matches.length > 1 ? ' ×' + matches.length : ''), '#60a5fa');
+        return;
+      }
+
+      // ── 5. PASA: avanza todas las órdenes del grupo ──────────────
+      let movedLabels = [];
+      matches.forEach(o => {
+        const idx = orders.findIndex(x => x.id === o.id);
+        const timerKey = o.id + (proc ? '_' + proc.pre : '');
+        if (proc && proc.etapa && o.etapa !== proc.etapa) {
           orders[idx] = { ...orders[idx], etapa: proc.etapa };
-          saveS(); render();
         }
-        showToast('⏱ Iniciando ' + procLabel + ': ' + o.titulo.substring(0, 22));
-        showScanFlash(o.titulo, '⏱ ' + procLabel, '#60a5fa');
-        return;
-      }
+        const oActual = orders[idx];
+        const flow = [ETAPAS[0], ...getAcabFlow(oActual).map(sid => ACAB_STEPS.find(s => s.id === sid)).filter(Boolean), ETAPAS[1], ETAPAS[2]];
+        const ei = flow.findIndex(et => et && et.id === oActual.etapa);
+        if (ei < 0 || ei >= flow.length - 1) return;
+        const nextStep = flow[ei + 1];
+        const fromEtapa = oActual.etapa;
+        if (_scanTimers[timerKey]) {
+          const mins = Math.round((Date.now() - _scanTimers[timerKey]) / 60000);
+          const tiempos = [...(oActual.tiemposReales || [])];
+          tiempos.push({ etapa: fromEtapa, label: procLabel, mins, ts: Date.now() });
+          orders[idx] = { ...orders[idx], tiemposReales: tiempos };
+          delete _scanTimers[timerKey];
+        }
+        orders[idx] = { ...orders[idx], etapa: nextStep.id };
+        if (nextStep.id === 'listo') markListoInSheets(orders[idx], fromEtapa);
+        movedLabels.push(nextStep.label);
+      });
 
-      // ── 5. PASA: avanza al siguiente paso ────────────────────────
-      // Si el proceso tiene etapa definida, posicionar ahí primero (corrección automática)
-      const idx = orders.findIndex(x => x.id === o.id);
-      if (proc && proc.etapa && o.etapa !== proc.etapa) {
-        orders[idx] = { ...orders[idx], etapa: proc.etapa };
-      }
-
-      const oActual = orders[idx];
-      const flow = [
-        ETAPAS[0],
-        ...getAcabFlow(oActual).map(sid => ACAB_STEPS.find(s => s.id === sid)).filter(Boolean),
-        ETAPAS[1],
-        ETAPAS[2],
-      ];
-      const ei = flow.findIndex(et => et && et.id === oActual.etapa);
-      if (ei < 0 || ei >= flow.length - 1) {
-        showToast('⚠️ ' + oActual.titulo.substring(0, 25) + ' ya está al final');
-        return;
-      }
-      const nextStep = flow[ei + 1];
-      const fromEtapa = oActual.etapa;
-
-      // Duración si hay timer de inicio
-      let durTxt = '';
-      if (_scanTimers[timerKey]) {
-        const mins = Math.round((Date.now() - _scanTimers[timerKey]) / 60000);
-        durTxt = mins > 0 ? ' · ' + mins + ' min' : '';
-        // Guardar tiempo real en la orden
-        const tiempos = [...(orders[idx].tiemposReales || [])];
-        tiempos.push({ etapa: fromEtapa, label: procLabel, mins, ts: Date.now() });
-        orders[idx] = { ...orders[idx], tiemposReales: tiempos };
-        delete _scanTimers[timerKey];
-      }
-
-      orders[idx] = { ...orders[idx], etapa: nextStep.id };
-      if (nextStep.id === 'listo') markListoInSheets(orders[idx], fromEtapa);
       autoMergeCheck(); saveS(); render();
-      showToast('✅ ' + oActual.titulo.substring(0, 20) + ' → ' + nextStep.label + durTxt);
-      showScanFlash(oActual.titulo, nextStep.label + durTxt, nextStep.color || '#f59e0b');
+      const nextLbl = movedLabels[0] || '';
+      showToast('✅ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl);
+      showScanFlash(matches[0].titulo, nextLbl + (matches.length > 1 ? ' ×' + matches.length : ''), '#f59e0b');
     }
 
     function showScanFlash(titulo, etapa, color) {
