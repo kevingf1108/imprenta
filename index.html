@@ -1145,13 +1145,13 @@
             countNuevas++;
             seenIds.add(newO.id);
           } else if (prev && prev.etapa !== 'impresion' && !prev._merged) {
-            // Ya existe y avanzó → conservar posición, no perder progreso
             countSinCambio++;
-            return { ...newO, etapa: prev.etapa };
+            return { ...newO, etapa: prev.etapa, tiemposReales: prev.tiemposReales || [] };
           } else {
             countActualizadas++;
           }
-          return newO;
+          // Siempre preservar tiemposReales aunque la orden se actualice
+          return prev ? { ...newO, tiemposReales: prev.tiemposReales || [] } : newO;
         });
 
         // Guardar historial actualizado
@@ -1924,7 +1924,9 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
       { pre: 'H', etapa: 'acab_pg', label: 'Hotmelt' },
     ];
 
-    const _scanTimers = {};
+    let _scanTimers = {};
+    try { _scanTimers = JSON.parse(localStorage.getItem('imp_timers') || '{}'); } catch {}
+    function saveTimers() { try { localStorage.setItem('imp_timers', JSON.stringify(_scanTimers)); } catch {} }
 
     function handleScan(raw) {
       // ── 1. Parsear sufijo i/p ────────────────────────────────────
@@ -1978,6 +1980,7 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
             orders[idx] = { ...orders[idx], etapa: proc.etapa };
           }
         });
+        saveTimers();
         saveS(); render();
         showToast('⏱ Iniciando ' + procLabel + ': ' + matches.map(o => o.titulo.substring(0, 15)).join(', '));
         showScanFlash(matches[0].titulo, '⏱ ' + procLabel + (matches.length > 1 ? ' ×' + matches.length : ''), '#60a5fa');
@@ -2004,6 +2007,7 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
           tiempos.push({ etapa: fromEtapa, label: procLabel, mins, ts: Date.now() });
           orders[idx] = { ...orders[idx], tiemposReales: tiempos };
           delete _scanTimers[timerKey];
+          saveTimers();
         }
         orders[idx] = { ...orders[idx], etapa: nextStep.id };
         if (nextStep.id === 'listo') markListoInSheets(orders[idx], fromEtapa);
