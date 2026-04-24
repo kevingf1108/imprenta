@@ -1289,7 +1289,7 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
       const fromEtapa = o.etapa;
       const idx = orders.findIndex(x => x.id === _dragId);
       orders[idx] = { ...orders[idx], etapa: colId };
-      if (colId === 'listo') markListoInSheets(orders[idx], fromEtapa);
+      if (colId === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
       autoMergeCheck(); saveS(); render();
       _dragId = null;
     }
@@ -1858,13 +1858,13 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
         const target = boardEt[bi + dir];
         if (!target) return;
         orders[idx] = { ...orders[idx], etapa: target.id };
-        if (target.id === 'listo') markListoInSheets(orders[idx], fromEtapa);
+        if (target.id === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
         autoMergeCheck(); saveS(); render(); return;
       }
       const ni = ei + dir;
       if (ni < 0 || ni >= flow.length) return;
       orders[idx] = { ...orders[idx], etapa: flow[ni].id };
-      if (flow[ni].id === 'listo') markListoInSheets(orders[idx], fromEtapa);
+      if (flow[ni].id === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
       autoMergeCheck();
       saveS(); render();
     }
@@ -2010,7 +2010,7 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
           saveTimers();
         }
         orders[idx] = { ...orders[idx], etapa: nextStep.id };
-        if (nextStep.id === 'listo') markListoInSheets(orders[idx], fromEtapa);
+        if (nextStep.id === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
         movedLabels.push(nextStep.label);
       });
 
