@@ -587,7 +587,7 @@
     // ═══════════════════════════════════════════════════
     //  ESTADO
     // ═══════════════════════════════════════════════════
-    let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0));
+    let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [];
     let modalId = undefined, showCfg = false, showSync = false, tvTimer = null, tvSub = 'gantt', ganttZoom = 180;
     let searchQ = '';
     let autoSync = false, _autoSyncInt = null;
@@ -615,19 +615,34 @@
           orders = [];
           cfg = JSON.parse(JSON.stringify(CFG0));
         }
+        const rawSH = data && data.statsHistory;
+        statsHistory = rawSH ? (Array.isArray(rawSH) ? rawSH : Object.values(rawSH)).filter(Boolean) : [];
+        // Migrar tiemposReales de órdenes existentes que aún no estén en el historial
+        const knownTs = new Set(statsHistory.map(s => s.ts));
+        let migrated = false;
+        orders.forEach(o => {
+          (o.tiemposReales || []).forEach(t => {
+            if (t.ts && !knownTs.has(t.ts)) {
+              statsHistory.push({ ordId: o.id, titulo: o.titulo || o.baseTitulo || o.id, etapa: t.etapa, label: t.label || t.etapa, mins: t.mins, cantidad: o.cantidad || 0, hojas: o.tabloidesSrc || 0, ts: t.ts });
+              knownTs.add(t.ts);
+              migrated = true;
+            }
+          });
+        });
+        if (migrated) saveS();
         autoMergeCheck();
         render();
       }, err => {
         console.error('Firebase error:', err);
         // Fallback a localStorage si no hay conexión
-        try { const o = localStorage.getItem('imp_o'), c = localStorage.getItem('imp_c'); orders = o ? JSON.parse(o) : []; cfg = c ? JSON.parse(c) : JSON.parse(JSON.stringify(CFG0)); } catch { orders = []; cfg = JSON.parse(JSON.stringify(CFG0)); }
+        try { const o = localStorage.getItem('imp_o'), c = localStorage.getItem('imp_c'), sh = localStorage.getItem('imp_sh'); orders = o ? JSON.parse(o) : []; cfg = c ? JSON.parse(c) : JSON.parse(JSON.stringify(CFG0)); statsHistory = sh ? JSON.parse(sh) : []; } catch { orders = []; cfg = JSON.parse(JSON.stringify(CFG0)); statsHistory = []; }
         autoMergeCheck(); render();
       });
     }
     function saveS() {
-      _ref.set({ orders, cfg }).catch(e => {
+      _ref.set({ orders, cfg, statsHistory }).catch(e => {
         // Fallback a localStorage si no hay conexión
-        try { localStorage.setItem('imp_o', JSON.stringify(orders)); localStorage.setItem('imp_c', JSON.stringify(cfg)); } catch { }
+        try { localStorage.setItem('imp_o', JSON.stringify(orders)); localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); } catch { }
       });
     }
 
@@ -663,8 +678,8 @@
       const ppt = +(o.ppt || c.pptDefault || 8);
       const esPort = (tipo === 'port_sub');
       // Tabloides: usar valor directo de la hoja si existe, si no calcular desde páginas
-      const tabInt = esPort ? 0 : (o.tabloidesSrc || (P > 0 ? Math.ceil(Q * P / ppt) : 0));
-      const tabPort = esPort ? (o.tabloidesSrc || Math.ceil(Q / portPpt)) : Math.ceil(Q / portPpt);
+      const tabInt = esPort ? 0 : (o.tabloidesSrc || 0);
+      const tabPort = esPort ? (o.tabloidesSrc || 0) : Math.ceil(Q / portPpt);
       if (!Q || (!tabInt && tipo !== 'port_sub' && tipo !== 'union_result')) return { pasos: [], total: 0, paralelo: 0, tabInt: 0, tabPort: 0 };
       const ppmI = col ? (gru ? m.color_grueso : m.color_normal) : m.byn_fast;
       const ppmP = gru ? m.color_grueso : m.color_normal;
@@ -962,7 +977,7 @@
       const desc = col(row, 'description', 'descripcion', 'desc');
       const colorBn = col(row, 'color_bn', 'color', 'tipo color');
       const papel = col(row, 'papel', 'paper', 'papel/cartulina');
-      const tabs = parseInt(col(row, 'hojas', 'tabloides', 'tabs', 'tabloids')) || 0;
+      const tabs = parseInt((col(row, 'tabloides') || '').replace(/[^\d]/g, '')) || 0;
       const cantidad = parseInt(col(row, 'cantidad', 'quantity', 'qty', 'cant')) || 0;
 
       if (!nombre || !itemNum) return null;
@@ -1079,12 +1094,13 @@
         let countImp = 0, countAcab = 0;
 
         // Procesa hoja de Impresión
+        let _debugImp = [];
         if (respImp && respImp.ok) {
           const text = await respImp.text();
           const rows = parseCSV(text);
           rows.forEach(row => {
             const o = mapImpRow(row);
-            if (o) newOrders.push(o);
+            if (o) { newOrders.push(o); _debugImp.push({ id: o.id, tabs: o.tabloidesSrc }); }
           });
           countImp = newOrders.length;
         }
@@ -1102,7 +1118,7 @@
             if (o) newOrders.push(o);
           });
           countAcab = newOrders.length - countImp;
-          // Actualiza cantidades en órdenes de Impresión
+          // Actualiza cantidades en órdenes de Impresión (tabloidesSrc viene directo de la hoja de Impresión)
           newOrders = newOrders.map(o => {
             if (o._fromSheets && o.grupoId) {
               const itemKey = o.grupoId;
@@ -1141,12 +1157,15 @@
           const prev = existingSheets.find(x => x.id === newO.id);
           const yaVista = seenIds.has(newO.id);
 
+          // Si la orden ya fue movida a acabados o más adelante, no regresar a impresión
+          if (prev && prev.etapa !== 'impresion' && !prev._merged) {
+            if (!yaVista) { countNuevas++; seenIds.add(newO.id); } else { countSinCambio++; }
+            return { ...newO, etapa: prev.etapa, tiemposReales: prev.tiemposReales || [] };
+          }
+
           if (!yaVista) {
             countNuevas++;
             seenIds.add(newO.id);
-          } else if (prev && prev.etapa !== 'impresion' && !prev._merged) {
-            countSinCambio++;
-            return { ...newO, etapa: prev.etapa, tiemposReales: prev.tiemposReales || [] };
           } else {
             countActualizadas++;
           }
@@ -1169,7 +1188,11 @@
             <span style="background:#0a1f3a;border:1px solid #1d4ed8;padding:4px 10px;border-radius:6px;color:#60a5fa">🔄 ${countActualizadas} actualizadas</span>
             <span style="background:#0f172a;border:1px solid #334155;padding:4px 10px;border-radius:6px;color:#64748b">✓ ${countSinCambio} sin cambio</span>
           </div>
-          <div style="margin-top:6px;font-size:11px;color:#475569">Total en sistema: ${newOrders.length} · Historial acumulado: ${seenIds.size} órdenes</div>`;
+          <div style="margin-top:6px;font-size:11px;color:#475569">Total en sistema: ${newOrders.length} · Historial acumulado: ${seenIds.size} órdenes</div>
+          <details style="margin-top:10px"><summary style="font-size:11px;color:#64748b;cursor:pointer">🔍 Ver tabloides leídos de Impresión</summary>
+          <div style="margin-top:6px;max-height:180px;overflow-y:auto;background:#0f172a;border-radius:6px;padding:8px;font-size:11px;font-family:monospace">
+          ${_debugImp.map(d => `<div style="color:${d.tabs===0?'#ef4444':'#94a3b8'}">${e(d.id)} → <b style="color:${d.tabs===0?'#ef4444':'#4ade80'}">${d.tabs} tab</b>${d.tabs===0?' ⚠️ NO ENCONTRÓ COLUMNA':''}${d.tabs>0&&d.tabs<100?' ⚠️ NÚMERO SOSPECHOSO':''}</div>`).join('')}
+          </div></details>`;
         setTimeout(() => { showSync = false; render(); }, 3000);
 
       } catch (err) {
@@ -1210,25 +1233,36 @@
           4. "Ejecutar como": <b style="color:#94a3b8">Yo</b> · "Quién tiene acceso": <b style="color:#94a3b8">Cualquier usuario</b><br>
           5. Copia la URL y pégala en <b style="color:#94a3b8">⚙️ Configuración → URL Apps Script</b>
         </div>
-        <div style="margin-top:10px;background:#020617;border-radius:6px;padding:10px;font-size:11px;color:#4ade80;font-family:monospace;white-space:pre-wrap;max-height:160px;overflow-y:auto">function doGet(e){
+        <div style="margin-top:10px;background:#020617;border-radius:6px;padding:10px;font-size:11px;color:#4ade80;font-family:monospace;white-space:pre-wrap;max-height:200px;overflow-y:auto">function doGet(e){
   try{
     const ss=SpreadsheetApp.getActiveSpreadsheet();
-    const item=e.parameter.item||'';
-    const hoja=e.parameter.hoja||'';
+    const item=(e.parameter.item||'').toString().trim();
+    const hoja=(e.parameter.hoja||'').toLowerCase();
+    const po=(e.parameter.po||'').toLowerCase();
     if(!item)return r('ERROR:falta item');
-    const nombreHoja=hoja.toLowerCase()==='impresion'?'Impresion org':'Acabado org';
+    const nombreHoja=hoja==='impresion'?'Impresion org':'Acabado org';
     const sh=ss.getSheets().find(s=>s.getName().trim()===nombreHoja);
-    if(!sh)return r('ERROR:hoja no encontrada');
+    if(!sh)return r('ERROR:hoja "'+nombreHoja+'" no encontrada');
     const data=sh.getDataRange().getValues();
+    const heads=data[0].map(h=>h.toString().toLowerCase().trim());
+    const ci=heads.findIndex(h=>['# item','item','#item'].includes(h));
+    const cl=heads.findIndex(h=>['listo','done','ready'].includes(h));
+    const cp=heads.findIndex(h=>['p_o','po','tipo'].includes(h));
+    if(ci<0)return r('ERROR:no encontré columna "# item"');
+    if(cl<0)return r('ERROR:no encontré columna "listo"');
     let n=0;
-    for(let i=data.length-1;i>=1;i--){
-      const rItem=data[i][3]?.toString().trim();
-      if(rItem===item){sh.deleteRow(i+1);n++;}
+    for(let i=1;i<data.length;i++){
+      const rItem=data[i][ci]?.toString().trim();
+      const rPO=cp>=0?data[i][cp]?.toString().toLowerCase():'';
+      if(rItem!==item)continue;
+      if(po&&rPO&&!rPO.includes(po))continue;
+      sh.getRange(i+1,cl+1).setValue(true);
+      n++;
     }
-    return r('OK:'+n);
-  }catch(e){return r('ERROR:'+e.message);}
+    return r('OK:'+n+' filas marcadas');
+  }catch(ex){return r('ERROR:'+ex.message);}
 }
-function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentService.MimeType.TEXT);}</div>
+function r(m){return ContentService.createTextOutput(m).setMimeType(ContentService.MimeType.TEXT);}</div>
       </div>
       <div id="sync-log" style="min-height:24px;font-size:13px;margin-bottom:14px"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
@@ -1311,7 +1345,7 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
       const cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
       const cl = cp < 60 ? '✅ Aceptar más' : cp < 85 ? '⚠️ Limitado' : '🔴 Al límite';
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.5</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -1341,19 +1375,7 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
     //  STATS
     // ═══════════════════════════════════════════════════
     function statsHTML() {
-      const rows = [];
-      orders.forEach(o => {
-        if (!o.tiemposReales || !o.tiemposReales.length) return;
-        o.tiemposReales.forEach(t => {
-          if (!t.mins || t.mins <= 0) return;
-          const hojas = o.tabloidesSrc || 0;
-          rows.push({
-            ordId: o.id, titulo: o.titulo || o.baseTitulo || o.id,
-            etapa: t.etapa, label: t.label || t.etapa,
-            mins: t.mins, cantidad: o.cantidad || 0, hojas, ts: t.ts,
-          });
-        });
-      });
+      const rows = statsHistory.filter(r => r.mins && r.mins > 0);
       if (!rows.length) return `<div style="padding:60px;text-align:center">
         <div style="font-size:48px;margin-bottom:16px">⏱</div>
         <div style="font-size:18px;font-weight:700;color:#64748b">Sin datos de escaneo aún</div>
@@ -1455,12 +1477,15 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
       const tipoBadge = tipo === 'int_sub' ? `<span class="badge" style="background:#818cf855;color:#818cf8">📄 INT</span>`
         : tipo === 'port_sub' ? `<span class="badge" style="background:#c084fc55;color:#c084fc">🎨 PORT</span>`
           : tipo === 'union_result' ? `<span class="badge" style="background:#4ade8033;color:#4ade80">🔗 Unido</span>` : '';
+      const activeTimer = Object.keys(_scanTimers).find(k => k === o.id || k.startsWith(o.id + '_'));
+      const timerBadge = activeTimer ? `<span class="badge" style="background:#ef444422;color:#ef4444;animation:pulse 1s infinite">⏱ EN PROCESO</span>` : '';
       const cardCls = tipo === 'int_sub' ? 'int-card' : tipo === 'port_sub' ? 'port-card' : tipo === 'union_result' ? 'merged-card' : '';
       return `<div class="card ${cardCls}${o.urgente ? ' urg' : ''}" onclick="openOrd('${e(o.id)}')" draggable="true" ondragstart="onDragStart(event,'${e(o.id)}')" ondragend="onDragEnd(event)">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
       <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
         <span style="font-size:11px;color:#475569;font-weight:600">${e(o.id)}</span>
         ${tipoBadge}
+        ${timerBadge}
         ${o.urgente ? `<span class="badge" style="background:#ef444433;color:#ef4444">⚡</span>` : ''}
       </div>
       ${!compact ? `<div style="display:flex;gap:1px">
@@ -1493,6 +1518,7 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
         baseTitulo: g('f_tit'), titulo: g('f_tit'),
         cliente: g('f_cli'), cantidad: +g('f_qty') || 0, paginas: +g('f_pag') || 0,
         ppt: +g('f_ppt') || 8, portaPpt: +g('f_portappt') || 2,
+        tabloidesSrc: +g('f_tabs') || 0,
         tipoInteriores: g('f_tint'), gramaje: g('f_gram'), tipoEncuadernacion: g('f_enc'),
         fechaLimite: g('f_dl'), urgente: gc('f_urg'), notas: g('f_not'),
         _split: gc('f_split'),
@@ -1522,6 +1548,10 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
       <div class="g2">
         <div><span class="lbl">📐 Páginas por tabloide</span><input class="inp" id="f_ppt" type="number" min="1" max="32" value="${e(ord.ppt || 8)}" oninput="updEst()"><div style="font-size:10px;color:#475569;margin-top:2px">4 por cara × 2 caras = 8</div></div>
         <div><span class="lbl">📐 Portadas por tabloide</span><input class="inp" id="f_portappt" type="number" min="1" max="8" value="${e(ord.portaPpt || 2)}" oninput="updEst()"></div>
+      </div>
+      <div>
+        <span class="lbl">🗂 Tabloides interiores <span style="color:#475569;font-weight:400">(de Sheets — corregir si el sync trae valor viejo)</span></span>
+        <input class="inp" id="f_tabs" type="number" min="0" value="${e(ord.tabloidesSrc || 0)}" oninput="updEst()">
       </div>
       <span class="lbl">Tipo de interiores</span>
       <div style="display:flex;gap:6px;margin-top:6px"><input type="hidden" id="f_tint" value="${e(ord.tipoInteriores || 'byn')}">
@@ -1579,8 +1609,12 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
 
     function updEst() {
       const o = getFormOrder(), el = document.getElementById('est-area');
-      if (!el) return; if (!o.cantidad || (!(o.tabloidesSrc || o.paginas))) { el.innerHTML = ''; return; }
-      const t = calcT({ ...o, tipo: 'normal' }, cfg); if (!t.total) { el.innerHTML = ''; return; }
+      if (!el) return;
+      // Preservar tabloidesSrc y tipo de la orden existente (viene de Sheets, no está en el formulario)
+      const existing = (modalId != null) ? (orders.find(x => x.id === modalId) || {}) : {};
+      const merged = { ...existing, ...o };
+      if (!merged.cantidad || (!(merged.tabloidesSrc || merged.paginas))) { el.innerHTML = ''; return; }
+      const t = calcT({ ...merged, tipo: existing.tipo || 'normal' }, cfg); if (!t.total) { el.innerHTML = ''; return; }
       const isSplit = document.getElementById('f_split')?.checked;
       const active = orders.filter(x => x.etapa !== 'listo' && !x._merged && x.id !== modalId);
       const qMin = active.reduce((s, x) => s + calcT(x, cfg).paralelo, 0);
@@ -1805,6 +1839,9 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
         <span class="lbl" style="margin-top:0;color:#64748b">URL del Google Apps Script Web App</span>
         <input class="inp" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.scriptUrl || '')}" oninput="cfg.scriptUrl=this.value;saveS()">
         <div style="font-size:11px;color:#475569;margin-top:6px">Cuando avances una orden con ▶, automáticamente marcará <b style="color:#4ade80">Listo = TRUE</b> en tu hoja de Google Sheets.</div>
+        <span class="lbl" style="margin-top:12px;color:#f59e0b">URL Script — Log HE / DI / T (Terminado)</span>
+        <input class="inp" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.scanLogUrl || '')}" oninput="cfg.scanLogUrl=this.value;saveS()">
+        <div style="font-size:11px;color:#475569;margin-top:6px">Al escanear <b style="color:#f59e0b">HE</b>, <b style="color:#f59e0b">DI</b> o <b style="color:#f59e0b">T</b>, el app lee la última fila de tu hoja de producción y la manda a este script para que la escriba en Sheets. No mueve ninguna orden.</div>
         <div style="font-size:11px;color:#166534;margin-top:4px">📋 Ver instrucciones para crear el script → botón 🔄 Sheets → "Cómo configurar"</div>
       </div>
       ${secs.map(sec => `<div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px"><div style="font-size:12px;color:${sec.color};font-weight:700;letter-spacing:.5px;margin-bottom:4px">${sec.title}</div><div class="g2">${sec.items.map(([l, p, s]) => inp(l, p, s)).join('')}</div></div>`).join('')}
@@ -1909,30 +1946,35 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
     // Orden: de más largo a más corto para evitar ambigüedad (CDC antes que CC; EM antes que E)
     const SCAN_PROC = [
       { pre: 'CDC', etapa: 'acab_cdc', label: 'Cinta Doble Cara' },
-      { pre: 'PL', etapa: 'acab_pl', label: 'Plastificado' },
-      { pre: 'CI', etapa: 'acab_ci', label: 'Corte Inicial' },
-      { pre: 'CF', etapa: 'acab_cf', label: 'Corte Final' },
-      { pre: 'CC', etapa: 'acab_cc', label: 'Corte Cartón' },
-      { pre: 'PD', etapa: 'acab_ap', label: 'Armado Portada' },
-      { pre: 'MT', etapa: 'acab_ms', label: 'Mesa de Trabajo' },
-      { pre: 'EM', etapa: 'empaque', label: 'Empaque' },
-      { pre: 'PI', etapa: 'acab_pi', label: 'Ponchado Int' },
-      { pre: 'PP', etapa: 'acab_pp', label: 'Ponchado Port' },
-      { pre: 'ES', etapa: 'acab_es', label: 'Espiralado' },
-      { pre: 'E', etapa: 'acab_en', label: 'Engrapado' },
-      { pre: 'T', etapa: 'acab_te', label: 'Termo' },
-      { pre: 'H', etapa: 'acab_pg', label: 'Hotmelt' },
+      { pre: 'CI',  etapa: 'acab_ci',  label: 'Corte Inicial' },
+      { pre: 'CF',  etapa: 'acab_cf',  label: 'Corte Final' },
+      { pre: 'CC',  etapa: 'acab_cc',  label: 'Corte Cartón' },
+      { pre: 'PD',  etapa: 'acab_ap',  label: 'Armado Portada' },
+      { pre: 'MT',  etapa: 'acab_ms',  label: 'Mesa de Trabajo' },
+      { pre: 'PP',  etapa: 'acab_pp',  label: 'Ponchado Port' },
+      { pre: 'PI',  etapa: 'acab_pi',  label: 'Ponchado Int' },
+      { pre: 'P',   etapa: 'acab_pl',  label: 'Plastificado' },
+      { pre: 'ES',  etapa: 'acab_es',  label: 'Espiralado' },
+      { pre: 'EN',  etapa: 'acab_en',  label: 'Engrapado' },
+      { pre: 'E',   etapa: 'empaque',  label: 'Empaque' },
+      { pre: 'I',   etapa: 'impresion',label: 'Impresión' },
+      { pre: 'H',   etapa: 'acab_pg',  label: 'Hotmelt' },
     ];
+    // Prefijos especiales: NO avanzan el kanban, solo mandan la última fila de la hoja a Sheets
+    const SCAN_LOG_PRE = ['HE', 'DI', 'T'];
 
     let _scanTimers = {};
     try { _scanTimers = JSON.parse(localStorage.getItem('imp_timers') || '{}'); } catch {}
     function saveTimers() { try { localStorage.setItem('imp_timers', JSON.stringify(_scanTimers)); } catch {} }
 
     function handleScan(raw) {
+      const raw2 = raw.trim().toUpperCase();
+      // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
+      const logPre = SCAN_LOG_PRE.find(p => raw2.startsWith(p));
+      if (logPre) { sendScanToSheets(raw2); return; }
       // ── 1. Parsear sufijo i/p ────────────────────────────────────
       // i = Inicia (llega a este paso, arranca timer)
       // p = Pasa   (terminó este paso, avanza al siguiente)
-      const raw2 = raw.trim().toUpperCase();
       const suffix = raw2.slice(-1);
       const isInicio = suffix === 'I';
       const isPaso = suffix === 'P';
@@ -2003,14 +2045,17 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
         const fromEtapa = oActual.etapa;
         if (_scanTimers[timerKey]) {
           const mins = Math.round((Date.now() - _scanTimers[timerKey]) / 60000);
+          const ts = Date.now();
           const tiempos = [...(oActual.tiemposReales || [])];
-          tiempos.push({ etapa: fromEtapa, label: procLabel, mins, ts: Date.now() });
+          tiempos.push({ etapa: fromEtapa, label: procLabel, mins, ts });
           orders[idx] = { ...orders[idx], tiemposReales: tiempos };
+          statsHistory.push({ ordId: oActual.id, titulo: oActual.titulo || oActual.baseTitulo || oActual.id, etapa: fromEtapa, label: procLabel, mins, cantidad: oActual.cantidad || 0, hojas: oActual.tabloidesSrc || 0, ts });
           delete _scanTimers[timerKey];
           saveTimers();
         }
         orders[idx] = { ...orders[idx], etapa: nextStep.id };
         if (nextStep.id === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
+        if (proc && proc.logScan) fetchLastSalidaRow(proc.label);
         movedLabels.push(nextStep.label);
       });
 
@@ -2018,6 +2063,13 @@ function r(msg){return ContentService.createTextOutput(msg).setMimeType(ContentS
       const nextLbl = movedLabels[0] || '';
       showToast('✅ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl);
       showScanFlash(matches[0].titulo, nextLbl + (matches.length > 1 ? ' ×' + matches.length : ''), '#f59e0b');
+    }
+
+    function sendScanToSheets(scanStr) {
+      const url = cfg.scanLogUrl || cfg.scriptUrl;
+      if (!url) { showToast('⚠️ Configura URL del script en ⚙️ Configuración'); return; }
+      fetch(`${url}?scan=${encodeURIComponent(scanStr)}`, { mode: 'no-cors' }).catch(() => {});
+      showToast('📊 Enviado: ' + scanStr);
     }
 
     function showScanFlash(titulo, etapa, color) {
