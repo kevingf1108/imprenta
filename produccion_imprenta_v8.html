@@ -1969,6 +1969,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
 
     function handleScan(raw) {
       const raw2 = raw.trim().toUpperCase();
+      showToast('🔍 ' + raw2);
       // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
       const logPre = SCAN_LOG_PRE.find(p => raw2.startsWith(p));
       if (logPre) { sendScanToSheets(raw2); return; }
