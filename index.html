@@ -1345,7 +1345,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
       const cl = cp < 60 ? '✅ Aceptar más' : cp < 85 ? '⚠️ Limitado' : '🔴 Al límite';
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.5</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.6</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -1947,18 +1947,18 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     const SCAN_PROC = [
       { pre: 'CDC', etapa: 'acab_cdc', label: 'Cinta Doble Cara' },
       { pre: 'CI',  etapa: 'acab_ci',  label: 'Corte Inicial' },
-      { pre: 'CF',  etapa: 'acab_cf',  label: 'Corte Final' },
+      { pre: 'CF',  etapa: 'acab_cf',  label: 'Corte Final',        grupo: true },
       { pre: 'CC',  etapa: 'acab_cc',  label: 'Corte Cartón' },
       { pre: 'PD',  etapa: 'acab_ap',  label: 'Armado Portada' },
-      { pre: 'MT',  etapa: 'acab_ms',  label: 'Mesa de Trabajo' },
+      { pre: 'MT',  etapa: 'acab_ms',  label: 'Mesa de Trabajo',    grupo: true },
       { pre: 'PP',  etapa: 'acab_pp',  label: 'Ponchado Port' },
       { pre: 'PI',  etapa: 'acab_pi',  label: 'Ponchado Int' },
       { pre: 'P',   etapa: 'acab_pl',  label: 'Plastificado' },
-      { pre: 'ES',  etapa: 'acab_es',  label: 'Espiralado' },
-      { pre: 'EN',  etapa: 'acab_en',  label: 'Engrapado' },
-      { pre: 'E',   etapa: 'empaque',  label: 'Empaque' },
+      { pre: 'ES',  etapa: 'acab_es',  label: 'Espiralado',         grupo: true },
+      { pre: 'EN',  etapa: 'acab_en',  label: 'Engrapado',          grupo: true },
+      { pre: 'E',   etapa: 'empaque',  label: 'Empaque',            grupo: true },
       { pre: 'I',   etapa: 'impresion',label: 'Impresión' },
-      { pre: 'H',   etapa: 'acab_pg',  label: 'Hotmelt' },
+      { pre: 'H',   etapa: 'acab_pg',  label: 'Hotmelt',            grupo: true },
     ];
     // Prefijos especiales: NO avanzan el kanban, solo mandan la última fila de la hoja a Sheets
     const SCAN_LOG_PRE = ['HE', 'DI', 'T'];
@@ -1991,16 +1991,34 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       }
 
       // ── 3. Buscar orden(es) ──────────────────────────────────────
-      // Primero busca coincidencia exacta por id o grupoId
-      // Si no encuentra, usa los primeros 5 dígitos del ordId para encontrar todas las órdenes del grupo
-      let matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
-        (x.id.toUpperCase() === ordId || x.id === ordId || (x.grupoId && x.grupoId === ordId)));
+      // grupo:true  → 5 dígitos, mueve todo el grupo (pegado y después)
+      // grupo:false → 6 dígitos exactos, mueve SOLO esa orden (impresión, CI, plastificado…)
+      const esGrupo = proc ? !!proc.grupo : false;
+      const digits6 = ordId.replace(/\D/g, '');
+      const prefix5 = digits6.slice(0, 5);
 
-      if (!matches.length) {
-        const prefix5 = ordId.replace(/\D/g, '').slice(0, 5);
-        if (prefix5.length === 5) {
+      let matches;
+      if (esGrupo && prefix5.length >= 5) {
+        // Pasos de unión: busca todo el grupo por primeros 5 dígitos
+        matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
+          ((x.grupoId && x.grupoId.toString().replace(/\D/g, '').startsWith(prefix5)) ||
+           x.id.replace(/\D/g, '').startsWith(prefix5)));
+      } else {
+        // Pasos individuales: coincidencia por 6 dígitos exactos (id o grupoId)
+        matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
+          (x.id.replace(/\D/g, '') === digits6 ||
+           (x.grupoId && x.grupoId.toString().replace(/\D/g, '') === digits6)));
+        // Si hay varios (INT + PORT del mismo grupo), quedarse solo con los del paso actual
+        if (matches.length > 1 && proc) {
+          const enEstePaso = matches.filter(o => o.etapa === proc.etapa);
+          if (enEstePaso.length > 0) matches = enEstePaso;
+        }
+        // Si aún hay varios (ambos en el mismo paso), tomar solo el primero
+        if (matches.length > 1) matches = [matches[0]];
+        // Fallback: si no encontró nada, intenta 5 dígitos
+        if (!matches.length && prefix5.length === 5) {
           matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
-            ((x.grupoId && x.grupoId.toString().startsWith(prefix5)) ||
+            ((x.grupoId && x.grupoId.toString().replace(/\D/g, '').startsWith(prefix5)) ||
              x.id.replace(/\D/g, '').startsWith(prefix5)));
         }
       }
