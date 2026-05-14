@@ -1994,7 +1994,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       // grupo:true  → 5 dígitos, mueve todo el grupo (pegado y después)
       // grupo:false → 6 dígitos exactos, mueve SOLO esa orden (impresión, CI, plastificado…)
       const esGrupo = proc ? !!proc.grupo : false;
-      const digits6 = ordId.replace(/\D/g, '');
+      // Tomar solo el primer grupo continuo de dígitos (ignora %W y otros caracteres del escáner)
+      const digits6 = (ordId.match(/\d+/) || [''])[0] || ordId.replace(/\D/g, '');
       const prefix5 = digits6.slice(0, 5);
 
       let matches;
