@@ -2023,6 +2023,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         }
       }
 
+      showToast('🔍 ' + matches.length + ' orden(es): ' + matches.map(x => x.id).join(', '));
+
       if (!matches.length) {
         showToast('❌ No encontrada: ' + ordId + (proc ? ' [' + proc.label + ']' : ''));
         return;
