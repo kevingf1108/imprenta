@@ -1992,29 +1992,33 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
 
       // ── 3. Buscar orden(es) ──────────────────────────────────────
       // grupo:true  → 5 dígitos, mueve todo el grupo (pegado y después)
-      // grupo:false → 6 dígitos exactos, mueve solo esa orden (impresión, CI, plastificado…)
+      // grupo:false → 6 dígitos exactos, mueve SOLO esa orden (impresión, CI, plastificado…)
       const esGrupo = proc ? !!proc.grupo : false;
-      const prefix5 = ordId.replace(/\D/g, '').slice(0, 5);
+      const digits6 = ordId.replace(/\D/g, '');
+      const prefix5 = digits6.slice(0, 5);
 
       let matches;
       if (esGrupo && prefix5.length >= 5) {
         // Pasos de unión: busca todo el grupo por primeros 5 dígitos
         matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
-          ((x.grupoId && x.grupoId.toString().startsWith(prefix5)) ||
+          ((x.grupoId && x.grupoId.toString().replace(/\D/g, '').startsWith(prefix5)) ||
            x.id.replace(/\D/g, '').startsWith(prefix5)));
       } else {
-        // Pasos individuales: busca coincidencia exacta por id o grupoId
+        // Pasos individuales: coincidencia por 6 dígitos exactos (id o grupoId)
         matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
-          (x.id.toUpperCase() === ordId || x.id === ordId || (x.grupoId && x.grupoId === ordId)));
-        // Si el grupoId devuelve varios (INT + PORT), quedarse solo con los que están en este paso
-        if (!esGrupo && matches.length > 1 && proc) {
+          (x.id.replace(/\D/g, '') === digits6 ||
+           (x.grupoId && x.grupoId.toString().replace(/\D/g, '') === digits6)));
+        // Si hay varios (INT + PORT del mismo grupo), quedarse solo con los del paso actual
+        if (matches.length > 1 && proc) {
           const enEstePaso = matches.filter(o => o.etapa === proc.etapa);
           if (enEstePaso.length > 0) matches = enEstePaso;
         }
-        // Fallback: si no encontró nada por exacto, intenta 5 dígitos
+        // Si aún hay varios (ambos en el mismo paso), tomar solo el primero
+        if (matches.length > 1) matches = [matches[0]];
+        // Fallback: si no encontró nada, intenta 5 dígitos
         if (!matches.length && prefix5.length === 5) {
           matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
-            ((x.grupoId && x.grupoId.toString().startsWith(prefix5)) ||
+            ((x.grupoId && x.grupoId.toString().replace(/\D/g, '').startsWith(prefix5)) ||
              x.id.replace(/\D/g, '').startsWith(prefix5)));
         }
       }
