@@ -2015,12 +2015,6 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         }
         // Si aún hay varios (ambos en el mismo paso), tomar solo el primero
         if (matches.length > 1) matches = [matches[0]];
-        // Fallback: si no encontró nada, intenta 5 dígitos
-        if (!matches.length && prefix5.length === 5) {
-          matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
-            ((x.grupoId && x.grupoId.toString().replace(/\D/g, '').startsWith(prefix5)) ||
-             x.id.replace(/\D/g, '').startsWith(prefix5)));
-        }
       }
 
       showToast('🔍 ' + matches.length + ' orden(es): ' + matches.map(x => x.id).join(', '));
