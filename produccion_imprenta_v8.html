@@ -557,6 +557,7 @@
     const ORD_COLORS = ['#3b82f6', '#22c55e', '#f97316', '#a855f7', '#ec4899', '#14b8a6', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#84cc16', '#f43f5e'];
     const CFG0 = {
       nombreImprenta: 'Mi Imprenta', horasDia: 10, startHour: 8, pptDefault: 8, portaPptDefault: 2,
+      bufferFactor: 1.3, calibRangeMin: 0.5, calibRangeMax: 2.0,
       scriptUrl: '', // URL del Google Apps Script Web App para marcar Listo en Sheets
       maq: {
         byn_fast: 150, byn_slow: 80, color_normal: 50, color_grueso: 25, color_slow_n: 40, color_slow_g: 20,
@@ -1345,7 +1346,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
       const cl = cp < 60 ? '✅ Aceptar más' : cp < 85 ? '⚠️ Limitado' : '🔴 Al límite';
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.6</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.7</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -1369,6 +1370,39 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       <div title="Escáner listo: escanea el código de barras de una orden para avanzarla al siguiente paso" style="display:flex;align-items:center;gap:5px;background:#0a1f0a;border:1px solid #166534;border-radius:8px;padding:5px 10px;font-size:11px;color:#4ade80;white-space:nowrap;cursor:default">📷 Escáner listo</div>
       <button class="btn btn-p" onclick="openNew()" style="white-space:nowrap">+ Nueva Orden</button>
     </div>`;
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  AUTO-CALIBRACIÓN
+    // ═══════════════════════════════════════════════════
+    // Mapa: etapa → qué campo de cfg.maq actualizar y cómo calcular la velocidad real
+    // Solo estaciones con fórmula simple (sin setup ni interpolación)
+    const CALIB_MAP = [
+      { etapa: 'acab_ci', key: 'corteInicial', speed: r => r.hojas > 0 && r.mins > 0 ? (r.hojas / r.mins) * 4 : null },
+      { etapa: 'acab_es', key: 'espiralado',   speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
+      { etapa: 'acab_en', key: 'engrapadora',  speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
+      { etapa: 'acab_ms', key: 'mesa_trabajo', speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
+      { etapa: 'acab_cc', key: 'corte_carton', speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
+      { etapa: 'acab_pp', key: 'ponchadora',   speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
+    ];
+
+    function autoCalibrate() {
+      const minF = cfg.calibRangeMin != null ? cfg.calibRangeMin : 0.5;
+      const maxF = cfg.calibRangeMax != null ? cfg.calibRangeMax : 2.0;
+      let changed = false;
+      CALIB_MAP.forEach(({ etapa, key, speed }) => {
+        const samples = statsHistory.filter(r => r.etapa === etapa);
+        const speeds = samples.map(speed).filter(v => v !== null && v > 0);
+        if (speeds.length < 3) return;
+        speeds.sort((a, b) => a - b);
+        const median = speeds[Math.floor(speeds.length / 2)];
+        const filtered = speeds.filter(v => v >= median * minF && v <= median * maxF);
+        if (!filtered.length) return;
+        const avg = filtered.reduce((s, v) => s + v, 0) / filtered.length;
+        const rounded = Math.round(avg * 10) / 10;
+        if (Math.abs(rounded - cfg.maq[key]) > 0.05) { cfg.maq[key] = rounded; changed = true; }
+      });
+      if (changed) saveS();
     }
 
     // ═══════════════════════════════════════════════════
@@ -1423,9 +1457,18 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         </div>`;
       }).join('');
 
+      const calibCount = CALIB_MAP.filter(({ etapa }) => statsHistory.filter(r => r.etapa === etapa).length >= 3).length;
+      const calibBar = `<div style="background:#1e293b;border-radius:12px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#f1f5f9">🤖 Auto-calibración de velocidades</div>
+          <div style="font-size:11px;color:#64748b;margin-top:3px">${calibCount} estación(es) con ≥3 muestras · Rango: ${Math.round((cfg.calibRangeMin||0.5)*100)}%–${Math.round((cfg.calibRangeMax||2.0)*100)}% de la mediana · Factor entrega: ×${cfg.bufferFactor||1.0}</div>
+        </div>
+        <button onclick="autoCalibrate();showToast('⚡ Velocidades actualizadas');render()" style="padding:7px 16px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-weight:700;font-size:13px;cursor:pointer">⚡ Calibrar ahora</button>
+      </div>`;
       return `<div style="padding:20px;max-width:1100px;margin:0 auto">
         <h2 style="font-size:20px;font-weight:800;margin-bottom:4px">⏱ Stats de Producción</h2>
-        <div style="font-size:13px;color:#475569;margin-bottom:20px">Rendimiento real por estación — registrado con el escáner (libros/minuto)</div>
+        <div style="font-size:13px;color:#475569;margin-bottom:12px">Rendimiento real por estación — registrado con el escáner (libros/minuto)</div>
+        ${calibBar}
         ${stationBlocks}
       </div>`;
     }
@@ -1618,8 +1661,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const isSplit = document.getElementById('f_split')?.checked;
       const active = orders.filter(x => x.etapa !== 'listo' && !x._merged && x.id !== modalId);
       const qMin = active.reduce((s, x) => s + calcT(x, cfg).paralelo, 0);
-      const qDias = Math.round(qMin / (cfg.horasDia * 60) * 10) / 10;
-      const fecha = addDias(new Date(), qMin + t.paralelo, cfg.horasDia);
+      const bf = cfg.bufferFactor || 1.0;
+      const qDias = Math.round(qMin * bf / (cfg.horasDia * 60) * 10) / 10;
+      const fecha = addDias(new Date(), (qMin + t.paralelo) * bf, cfg.horasDia);
       const fmtF = fecha.toLocaleDateString('es', { weekday: 'long', day: '2-digit', month: 'long' });
       const fases = [{ id: 'imp', label: '🖨️ Impresión', color: '#fb923c' }, { id: 'acab', label: '✂️ Acabados', color: '#c084fc' }, { id: 'emp', label: '📦 Empaque', color: '#2dd4bf' }];
       const impBox = `<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:9px 10px;margin-bottom:10px;font-size:12px">
@@ -1844,6 +1888,15 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         <div style="font-size:11px;color:#475569;margin-top:6px">Al escanear <b style="color:#f59e0b">HE</b>, <b style="color:#f59e0b">DI</b> o <b style="color:#f59e0b">T</b>, el app lee la última fila de tu hoja de producción y la manda a este script para que la escriba en Sheets. No mueve ninguna orden.</div>
         <div style="font-size:11px;color:#166534;margin-top:4px">📋 Ver instrucciones para crear el script → botón 🔄 Sheets → "Cómo configurar"</div>
       </div>
+      <div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px">
+        <div style="font-size:12px;color:#4ade80;font-weight:700;letter-spacing:.5px;margin-bottom:4px">🤖 AUTO-CALIBRACIÓN Y ENTREGAS</div>
+        <div class="g2">
+          <div><div style="font-size:12px;color:#64748b;margin-top:10px">Factor buffer entrega (×)</div><input class="inp" type="number" step="0.05" min="1" max="3" value="${cfg.bufferFactor||1.3}" oninput="cfg.bufferFactor=+this.value;saveS()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">1.3 = 30% extra sobre el tiempo calculado</div></div>
+          <div></div>
+          <div><div style="font-size:12px;color:#64748b;margin-top:10px">Rango mín. calibración (fracción)</div><input class="inp" type="number" step="0.05" min="0.1" max="1" value="${cfg.calibRangeMin||0.5}" oninput="cfg.calibRangeMin=+this.value;saveS()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">0.5 = excluir muestras < 50% de la mediana</div></div>
+          <div><div style="font-size:12px;color:#64748b;margin-top:10px">Rango máx. calibración (fracción)</div><input class="inp" type="number" step="0.1" min="1" max="5" value="${cfg.calibRangeMax||2.0}" oninput="cfg.calibRangeMax=+this.value;saveS()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">2.0 = excluir muestras > 200% de la mediana</div></div>
+        </div>
+      </div>
       ${secs.map(sec => `<div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px"><div style="font-size:12px;color:${sec.color};font-weight:700;letter-spacing:.5px;margin-bottom:4px">${sec.title}</div><div class="g2">${sec.items.map(([l, p, s]) => inp(l, p, s)).join('')}</div></div>`).join('')}
       <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn btn-g" onclick="closeCfg()">Cerrar</button></div>
     </div>
@@ -2018,7 +2071,6 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         if (matches.length > 1) matches = [matches[0]];
       }
 
-      showToast('🔍 ' + matches.length + ' orden(es): ' + matches.map(x => x.id).join(', '));
 
       if (!matches.length) {
         showToast('❌ No encontrada: ' + ordId + (proc ? ' [' + proc.label + ']' : ''));
@@ -2053,7 +2105,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           orders[idx] = { ...orders[idx], etapa: proc.etapa };
         }
         const oActual = orders[idx];
-        const flow = [ETAPAS[0], ...getAcabFlow(oActual).map(sid => ACAB_STEPS.find(s => s.id === sid)).filter(Boolean), ETAPAS[1], ETAPAS[2]];
+        const isSubOrd = oActual.tipo === 'int_sub' || oActual.tipo === 'port_sub';
+        // INT y PORT no avanzan solos a empaque — esperan unión via autoMergeCheck
+        const flow = [ETAPAS[0], ...getAcabFlow(oActual).map(sid => ACAB_STEPS.find(s => s.id === sid)).filter(Boolean), ...(isSubOrd ? [] : [ETAPAS[1], ETAPAS[2]])];
         const ei = flow.findIndex(et => et && et.id === oActual.etapa);
         if (ei < 0 || ei >= flow.length - 1) return;
         const nextStep = flow[ei + 1];
@@ -2065,6 +2119,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           tiempos.push({ etapa: fromEtapa, label: procLabel, mins, ts });
           orders[idx] = { ...orders[idx], tiemposReales: tiempos };
           statsHistory.push({ ordId: oActual.id, titulo: oActual.titulo || oActual.baseTitulo || oActual.id, etapa: fromEtapa, label: procLabel, mins, cantidad: oActual.cantidad || 0, hojas: oActual.tabloidesSrc || 0, ts });
+          autoCalibrate();
           delete _scanTimers[timerKey];
           saveTimers();
         }
