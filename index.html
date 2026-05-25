@@ -1327,6 +1327,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const fromEtapa = o.etapa;
       const idx = orders.findIndex(x => x.id === _dragId);
       orders[idx] = { ...orders[idx], etapa: colId };
+      if (colId === 'listo') clearOrderTimers(_dragId);
       if (colId === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
       autoMergeCheck(); saveS(); render();
       _dragId = null;
@@ -1349,7 +1350,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
       const cl = cp < 60 ? '✅ Aceptar más' : cp < 85 ? '⚠️ Limitado' : '🔴 Al límite';
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.12</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.13</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -2009,12 +2010,14 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         const target = boardEt[bi + dir];
         if (!target) return;
         orders[idx] = { ...orders[idx], etapa: target.id };
+        if (target.id === 'listo') clearOrderTimers(id);
         if (target.id === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
         autoMergeCheck(); saveS(); render(); return;
       }
       const ni = ei + dir;
       if (ni < 0 || ni >= flow.length) return;
       orders[idx] = { ...orders[idx], etapa: flow[ni].id };
+      if (flow[ni].id === 'listo') clearOrderTimers(id);
       if (flow[ni].id === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
       autoMergeCheck();
       saveS(); render();
@@ -2079,7 +2082,13 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
 
     let _scanTimers = {};
     try { _scanTimers = JSON.parse(localStorage.getItem('imp_timers') || '{}'); } catch {}
+    // Limpiar timers de órdenes ya en listo al arrancar
+    setTimeout(() => { orders.filter(o => o.etapa === 'listo').forEach(o => { Object.keys(_scanTimers).filter(k => k === o.id || k.startsWith(o.id + '_')).forEach(k => delete _scanTimers[k]); }); saveTimers(); }, 1000);
     function saveTimers() { try { localStorage.setItem('imp_timers', JSON.stringify(_scanTimers)); } catch {} }
+    function clearOrderTimers(ordId) {
+      Object.keys(_scanTimers).filter(k => k === ordId || k.startsWith(ordId + '_')).forEach(k => delete _scanTimers[k]);
+      saveTimers();
+    }
 
     function handleScan(raw) {
       const raw2 = raw.trim().toUpperCase();
