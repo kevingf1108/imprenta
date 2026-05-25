@@ -591,7 +591,7 @@
     let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [], historial = [];
     let modalId = undefined, showCfg = false, showSync = false, tvTimer = null, tvSub = 'gantt', ganttZoom = 180;
     let searchQ = '';
-    let autoSync = false, _autoSyncInt = null;
+    let autoSync = false, _autoSyncInt = null, _syncing = false;
 
     // URLs pre-configuradas de Google Sheets
     const SHEET_IMP = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIlfUFRnj_VYEvovfEKY4Gj44uRgb1VOr9VVc3F1tlS2aHwHA4pJ-vib1SbHhJq0pR_PbHSs853ImS/pub?gid=438428152&single=true&output=csv';
@@ -1082,6 +1082,8 @@
 
     // Función principal de sincronización
     async function runSync() {
+      if (_syncing) return;
+      _syncing = true;
       const btn = document.getElementById('sync-btn');
       const log = document.getElementById('sync-log');
       if (btn) btn.disabled = true;
@@ -1089,7 +1091,9 @@
 
       try {
         // Intenta varios proxies CORS en orden hasta que uno funcione
+        // Añade timestamp para evitar que el proxy devuelva datos cacheados
         async function fetchCSV(url) {
+          const bust = url + (url.includes('?') ? '&' : '?') + '_cb=' + Date.now();
           const proxies = [
             u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
             u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
@@ -1097,7 +1101,7 @@
           ];
           for (const mk of proxies) {
             try {
-              const r = await fetch(mk(url), { cache: 'no-cache' });
+              const r = await fetch(mk(bust), { cache: 'no-cache' });
               if (r && r.ok) return r;
             } catch { }
           }
@@ -1218,6 +1222,8 @@
           `<span style="color:#94a3b8;font-size:12px">Si el archivo está abierto localmente (file://), el navegador bloquea las peticiones a Google Sheets. ` +
           `Sube el archivo a un servidor o úsalo en Claude.ai.</span>`;
         if (btn) btn.disabled = false;
+      } finally {
+        _syncing = false;
       }
     }
 
@@ -1370,7 +1376,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
       const cl = cp < 60 ? '✅ Aceptar más' : cp < 85 ? '⚠️ Limitado' : '🔴 Al límite';
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.16</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.17</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
