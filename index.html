@@ -588,7 +588,7 @@
     // ═══════════════════════════════════════════════════
     //  ESTADO
     // ═══════════════════════════════════════════════════
-    let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [];
+    let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [], historial = [];
     let modalId = undefined, showCfg = false, showSync = false, tvTimer = null, tvSub = 'gantt', ganttZoom = 180;
     let searchQ = '';
     let autoSync = false, _autoSyncInt = null;
@@ -618,6 +618,8 @@
         }
         const rawSH = data && data.statsHistory;
         statsHistory = rawSH ? (Array.isArray(rawSH) ? rawSH : Object.values(rawSH)).filter(Boolean) : [];
+        const rawH = data && data.historial;
+        historial = rawH ? (Array.isArray(rawH) ? rawH : Object.values(rawH)).filter(Boolean) : [];
         // Migrar tiemposReales de órdenes existentes que aún no estén en el historial
         const knownTs = new Set(statsHistory.map(s => s.ts));
         let migrated = false;
@@ -641,10 +643,13 @@
       });
     }
     function saveS() {
-      _ref.set({ orders, cfg, statsHistory }).catch(e => {
-        // Fallback a localStorage si no hay conexión
-        try { localStorage.setItem('imp_o', JSON.stringify(orders)); localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); } catch { }
+      _ref.set({ orders, cfg, statsHistory, historial }).catch(e => {
+        try { localStorage.setItem('imp_o', JSON.stringify(orders)); localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); localStorage.setItem('imp_h', JSON.stringify(historial)); } catch { }
       });
+    }
+    function pushHistorial(o) {
+      if (historial.find(h => h.id === o.id && h.ts && Date.now() - h.ts < 5000)) return;
+      historial.push({ id: o.id, titulo: o.titulo || o.baseTitulo || o.id, cliente: o.cliente || '', cantidad: o.cantidad || 0, tipoEncuadernacion: o.tipoEncuadernacion || '', ts: Date.now() });
     }
 
     // ═══════════════════════════════════════════════════
@@ -1327,7 +1332,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const fromEtapa = o.etapa;
       const idx = orders.findIndex(x => x.id === _dragId);
       orders[idx] = { ...orders[idx], etapa: colId };
-      if (colId === 'listo') clearOrderTimers(_dragId);
+      if (colId === 'listo') { clearOrderTimers(_dragId); pushHistorial(orders[idx]); }
       if (colId === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
       autoMergeCheck(); saveS(); render();
       _dragId = null;
@@ -1350,7 +1355,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
       const cl = cp < 60 ? '✅ Aceptar más' : cp < 85 ? '⚠️ Limitado' : '🔴 Al límite';
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.14</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.15</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -1454,20 +1459,31 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         <div style="font-size:13px;color:#475569;margin-top:8px">Escanea órdenes con <b style="color:#4ade80">I</b> (inicio) y <b style="color:#f59e0b">P</b> (fin) para registrar tiempos reales por estación</div>
       </div>`;
 
+      // Unidades por etapa
+      const ETAPA_UNIT = {
+        'impresion': { metric: r => r.hojas > 0 && r.mins > 0 ? r.hojas / r.mins : null, unit: 'ppm',        col: 'Tabs' },
+        'acab_pl':   { metric: r => r.hojas > 0 && r.mins > 0 ? r.hojas / r.mins : null, unit: 'tabs/min',   col: 'Tabs' },
+        'acab_ci':   { metric: r => r.hojas > 0 && r.mins > 0 ? r.hojas / r.mins : null, unit: 'cortes/min', col: 'Tabs' },
+      };
+      const defaultUnit = { metric: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null, unit: 'lib/min', col: 'Libros' };
+
       const byStation = {};
       rows.forEach(r => { if (!byStation[r.label]) byStation[r.label] = []; byStation[r.label].push(r); });
 
       const stationBlocks = Object.entries(byStation).map(([label, items]) => {
-        const avg = items.reduce((s, r) => s + (r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : 0), 0) / items.length;
-        const isPeg = label.toLowerCase().includes('peg') || items[0]?.etapa?.includes('pg') || label.toLowerCase().includes('encuad');
+        const etapa = items[0]?.etapa || '';
+        const unitCfg = ETAPA_UNIT[etapa] || defaultUnit;
+        const speeds = items.map(unitCfg.metric).filter(v => v !== null);
+        const avg = speeds.length ? speeds.reduce((s, v) => s + v, 0) / speeds.length : 0;
+        const useHojas = ['impresion','acab_pl','acab_ci'].includes(etapa);
         const tableRows = items.map(r => {
-          const lpm = r.cantidad > 0 && r.mins > 0 ? (r.cantidad / r.mins).toFixed(2) : '—';
+          const spd = unitCfg.metric(r);
+          const spdStr = spd !== null ? spd.toFixed(2) : '—';
           return `<tr style="border-top:1px solid #0f172a">
             <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(r.titulo.substring(0, 32))}</td>
-            <td style="padding:6px 8px;text-align:right;color:#f1f5f9;font-weight:600">${r.cantidad}</td>
-            ${isPeg ? `<td style="padding:6px 8px;text-align:right;color:#c084fc">${r.hojas || '—'}</td>` : ''}
+            <td style="padding:6px 8px;text-align:right;color:#f1f5f9;font-weight:600">${useHojas ? (r.hojas || '—') : r.cantidad}</td>
             <td style="padding:6px 8px;text-align:right;color:#60a5fa">${r.mins} min</td>
-            <td style="padding:6px 8px;text-align:right;color:#4ade80;font-weight:700">${lpm}</td>
+            <td style="padding:6px 8px;text-align:right;color:#4ade80;font-weight:700">${spdStr}</td>
             <td style="padding:6px 8px;text-align:right;color:#475569;font-size:11px">${new Date(r.ts).toLocaleDateString('es', { day: '2-digit', month: 'short' })}</td>
           </tr>`;
         }).join('');
@@ -1476,17 +1492,16 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             <div style="font-size:15px;font-weight:800;color:#f1f5f9">${e(label)}</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <span style="background:#0a2040;border:1px solid #1d4ed8;padding:3px 10px;border-radius:6px;font-size:12px;color:#60a5fa">${items.length} registros</span>
-              <span style="background:#0a2e1a;border:1px solid #166534;padding:3px 10px;border-radius:6px;font-size:12px;color:#4ade80;font-weight:700">Prom: ${avg.toFixed(2)} lib/min</span>
+              <span style="background:#0a2e1a;border:1px solid #166534;padding:3px 10px;border-radius:6px;font-size:12px;color:#4ade80;font-weight:700">Prom: ${avg.toFixed(2)} ${unitCfg.unit}</span>
             </div>
           </div>
           <div style="overflow-x:auto">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <tr style="color:#475569;font-size:11px;border-bottom:1px solid #334155">
               <td style="padding:4px 8px">Orden</td>
-              <td style="padding:4px 8px;text-align:right">Libros</td>
-              ${isPeg ? `<td style="padding:4px 8px;text-align:right;color:#c084fc">Hojas</td>` : ''}
+              <td style="padding:4px 8px;text-align:right">${unitCfg.col}</td>
               <td style="padding:4px 8px;text-align:right">Tiempo</td>
-              <td style="padding:4px 8px;text-align:right">Lib/min</td>
+              <td style="padding:4px 8px;text-align:right">${unitCfg.unit}</td>
               <td style="padding:4px 8px;text-align:right">Fecha</td>
             </tr>
             ${tableRows}
@@ -1503,11 +1518,32 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         </div>
         <button onclick="autoCalibrate();showToast('⚡ Velocidades actualizadas');render()" style="padding:7px 16px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-weight:700;font-size:13px;cursor:pointer">⚡ Calibrar ahora</button>
       </div>`;
+      const histRows = [...historial].sort((a, b) => b.ts - a.ts);
+      const histBlock = `<div style="background:#1e293b;border-radius:12px;padding:16px;margin-top:24px">
+        <div style="font-size:15px;font-weight:800;color:#f1f5f9;margin-bottom:12px">✅ Historial de órdenes completadas (${histRows.length})</div>
+        ${!histRows.length ? '<div style="color:#475569;font-size:13px">Ninguna orden completada aún</div>' : `
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+          <tr style="color:#475569;font-size:11px;border-bottom:1px solid #334155">
+            <td style="padding:4px 8px">Orden</td>
+            <td style="padding:4px 8px">Cliente</td>
+            <td style="padding:4px 8px;text-align:right">Libros</td>
+            <td style="padding:4px 8px;text-align:right">Fecha</td>
+          </tr>
+          ${histRows.map(h => `<tr style="border-top:1px solid #0f172a">
+            <td style="padding:6px 8px;color:#f1f5f9;font-weight:600;font-size:12px">${e(h.titulo.substring(0,30))}</td>
+            <td style="padding:6px 8px;color:#94a3b8;font-size:12px">${e(h.cliente||'')}</td>
+            <td style="padding:6px 8px;text-align:right;color:#4ade80;font-weight:700">${h.cantidad}</td>
+            <td style="padding:6px 8px;text-align:right;color:#475569;font-size:11px">${new Date(h.ts).toLocaleDateString('es',{day:'2-digit',month:'short',year:'numeric'})}</td>
+          </tr>`).join('')}
+        </table></div>`}
+      </div>`;
+
       return `<div style="padding:20px;max-width:1100px;margin:0 auto">
         <h2 style="font-size:20px;font-weight:800;margin-bottom:4px">⏱ Stats de Producción</h2>
-        <div style="font-size:13px;color:#475569;margin-bottom:12px">Rendimiento real por estación — registrado con el escáner (libros/minuto)</div>
+        <div style="font-size:13px;color:#475569;margin-bottom:12px">Rendimiento real por estación — registrado con el escáner</div>
         ${calibBar}
         ${stationBlocks}
+        ${histBlock}
       </div>`;
     }
 
@@ -2010,14 +2046,14 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         const target = boardEt[bi + dir];
         if (!target) return;
         orders[idx] = { ...orders[idx], etapa: target.id };
-        if (target.id === 'listo') clearOrderTimers(id);
+        if (target.id === 'listo') { clearOrderTimers(id); pushHistorial(orders[idx]); }
         if (target.id === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
         autoMergeCheck(); saveS(); render(); return;
       }
       const ni = ei + dir;
       if (ni < 0 || ni >= flow.length) return;
       orders[idx] = { ...orders[idx], etapa: flow[ni].id };
-      if (flow[ni].id === 'listo') clearOrderTimers(id);
+      if (flow[ni].id === 'listo') { clearOrderTimers(id); pushHistorial(orders[idx]); }
       if (flow[ni].id === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
       autoMergeCheck();
       saveS(); render();
@@ -2210,6 +2246,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           saveTimers();
         }
         orders[idx] = { ...orders[idx], etapa: nextStep.id };
+        if (nextStep.id === 'listo') pushHistorial(orders[idx]);
         if (nextStep.id === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
         if (proc && proc.logScan) fetchLastSalidaRow(proc.label);
         movedLabels.push(nextStep.label);
