@@ -1072,20 +1072,17 @@
       }
       const tit = (order.titulo || order.baseTitulo || itemNum).substring(0, 30);
       showToast(`📤 Enviando a Sheets: ${tit}...`);
-      fetch(url)
+      const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+      fetch(proxy)
         .then(r => r.text())
         .then(txt => {
           try {
             const j = JSON.parse(txt);
             if (j.ok) showToast(`✅ Sheets OK — marcado:${j.marcado ?? ''}`);
-            else showToast(`❌ Script error: ${j.msg || txt.substring(0, 60)}`);
-          } catch { showToast(`⚠️ Respuesta inesperada: ${txt.substring(0, 60)}`); }
+            else showToast(`❌ Script: ${j.msg || txt.substring(0, 80)}`);
+          } catch { showToast(`⚠️ Respuesta: ${txt.substring(0, 80)}`); }
         })
-        .catch(err => {
-          // fallback no-cors si hay error CORS
-          fetch(url, { mode: 'no-cors' }).catch(() => {});
-          showToast(`⚠️ CORS — intento directo enviado`);
-        });
+        .catch(() => showToast('❌ No se pudo conectar con el proxy'));
     }
 
     async function testScriptUrl() {
@@ -1404,7 +1401,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
       const cl = cp < 60 ? '✅ Aceptar más' : cp < 85 ? '⚠️ Limitado' : '🔴 Al límite';
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.19</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.20</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
