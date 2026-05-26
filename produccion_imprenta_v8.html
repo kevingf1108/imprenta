@@ -1051,16 +1051,17 @@
 
     // Marca Listo=TRUE en Google Sheets cuando se avanza una orden
     function markListoInSheets(order, fromEtapa) {
-      if (!cfg.scriptUrl || !order._fromSheets) return;
+      if (!cfg.scriptUrl) { showToast('⚠️ Falta URL del Script en ⚙️ Configuración → Conexión con Sheets'); return; }
+      if (!order._fromSheets) { return; } // orden manual, sin fila en Sheets
       const itemNum = (order.grupoId || '');
-      if (!itemNum) return;
+      if (!itemNum) { showToast('⚠️ Orden sin # ITEM, no se puede marcar en Sheets'); return; }
       const hoja = fromEtapa === 'impresion' ? 'impresion' : 'acabados';
       const po = order.tipo === 'int_sub' ? 'interior' : order.tipo === 'port_sub' ? 'portada' : '';
       let url = `${cfg.scriptUrl}?item=${encodeURIComponent(itemNum)}&hoja=${encodeURIComponent(hoja)}&po=${encodeURIComponent(po)}`;
       if (fromEtapa === 'impresion') {
         url += `&addAcab=1`
           + `&titulo=${encodeURIComponent(order.titulo || '')}`
-          + `&nombre=${encodeURIComponent(order.cliente || '')}`
+          + `&nombre=${encodeURIComponent(order.cliente || order.baseTitulo || '')}`
           + `&cantidad=${encodeURIComponent(order.cantidad || 0)}`
           + `&hojas=${encodeURIComponent(order.tabloidesSrc || 0)}`
           + `&tabloides=${encodeURIComponent(order.tabloidesSrc || 0)}`
@@ -1069,7 +1070,23 @@
           + `&entrega=${encodeURIComponent(order.fechaLimite || '')}`
           + `&urgente=${encodeURIComponent(order.urgente ? 'URGENTE' : '')}`;
       }
-      fetch(url, { mode: 'no-cors' }).then(() => showToast(`✅ Listo marcado en Sheets: ${order.titulo.substring(0, 30)}`)).catch(() => showToast('⚠️ No se pudo conectar con Sheets'));
+      const tit = (order.titulo || order.baseTitulo || itemNum).substring(0, 30);
+      showToast(`📤 Enviando a Sheets: ${tit}...`);
+      fetch(url, { mode: 'no-cors' })
+        .then(() => showToast(`✅ Listo en Sheets: ${tit}`))
+        .catch(() => showToast('❌ Error al conectar con el Script de Sheets'));
+    }
+
+    async function testScriptUrl() {
+      if (!cfg.scriptUrl) { showToast('⚠️ Ingresa la URL del Script primero'); return; }
+      showToast('🔄 Probando URL del script...');
+      try {
+        const r = await fetch(cfg.scriptUrl + '?test=1');
+        const txt = await r.text();
+        showToast('✅ Script responde: ' + txt.substring(0, 60));
+      } catch {
+        showToast('❌ No se pudo conectar al script (verifica que esté publicado como "Cualquiera")');
+      }
     }
 
     // Toast de notificación rápida
@@ -1376,7 +1393,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
       const cl = cp < 60 ? '✅ Aceptar más' : cp < 85 ? '⚠️ Limitado' : '🔴 Al límite';
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.17</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.18</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -2000,8 +2017,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       <div style="background:#0a1200;border:1px solid #166534;border-radius:10px;padding:14px;margin-top:16px">
         <div style="font-size:12px;color:#4ade80;font-weight:700;margin-bottom:8px">🔗 CONEXIÓN CON GOOGLE SHEETS</div>
         <span class="lbl" style="margin-top:0;color:#64748b">URL del Google Apps Script Web App</span>
-        <input class="inp" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.scriptUrl || '')}" oninput="cfg.scriptUrl=this.value;saveS()">
-        <div style="font-size:11px;color:#475569;margin-top:6px">Cuando avances una orden con ▶, automáticamente marcará <b style="color:#4ade80">Listo = TRUE</b> en tu hoja de Google Sheets.</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="inp" style="flex:1;margin-bottom:0" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.scriptUrl || '')}" oninput="cfg.scriptUrl=this.value;saveS()">
+          <button onclick="testScriptUrl()" style="padding:7px 12px;border-radius:8px;border:1px solid #166534;background:#0a2e1a;color:#4ade80;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap">🔌 Probar</button>
+        </div>
+        <div style="font-size:11px;color:#475569;margin-top:6px">Cuando avances una orden con ▶, automáticamente marcará <b style="color:#4ade80">Listo = TRUE</b> en tu hoja de Google Sheets y enviará a Acabado org.</div>
         <span class="lbl" style="margin-top:12px;color:#f59e0b">URL Script — Log HE / DI / T (Terminado)</span>
         <input class="inp" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.scanLogUrl || '')}" oninput="cfg.scanLogUrl=this.value;saveS()">
         <div style="font-size:11px;color:#475569;margin-top:6px">Al escanear <b style="color:#f59e0b">HE</b>, <b style="color:#f59e0b">DI</b> o <b style="color:#f59e0b">T</b>, el app lee la última fila de tu hoja de producción y la manda a este script para que la escriba en Sheets. No mueve ninguna orden.</div>
