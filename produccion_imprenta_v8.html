@@ -1072,17 +1072,9 @@
       }
       const tit = (order.titulo || order.baseTitulo || itemNum).substring(0, 30);
       showToast(`📤 Enviando a Sheets: ${tit}...`);
-      const proxy = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-      fetch(proxy)
-        .then(r => r.text())
-        .then(txt => {
-          try {
-            const j = JSON.parse(txt);
-            if (j.ok) showToast(`✅ Sheets OK — marcado:${j.marcado ?? ''}`);
-            else showToast(`❌ Script: ${j.msg || txt.substring(0, 80)}`);
-          } catch { showToast(`⚠️ Respuesta: ${txt.substring(0, 80)}`); }
-        })
-        .catch(() => showToast('❌ No se pudo conectar con el proxy'));
+      fetch(url, { mode: 'no-cors' })
+        .then(() => showToast(`✅ Enviado a Sheets: ${tit}`))
+        .catch(() => showToast('❌ Error de conexión con Sheets'));
     }
 
     async function testScriptUrl() {
@@ -1132,15 +1124,12 @@
           }
           return null;
         }
-        const [respImp, respAcab] = await Promise.all([
-          fetchCSV(SHEET_IMP),
-          fetchCSV(SHEET_ACAB),
-        ]);
+        const respImp = await fetchCSV(SHEET_IMP);
 
         let newOrders = [];
-        let countImp = 0, countAcab = 0;
+        let countImp = 0;
 
-        // Procesa hoja de Impresión
+        // Solo sincroniza de Impresion org (no de Acabado org)
         let _debugImp = [];
         if (respImp && respImp.ok) {
           const text = await respImp.text();
@@ -1152,37 +1141,18 @@
           countImp = newOrders.length;
         }
 
-        // Procesa hoja de Acabados
-        if (respAcab && respAcab.ok) {
-          const text = await respAcab.text();
-          const rows = parseCSV(text);
-          const qtyMap = {}; // item -> quantity
-          rows.forEach(row => {
-            const itemNum = col(row, '# item', 'item', '#item');
-            const qty = parseInt(col(row, 'quantity', 'cantidad', 'qty')) || 0;
-            if (itemNum && qty) qtyMap[itemNum] = qty;
-            const o = mapAcabRow(row);
-            if (o) newOrders.push(o);
-          });
-          countAcab = newOrders.length - countImp;
-          // Actualiza cantidades en órdenes de Impresión (tabloidesSrc viene directo de la hoja de Impresión)
-          newOrders = newOrders.map(o => {
-            if (o._fromSheets && o.grupoId) {
-              const itemKey = o.grupoId;
-              if (qtyMap[itemKey]) return { ...o, cantidad: qtyMap[itemKey] };
-            }
-            return o;
-          });
-        }
+        // Deduplicar por ID (evita órdenes repetidas si el sheet tiene filas duplicadas)
+        const _seenNewIds = new Set();
+        newOrders = newOrders.filter(o => { if (_seenNewIds.has(o.id)) return false; _seenNewIds.add(o.id); return true; });
 
         if (!newOrders.length) {
-          const impOk = respImp && respImp.ok, acabOk = respAcab && respAcab.ok;
+          const impOk = respImp && respImp.ok;
           let msg = '<span style="color:#ef4444">⚠️ No se encontraron órdenes.</span><br><br>';
-          if (!impOk && !acabOk) {
-            msg += '<span style="color:#f97316">❌ No se pudo conectar a ninguna hoja. Posibles causas:</span><br>';
+          if (!impOk) {
+            msg += '<span style="color:#f97316">❌ No se pudo conectar a Impresion org. Posibles causas:</span><br>';
             msg += '<span style="color:#94a3b8;font-size:12px">• La hoja no está publicada como CSV<br>• La URL del spreadsheet cambió<br>• Problema de red o CORS</span><br><br>';
           } else {
-            msg += '<span style="color:#f97316">Las hojas conectaron pero no tienen filas con datos válidos.</span><br>';
+            msg += '<span style="color:#f97316">La hoja conectó pero no tiene filas con datos válidos.</span><br>';
             msg += '<span style="color:#94a3b8;font-size:12px">Verifica que las columnas tengan encabezados: <b>nombre, # item, p_o, listo, entrega</b></span><br><br>';
           }
           msg += '<span style="color:#64748b;font-size:11px">Para publicar: Archivo → Compartir → Publicar en la web → selecciona la hoja → formato CSV → Publicar.</span>';
@@ -1401,7 +1371,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
       const cl = cp < 60 ? '✅ Aceptar más' : cp < 85 ? '⚠️ Limitado' : '🔴 Al límite';
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.20</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.22</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
