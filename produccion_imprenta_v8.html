@@ -1404,7 +1404,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.44</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.45</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -1888,13 +1888,23 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const isSplit = document.getElementById('f_split')?.checked;
       const active = orders.filter(x => x.etapa !== 'listo' && !x._merged && x.id !== modalId);
       const bf = cfg.bufferFactor || 1.0;
-      // Misma lógica que calcETA: solo cola de la misma fase
+      // Cola: acabados corren en paralelo por máquina, solo contar el mismo sub-paso
       const orderEtapa = existing.etapa || 'impresion';
-      const myPhase = isAcabEtapa(orderEtapa) ? 'acab' : orderEtapa === 'empaque' ? 'emp' : 'imp';
-      const qMin = active.filter(x => {
-        const xp = isAcabEtapa(x.etapa) ? 'acab' : x.etapa === 'empaque' ? 'emp' : 'imp';
-        return xp === myPhase;
-      }).reduce((s, x) => s + calcRemainingMin(x), 0);
+      let qMin;
+      if (isAcabEtapa(orderEtapa)) {
+        qMin = active.filter(x => x.etapa === orderEtapa).reduce((s, x) => {
+          const xt = calcT(x, cfg);
+          const xf = getAcabFlow(x);
+          const xam = xt.pasos.filter(p => p.fase === 'acab').reduce((a, p) => a + p.min, 0);
+          return s + (xf.length > 0 ? xam / xf.length : xam);
+        }, 0);
+      } else {
+        const myPhase = orderEtapa === 'empaque' ? 'emp' : 'imp';
+        qMin = active.filter(x => {
+          const xp = isAcabEtapa(x.etapa) ? 'acab' : x.etapa === 'empaque' ? 'emp' : 'imp';
+          return xp === myPhase;
+        }).reduce((s, x) => s + calcRemainingMin(x), 0);
+      }
       const qDias = Math.round(qMin * bf / (cfg.horasDia * 60) * 10) / 10;
       const fecha = addDias(new Date(), (qMin + calcTotalRemaining({ ...merged, etapa: orderEtapa })) * bf, cfg.horasDia);
       const fmtF = fecha.toLocaleDateString('es', { weekday: 'long', day: '2-digit', month: 'long' });
