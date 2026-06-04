@@ -1404,7 +1404,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.45</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.46</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -1433,6 +1433,26 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     // ═══════════════════════════════════════════════════
     //  TIEMPO RESTANTE POR ORDEN
     // ═══════════════════════════════════════════════════
+    // Tiempo del paso actual de acabados (usa id del paso: acab_pl → 'pl')
+    function acabStepMin(t, etapa) {
+      const sid = etapa.replace('acab_', '');
+      const paso = t.pasos.find(p => p.id === sid);
+      if (paso) return paso.min;
+      // fallback: dividir acabMin entre número de pasos de acabados
+      const acabs = t.pasos.filter(p => p.fase === 'acab');
+      return acabs.length > 0 ? acabs.reduce((s, p) => s + p.min, 0) / acabs.length : 0;
+    }
+    // Tiempo restante de acabados desde la etapa actual (suma de pasos restantes)
+    function acabRemainingMin(t, o) {
+      const flow = getAcabFlow(o);
+      const ci = flow.indexOf(o.etapa);
+      const remaining = ci >= 0 ? flow.slice(ci) : flow;
+      return remaining.reduce((s, stepId) => {
+        const sid = stepId.replace('acab_', '');
+        const paso = t.pasos.find(p => p.id === sid);
+        return s + (paso ? paso.min : 0);
+      }, 0);
+    }
     function calcRemainingMin(o) {
       const t = calcT(o, cfg);
       if (!t.total || o.etapa === 'listo') return 0;
@@ -1440,12 +1460,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         return t.pasos.filter(p => p.fase === 'emp').reduce((s, p) => s + p.min, 0) || 30;
       }
       if (isAcabEtapa(o.etapa)) {
-        const acabFlow = getAcabFlow(o);
-        const ci = acabFlow.indexOf(o.etapa);
-        const fraction = ci >= 0 && acabFlow.length > 1 ? (acabFlow.length - ci) / acabFlow.length : 1;
-        const acabMin = t.pasos.filter(p => p.fase === 'acab').reduce((s, p) => s + p.min, 0);
         const empMin = t.pasos.filter(p => p.fase === 'emp').reduce((s, p) => s + p.min, 0);
-        return acabMin * fraction + empMin;
+        return acabRemainingMin(t, o) + empMin;
       }
       // impresion: solo el tiempo de la fase de impresión (para cálculo de cola)
       return t.pasos.filter(p => p.fase === 'imp').reduce((s, p) => s + p.min, 0) || t.paralelo;
@@ -1454,17 +1470,12 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     function calcTotalRemaining(o) {
       const t = calcT(o, cfg);
       if (!t.total || o.etapa === 'listo') return 0;
-      const impMin  = t.pasos.filter(p => p.fase === 'imp').reduce((s, p) => s + p.min, 0);
-      const acabMin = t.pasos.filter(p => p.fase === 'acab').reduce((s, p) => s + p.min, 0);
-      const empMin  = t.pasos.filter(p => p.fase === 'emp').reduce((s, p) => s + p.min, 0);
+      const impMin = t.pasos.filter(p => p.fase === 'imp').reduce((s, p) => s + p.min, 0);
+      const empMin = t.pasos.filter(p => p.fase === 'emp').reduce((s, p) => s + p.min, 0);
       if (o.etapa === 'empaque') return empMin || 30;
-      if (isAcabEtapa(o.etapa)) {
-        const acabFlow = getAcabFlow(o);
-        const ci = acabFlow.indexOf(o.etapa);
-        const fraction = ci >= 0 && acabFlow.length > 1 ? (acabFlow.length - ci) / acabFlow.length : 1;
-        return acabMin * fraction + empMin;
-      }
+      if (isAcabEtapa(o.etapa)) return acabRemainingMin(t, o) + empMin;
       // impresion: imp + acab + emp (tiempo completo hasta listo)
+      const acabMin = t.pasos.filter(p => p.fase === 'acab').reduce((s, p) => s + p.min, 0);
       return impMin + acabMin + empMin;
     }
 
@@ -1476,12 +1487,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // Acabados: cada máquina corre en paralelo, solo contar órdenes en el MISMO sub-paso
         qMin = orders
           .filter(x => x.id !== o.id && !x._merged && x.etapa === o.etapa)
-          .reduce((s, x) => {
-            const xt = calcT(x, cfg);
-            const xFlow = getAcabFlow(x);
-            const xAcabMin = xt.pasos.filter(p => p.fase === 'acab').reduce((a, p) => a + p.min, 0);
-            return s + (xFlow.length > 0 ? xAcabMin / xFlow.length : xAcabMin);
-          }, 0);
+          .reduce((s, x) => s + acabStepMin(calcT(x, cfg), x.etapa), 0);
       } else {
         const myPhase = o.etapa === 'empaque' ? 'emp' : 'imp';
         qMin = orders
@@ -1751,7 +1757,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const t2 = calcT(o, cfg);
       const bf = cfg.bufferFactor || 1.0;
       const qMin = isAcabEtapa(o.etapa)
-        ? orders.filter(x=>x.id!==o.id&&!x._merged&&x.etapa===o.etapa).reduce((s,x)=>{const xt=calcT(x,cfg);const xf=getAcabFlow(x);const xam=xt.pasos.filter(p=>p.fase==='acab').reduce((a,p)=>a+p.min,0);return s+(xf.length>0?xam/xf.length:xam);},0)
+        ? orders.filter(x=>x.id!==o.id&&!x._merged&&x.etapa===o.etapa).reduce((s,x)=>s+acabStepMin(calcT(x,cfg),x.etapa),0)
         : orders.filter(x=>x.id!==o.id&&!x._merged&&x.etapa!=='listo').filter(x=>{const xp=isAcabEtapa(x.etapa)?'acab':x.etapa==='empaque'?'emp':'imp';return xp===(o.etapa==='empaque'?'emp':'imp');}).reduce((s,x)=>s+calcRemainingMin(x),0);
       const impM  = t2.pasos.filter(p=>p.fase==='imp').reduce((s,p)=>s+p.min,0);
       const acabM = t2.pasos.filter(p=>p.fase==='acab').reduce((s,p)=>s+p.min,0);
