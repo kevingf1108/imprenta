@@ -1395,7 +1395,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.27</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.28</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -1733,21 +1733,28 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     ${isAcabEtapa(o.etapa) ? `<div style="margin-top:6px">${(() => { const flow = getAcabFlow(o); const ci = flow.indexOf(o.etapa); return flow.map((s, i) => { const st = ACAB_STEPS.find(x => x.id === s); return `<span title="${st ? st.label : s}" style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:2px;background:${i < ci ? '#4ade80' : i === ci ? (st ? st.color : '#f59e0b') : '#334155'}"></span>`; }).join(''); })()}</div>` : ''}
     ${(() => {
       const eta = calcETA(o);
+      const etaStr = fDate(eta.toISOString().split('T')[0]);
       const late = o.fechaLimite && eta > new Date(o.fechaLimite + 'T23:59:59');
-      // Si tiene fecha límite, mostrar esa (igual que el modal); si no, mostrar ETA calculado
-      const displayDate = o.fechaLimite ? o.fechaLimite : eta.toISOString().split('T')[0];
-      const displayStr = fDate(displayDate);
       const etaColor = late ? '#ef4444' : '#4ade80';
       const dlColor = od ? '#ef4444' : sn ? '#f59e0b' : '#94a3b8';
       const dlIcon = o.urgente ? '⚡' : od ? '🔴' : sn ? '🟡' : '📅';
+      // Desglose para tooltip
+      const t2 = calcT(o, cfg);
+      const bf = cfg.bufferFactor || 1.0;
+      const myPhase = isAcabEtapa(o.etapa) ? 'acab' : o.etapa === 'empaque' ? 'emp' : 'imp';
+      const qMin = orders.filter(x => x.id !== o.id && !x._merged && x.etapa !== 'listo').filter(x => { const xp = isAcabEtapa(x.etapa)?'acab':x.etapa==='empaque'?'emp':'imp'; return xp===myPhase; }).reduce((s,x)=>s+calcRemainingMin(x),0);
+      const impM  = t2.pasos.filter(p=>p.fase==='imp').reduce((s,p)=>s+p.min,0);
+      const acabM = t2.pasos.filter(p=>p.fase==='acab').reduce((s,p)=>s+p.min,0);
+      const empM  = t2.pasos.filter(p=>p.fase==='emp').reduce((s,p)=>s+p.min,0);
+      const tip = `Cola: ${mStr(qMin)} | Imp: ${mStr(impM)} | Acab: ${mStr(acabM)} | Emp: ${mStr(empM)} | Buffer ×${bf}`;
       return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:6px;padding-top:6px;border-top:1px solid #1e293b">
         <div style="background:#0f172a;border-radius:6px;padding:5px 8px">
           <div style="font-size:9px;color:#475569;margin-bottom:2px;font-weight:600">ENTREGAR</div>
           <div style="font-size:12px;color:${dlColor};font-weight:700">${dlIcon} ${o.fechaLimite ? fDate(o.fechaLimite) : '—'}</div>
         </div>
-        <div style="background:#0f172a;border-radius:6px;padding:5px 8px">
-          <div style="font-size:9px;color:#475569;margin-bottom:2px;font-weight:600">${o.fechaLimite ? 'ENTREGAR' : 'LISTO ~'}</div>
-          <div style="font-size:12px;color:${etaColor};font-weight:700">${displayStr}${late ? ' 🔴' : ' ✅'}</div>
+        <div style="background:#0f172a;border-radius:6px;padding:5px 8px;cursor:help" title="${tip}">
+          <div style="font-size:9px;color:#475569;margin-bottom:2px;font-weight:600">LISTO ~ ⓘ</div>
+          <div style="font-size:12px;color:${etaColor};font-weight:700">${etaStr}${late ? ' 🔴' : ' ✅'}</div>
         </div>
       </div>`;
     })()}
