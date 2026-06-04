@@ -1404,7 +1404,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.47</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.48</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -1544,48 +1544,70 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       };
       const defaultUnit = { metric: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null, unit: 'lib/min', col: 'Libros' };
 
-      const byStation = {};
-      rows.forEach(r => { if (!byStation[r.label]) byStation[r.label] = []; byStation[r.label].push(r); });
+      // Agrupar filas de impresión por máquina+papel+tamaño; resto por label
+      const impRows = rows.filter(r => r.etapa === 'impresion');
+      const otherRows = rows.filter(r => r.etapa !== 'impresion');
 
-      const stationBlocks = Object.entries(byStation).map(([label, items]) => {
-        const etapa = items[0]?.etapa || '';
+      const byStation = {};
+      otherRows.forEach(r => { if (!byStation[r.label]) byStation[r.label] = []; byStation[r.label].push(r); });
+
+      const byImpSec = {};
+      impRows.forEach(r => {
+        const maq = getMaqInfo({ maquina: r.maquina, tipoInteriores: r.tipoInteriores });
+        const papel = r.gramaje === 'grueso' ? 'Grueso >200g' : 'Normal ≤150g';
+        const tam = r.tamano || 'tabloide';
+        const key = `${String(maq.order).padStart(2,'0')}|${papel}|${tam}`;
+        if (!byImpSec[key]) byImpSec[key] = { maq, papel, tam, items: [] };
+        byImpSec[key].items.push(r);
+      });
+
+      const makeBlock = (label, items, etapa, headerExtra = '') => {
         const unitCfg = ETAPA_UNIT[etapa] || defaultUnit;
         const speeds = items.map(unitCfg.metric).filter(v => v !== null);
         const avg = speeds.length ? speeds.reduce((s, v) => s + v, 0) / speeds.length : 0;
         const useHojas = ['impresion','acab_pl','acab_ci'].includes(etapa);
         const tableRows = items.map(r => {
           const spd = unitCfg.metric(r);
-          const spdStr = spd !== null ? spd.toFixed(2) : '—';
           return `<tr style="border-top:1px solid #0f172a">
             <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(r.titulo.substring(0, 32))}</td>
             <td style="padding:6px 8px;text-align:right;color:#f1f5f9;font-weight:600">${useHojas ? (r.hojas || '—') : r.cantidad}</td>
             <td style="padding:6px 8px;text-align:right;color:#60a5fa">${r.mins} min</td>
-            <td style="padding:6px 8px;text-align:right;color:#4ade80;font-weight:700">${spdStr}</td>
+            <td style="padding:6px 8px;text-align:right;color:#4ade80;font-weight:700">${spd !== null ? spd.toFixed(2) : '—'}</td>
             <td style="padding:6px 8px;text-align:right;color:#475569;font-size:11px">${new Date(r.ts).toLocaleDateString('es', { day: '2-digit', month: 'short' })}</td>
           </tr>`;
         }).join('');
         return `<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:14px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-            <div style="font-size:15px;font-weight:800;color:#f1f5f9">${e(label)}</div>
+            <div><div style="font-size:15px;font-weight:800;color:#f1f5f9">${e(label)}</div>${headerExtra}</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <span style="background:#0a2040;border:1px solid #1d4ed8;padding:3px 10px;border-radius:6px;font-size:12px;color:#60a5fa">${items.length} registros</span>
               <span style="background:#0a2e1a;border:1px solid #166534;padding:3px 10px;border-radius:6px;font-size:12px;color:#4ade80;font-weight:700">Prom: ${avg.toFixed(2)} ${unitCfg.unit}</span>
             </div>
           </div>
-          <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
             <tr style="color:#475569;font-size:11px;border-bottom:1px solid #334155">
               <td style="padding:4px 8px">Orden</td>
               <td style="padding:4px 8px;text-align:right">${unitCfg.col}</td>
               <td style="padding:4px 8px;text-align:right">Tiempo</td>
               <td style="padding:4px 8px;text-align:right">${unitCfg.unit}</td>
               <td style="padding:4px 8px;text-align:right">Fecha</td>
-            </tr>
-            ${tableRows}
-          </table>
-          </div>
+            </tr>${tableRows}
+          </table></div>
         </div>`;
+      };
+
+      const impBlocks = Object.entries(byImpSec).sort((a,b)=>a[0].localeCompare(b[0])).map(([, sec]) => {
+        const extra = `<div style="margin-top:3px;display:flex;gap:6px;flex-wrap:wrap">
+          <span style="background:${sec.maq.color}22;border:1px solid ${sec.maq.color};padding:2px 8px;border-radius:4px;font-size:11px;color:${sec.maq.color};font-weight:700">${e(sec.maq.label)}</span>
+          <span style="background:#1e293b;border:1px solid #334155;padding:2px 8px;border-radius:4px;font-size:11px;color:#94a3b8">${e(sec.papel)}</span>
+          <span style="background:#1e293b;border:1px solid #334155;padding:2px 8px;border-radius:4px;font-size:11px;color:#94a3b8">${e(sec.tam)}</span>
+        </div>`;
+        return makeBlock('🖨️ Impresión', sec.items, 'impresion', extra);
       }).join('');
+
+      const stationBlocks = impBlocks + Object.entries(byStation).map(([label, items]) =>
+        makeBlock(label, items, items[0]?.etapa || '')
+      ).join('');
 
       const calibCount = CALIB_MAP.filter(({ etapa }) => statsHistory.filter(r => r.etapa === etapa).length >= 3).length;
       const calibBar = `<div style="background:#1e293b;border-radius:12px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
