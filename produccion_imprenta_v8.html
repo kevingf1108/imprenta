@@ -1395,7 +1395,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.30</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.31</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -1538,14 +1538,20 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       };
       const defaultUnit = { metric: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null, unit: 'lib/min', col: 'Libros' };
 
+      const MAQ_LABEL = { oce6320: 'OCE 6320', titan: 'Titan 6180', c1352: 'Color 1352', c1351: 'Color 1351', c10010: 'Color 10010' };
       const byStation = {};
       rows.forEach(r => {
-        const gram  = r.gramaje === 'grueso' ? 'Grueso >200g' : r.gramaje === 'normal' ? 'Normal ≤150g' : '';
-        const tam   = r.tamano === 'carta' ? 'Carta' : r.tamano === 'oficio' ? 'Oficio' : r.tamano === 'tabloide' ? 'Tabloide' : '';
-        const maq   = r.maquina && r.maquina !== 'auto' ? r.maquina.replace('c','Color ').replace('oce6320','OCE 6320').replace('titan','Titan 6180') : '';
-        const subKey = [maq, gram, tam].filter(Boolean).join(' · ');
-        const key = subKey ? `${r.label}||${subKey}` : r.label;
-        if (!byStation[key]) byStation[key] = { label: r.label, sub: subKey, items: [] };
+        let key, sub = '';
+        if (r.etapa === 'impresion') {
+          const maq  = (r.maquina && r.maquina !== 'auto') ? (MAQ_LABEL[r.maquina] || r.maquina) : '';
+          const gram = r.gramaje === 'grueso' ? 'Grueso >200g' : r.gramaje === 'normal' ? 'Normal ≤150g' : '';
+          const tam  = r.tamano === 'carta' ? 'Carta' : r.tamano === 'oficio' ? 'Oficio' : r.tamano === 'tabloide' ? 'Tabloide' : '';
+          sub = [maq, gram, tam].filter(Boolean).join(' · ');
+          key = sub ? `${r.label}||${sub}` : r.label;
+        } else {
+          key = r.label;
+        }
+        if (!byStation[key]) byStation[key] = { label: r.label, sub, items: [] };
         byStation[key].items.push(r);
       });
 
