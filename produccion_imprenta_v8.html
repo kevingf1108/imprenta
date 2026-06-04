@@ -591,7 +591,7 @@
     let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [], historial = [];
     let modalId = undefined, showCfg = false, showSync = false, tvTimer = null, tvSub = 'gantt', ganttZoom = 180;
     let searchQ = '';
-    let autoSync = false, _autoSyncInt = null, _syncing = false;
+    let autoSync = false, _autoSyncInt = null, _syncing = false, _fbReady = false;
 
     // URLs pre-configuradas de Google Sheets
     const SHEET_IMP = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIlfUFRnj_VYEvovfEKY4Gj44uRgb1VOr9VVc3F1tlS2aHwHA4pJ-vib1SbHhJq0pR_PbHSs853ImS/pub?gid=438428152&single=true&output=csv';
@@ -609,6 +609,8 @@
       _ref.on('value', snap => {
         if (_syncing) return; // Don't overwrite during sync — runSync will save the correct state
         const data = snap.val();
+        const firstLoad = !_fbReady;
+        _fbReady = true;
         if (data && data.orders) {
           const raw = data.orders;
           orders = (Array.isArray(raw) ? raw : Object.values(raw)).filter(Boolean);
@@ -636,6 +638,8 @@
         if (migrated) saveS();
         autoMergeCheck();
         render();
+        // Start auto-sync only after Firebase has loaded — prevents sync from running with empty orders
+        if (firstLoad) setTimeout(() => setAutoSync(true), 300);
       }, err => {
         console.error('Firebase error:', err);
         // Fallback a localStorage si no hay conexión
@@ -1407,7 +1411,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.37</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.38</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -2434,8 +2438,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     //  INICIO
     // ═══════════════════════════════════════════════════
     loadS();
-    // Auto-sync siempre activo al arrancar
-    setTimeout(() => setAutoSync(true), 2000);
+    // Auto-sync starts inside the Firebase listener's first-load callback (after _fbReady)
   </script>
 </body>
 
