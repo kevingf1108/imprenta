@@ -1395,7 +1395,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.29</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.30</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -1462,14 +1462,27 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     // ETA de una orden: cola de su misma fase + tiempo total restante propio
     function calcETA(o) {
       const bf = cfg.bufferFactor || 1.0;
-      const myPhase = isAcabEtapa(o.etapa) ? 'acab' : o.etapa === 'empaque' ? 'emp' : 'imp';
-      const qMin = orders
-        .filter(x => x.id !== o.id && !x._merged && x.etapa !== 'listo')
-        .filter(x => {
-          const xp = isAcabEtapa(x.etapa) ? 'acab' : x.etapa === 'empaque' ? 'emp' : 'imp';
-          return xp === myPhase;
-        })
-        .reduce((s, x) => s + calcRemainingMin(x), 0);
+      let qMin;
+      if (isAcabEtapa(o.etapa)) {
+        // Acabados: cada máquina corre en paralelo, solo contar órdenes en el MISMO sub-paso
+        qMin = orders
+          .filter(x => x.id !== o.id && !x._merged && x.etapa === o.etapa)
+          .reduce((s, x) => {
+            const xt = calcT(x, cfg);
+            const xFlow = getAcabFlow(x);
+            const xAcabMin = xt.pasos.filter(p => p.fase === 'acab').reduce((a, p) => a + p.min, 0);
+            return s + (xFlow.length > 0 ? xAcabMin / xFlow.length : xAcabMin);
+          }, 0);
+      } else {
+        const myPhase = o.etapa === 'empaque' ? 'emp' : 'imp';
+        qMin = orders
+          .filter(x => x.id !== o.id && !x._merged && x.etapa !== 'listo')
+          .filter(x => {
+            const xp = isAcabEtapa(x.etapa) ? 'acab' : x.etapa === 'empaque' ? 'emp' : 'imp';
+            return xp === myPhase;
+          })
+          .reduce((s, x) => s + calcRemainingMin(x), 0);
+      }
       return addDias(new Date(), (qMin + calcTotalRemaining(o)) * bf, cfg.horasDia);
     }
 
@@ -1741,8 +1754,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       // Desglose para tooltip
       const t2 = calcT(o, cfg);
       const bf = cfg.bufferFactor || 1.0;
-      const myPhase = isAcabEtapa(o.etapa) ? 'acab' : o.etapa === 'empaque' ? 'emp' : 'imp';
-      const qMin = orders.filter(x => x.id !== o.id && !x._merged && x.etapa !== 'listo').filter(x => { const xp = isAcabEtapa(x.etapa)?'acab':x.etapa==='empaque'?'emp':'imp'; return xp===myPhase; }).reduce((s,x)=>s+calcRemainingMin(x),0);
+      const qMin = isAcabEtapa(o.etapa)
+        ? orders.filter(x=>x.id!==o.id&&!x._merged&&x.etapa===o.etapa).reduce((s,x)=>{const xt=calcT(x,cfg);const xf=getAcabFlow(x);const xam=xt.pasos.filter(p=>p.fase==='acab').reduce((a,p)=>a+p.min,0);return s+(xf.length>0?xam/xf.length:xam);},0)
+        : orders.filter(x=>x.id!==o.id&&!x._merged&&x.etapa!=='listo').filter(x=>{const xp=isAcabEtapa(x.etapa)?'acab':x.etapa==='empaque'?'emp':'imp';return xp===(o.etapa==='empaque'?'emp':'imp');}).reduce((s,x)=>s+calcRemainingMin(x),0);
       const impM  = t2.pasos.filter(p=>p.fase==='imp').reduce((s,p)=>s+p.min,0);
       const acabM = t2.pasos.filter(p=>p.fase==='acab').reduce((s,p)=>s+p.min,0);
       const empM  = t2.pasos.filter(p=>p.fase==='emp').reduce((s,p)=>s+p.min,0);
