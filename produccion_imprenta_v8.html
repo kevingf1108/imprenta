@@ -626,7 +626,7 @@
         orders.forEach(o => {
           (o.tiemposReales || []).forEach(t => {
             if (t.ts && !knownTs.has(t.ts)) {
-              statsHistory.push({ ordId: o.id, titulo: o.titulo || o.baseTitulo || o.id, etapa: t.etapa, label: t.label || t.etapa, mins: t.mins, cantidad: o.cantidad || 0, hojas: o.tabloidesSrc || 0, ts: t.ts });
+              statsHistory.push({ ordId: o.id, titulo: o.titulo || o.baseTitulo || o.id, etapa: t.etapa, label: t.label || t.etapa, mins: t.mins, cantidad: o.cantidad || 0, hojas: o.tabloidesSrc || 0, gramaje: o.gramaje || '', tamano: o.tamano || '', maquina: o.maquina || '', ts: t.ts });
               knownTs.add(t.ts);
               migrated = true;
             }
@@ -1395,7 +1395,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.25</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.26</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -1438,11 +1438,28 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         const empMin = t.pasos.filter(p => p.fase === 'emp').reduce((s, p) => s + p.min, 0);
         return acabMin * fraction + empMin;
       }
-      // impresion: solo el tiempo de la fase de impresión (no todo el paralelo)
+      // impresion: solo el tiempo de la fase de impresión (para cálculo de cola)
       return t.pasos.filter(p => p.fase === 'imp').reduce((s, p) => s + p.min, 0) || t.paralelo;
     }
+    // Tiempo TOTAL restante desde la etapa actual hasta listo (imp + acab + emp)
+    function calcTotalRemaining(o) {
+      const t = calcT(o, cfg);
+      if (!t.total || o.etapa === 'listo') return 0;
+      const impMin  = t.pasos.filter(p => p.fase === 'imp').reduce((s, p) => s + p.min, 0);
+      const acabMin = t.pasos.filter(p => p.fase === 'acab').reduce((s, p) => s + p.min, 0);
+      const empMin  = t.pasos.filter(p => p.fase === 'emp').reduce((s, p) => s + p.min, 0);
+      if (o.etapa === 'empaque') return empMin || 30;
+      if (isAcabEtapa(o.etapa)) {
+        const acabFlow = getAcabFlow(o);
+        const ci = acabFlow.indexOf(o.etapa);
+        const fraction = ci >= 0 && acabFlow.length > 1 ? (acabFlow.length - ci) / acabFlow.length : 1;
+        return acabMin * fraction + empMin;
+      }
+      // impresion: imp + acab + emp (tiempo completo hasta listo)
+      return impMin + acabMin + empMin;
+    }
 
-    // ETA de una orden considerando solo la cola de su misma fase
+    // ETA de una orden: cola de su misma fase + tiempo total restante propio
     function calcETA(o) {
       const bf = cfg.bufferFactor || 1.0;
       const myPhase = isAcabEtapa(o.etapa) ? 'acab' : o.etapa === 'empaque' ? 'emp' : 'imp';
@@ -1453,7 +1470,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           return xp === myPhase;
         })
         .reduce((s, x) => s + calcRemainingMin(x), 0);
-      return addDias(new Date(), (qMin + calcRemainingMin(o)) * bf, cfg.horasDia);
+      return addDias(new Date(), (qMin + calcTotalRemaining(o)) * bf, cfg.horasDia);
     }
 
     // ═══════════════════════════════════════════════════
@@ -1509,9 +1526,17 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const defaultUnit = { metric: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null, unit: 'lib/min', col: 'Libros' };
 
       const byStation = {};
-      rows.forEach(r => { if (!byStation[r.label]) byStation[r.label] = []; byStation[r.label].push(r); });
+      rows.forEach(r => {
+        const gram  = r.gramaje === 'grueso' ? 'Grueso >200g' : r.gramaje === 'normal' ? 'Normal ≤150g' : '';
+        const tam   = r.tamano === 'carta' ? 'Carta' : r.tamano === 'oficio' ? 'Oficio' : r.tamano === 'tabloide' ? 'Tabloide' : '';
+        const maq   = r.maquina && r.maquina !== 'auto' ? r.maquina.replace('c','Color ').replace('oce6320','OCE 6320').replace('titan','Titan 6180') : '';
+        const subKey = [maq, gram, tam].filter(Boolean).join(' · ');
+        const key = subKey ? `${r.label}||${subKey}` : r.label;
+        if (!byStation[key]) byStation[key] = { label: r.label, sub: subKey, items: [] };
+        byStation[key].items.push(r);
+      });
 
-      const stationBlocks = Object.entries(byStation).map(([label, items]) => {
+      const stationBlocks = Object.values(byStation).map(({ label, sub, items }) => {
         const etapa = items[0]?.etapa || '';
         const unitCfg = ETAPA_UNIT[etapa] || defaultUnit;
         const speeds = items.map(unitCfg.metric).filter(v => v !== null);
@@ -1520,8 +1545,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         const tableRows = items.map(r => {
           const spd = unitCfg.metric(r);
           const spdStr = spd !== null ? spd.toFixed(2) : '—';
+          const gramBadge = r.gramaje ? `<span style="background:#1e293b;color:#64748b;padding:1px 5px;border-radius:4px;font-size:10px;margin-left:4px">${r.gramaje === 'grueso' ? '>200g' : '≤150g'}</span>` : '';
+          const tamBadge  = r.tamano && r.tamano !== 'tabloide' ? `<span style="background:#1e293b;color:#64748b;padding:1px 5px;border-radius:4px;font-size:10px;margin-left:2px">${r.tamano}</span>` : '';
           return `<tr style="border-top:1px solid #0f172a">
-            <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(r.titulo.substring(0, 32))}</td>
+            <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(r.titulo.substring(0, 28))}${gramBadge}${tamBadge}</td>
             <td style="padding:6px 8px;text-align:right;color:#f1f5f9;font-weight:600">${useHojas ? (r.hojas || '—') : r.cantidad}</td>
             <td style="padding:6px 8px;text-align:right;color:#60a5fa">${r.mins} min</td>
             <td style="padding:6px 8px;text-align:right;color:#4ade80;font-weight:700">${spdStr}</td>
@@ -1530,7 +1557,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         }).join('');
         return `<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:14px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-            <div style="font-size:15px;font-weight:800;color:#f1f5f9">${e(label)}</div>
+            <div>
+              <div style="font-size:15px;font-weight:800;color:#f1f5f9">${e(label)}</div>
+              ${sub ? `<div style="font-size:11px;color:#64748b;margin-top:2px">${e(sub)}</div>` : ''}
+            </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <span style="background:#0a2040;border:1px solid #1d4ed8;padding:3px 10px;border-radius:6px;font-size:12px;color:#60a5fa">${items.length} registros</span>
               <span style="background:#0a2e1a;border:1px solid #166534;padding:3px 10px;border-radius:6px;font-size:12px;color:#4ade80;font-weight:700">Prom: ${avg.toFixed(2)} ${unitCfg.unit}</span>
@@ -1838,10 +1868,16 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const t = calcT({ ...merged, tipo: existing.tipo || 'normal' }, cfg); if (!t.total) { el.innerHTML = ''; return; }
       const isSplit = document.getElementById('f_split')?.checked;
       const active = orders.filter(x => x.etapa !== 'listo' && !x._merged && x.id !== modalId);
-      const qMin = active.reduce((s, x) => s + calcT(x, cfg).paralelo, 0);
       const bf = cfg.bufferFactor || 1.0;
+      // Misma lógica que calcETA: solo cola de la misma fase
+      const orderEtapa = existing.etapa || 'impresion';
+      const myPhase = isAcabEtapa(orderEtapa) ? 'acab' : orderEtapa === 'empaque' ? 'emp' : 'imp';
+      const qMin = active.filter(x => {
+        const xp = isAcabEtapa(x.etapa) ? 'acab' : x.etapa === 'empaque' ? 'emp' : 'imp';
+        return xp === myPhase;
+      }).reduce((s, x) => s + calcRemainingMin(x), 0);
       const qDias = Math.round(qMin * bf / (cfg.horasDia * 60) * 10) / 10;
-      const fecha = addDias(new Date(), (qMin + t.paralelo) * bf, cfg.horasDia);
+      const fecha = addDias(new Date(), (qMin + calcTotalRemaining({ ...merged, etapa: orderEtapa })) * bf, cfg.horasDia);
       const fmtF = fecha.toLocaleDateString('es', { weekday: 'long', day: '2-digit', month: 'long' });
       const fases = [{ id: 'imp', label: '🖨️ Impresión', color: '#fb923c' }, { id: 'acab', label: '✂️ Acabados', color: '#c084fc' }, { id: 'emp', label: '📦 Empaque', color: '#2dd4bf' }];
       const impBox = `<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:9px 10px;margin-bottom:10px;font-size:12px">
@@ -2329,7 +2365,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           const tiempos = [...(oActual.tiemposReales || [])];
           tiempos.push({ etapa: fromEtapa, label: procLabel, mins, ts });
           orders[idx] = { ...orders[idx], tiemposReales: tiempos };
-          statsHistory.push({ ordId: oActual.id, titulo: oActual.titulo || oActual.baseTitulo || oActual.id, etapa: fromEtapa, label: procLabel, mins, cantidad: oActual.cantidad || 0, hojas: oActual.tabloidesSrc || 0, ts });
+          statsHistory.push({ ordId: oActual.id, titulo: oActual.titulo || oActual.baseTitulo || oActual.id, etapa: fromEtapa, label: procLabel, mins, cantidad: oActual.cantidad || 0, hojas: oActual.tabloidesSrc || 0, gramaje: oActual.gramaje || '', tamano: oActual.tamano || '', maquina: oActual.maquina || '', ts });
           autoCalibrate();
           delete _scanTimers[timerKey];
           saveTimers();
