@@ -1235,7 +1235,8 @@
             <span style="background:#0a1f3a;border:1px solid #1d4ed8;padding:4px 10px;border-radius:6px;color:#60a5fa">🔄 ${countActualizadas} actualizadas</span>
             <span style="background:#0f172a;border:1px solid #334155;padding:4px 10px;border-radius:6px;color:#64748b">✓ ${countSinCambio} sin cambio</span>
           </div>
-          <div style="margin-top:6px;font-size:11px;color:#475569">Total en sistema: ${newOrders.length} · Historial acumulado: ${seenIds.size} órdenes</div>
+          <div style="margin-top:6px;font-size:11px;color:#475569">Total en sistema: ${orders.length} · De sheets: ${newOrders.length} · Rescatadas: ${orphaned.length} · Manuales: ${manual.length}</div>
+          ${orphaned.length > 0 ? `<details style="margin-top:6px"><summary style="font-size:11px;color:#f59e0b;cursor:pointer">♻️ ${orphaned.length} órdenes rescatadas de Firebase (ya no están en sheets)</summary><div style="margin-top:4px;max-height:120px;overflow-y:auto;background:#0f172a;border-radius:6px;padding:6px;font-size:11px;font-family:monospace">${orphaned.map(o=>`<div style="color:#94a3b8">${e(o.id)} → <b style="color:#f59e0b">${e(o.etapa)}</b></div>`).join('')}</div></details>` : ''}
           <details style="margin-top:10px"><summary style="font-size:11px;color:#64748b;cursor:pointer">🔍 Ver tabloides leídos de Impresión</summary>
           <div style="margin-top:6px;max-height:180px;overflow-y:auto;background:#0f172a;border-radius:6px;padding:8px;font-size:11px;font-family:monospace">
           ${_debugImp.map(d => `<div style="color:${d.tabs===0?'#ef4444':'#94a3b8'}">${e(d.id)} → <b style="color:${d.tabs===0?'#ef4444':'#4ade80'}">${d.tabs} tab</b>${d.tabs===0?' ⚠️ NO ENCONTRÓ COLUMNA':''}${d.tabs>0&&d.tabs<100?' ⚠️ NÚMERO SOSPECHOSO':''}</div>`).join('')}
@@ -1403,7 +1404,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.34</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.35</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
