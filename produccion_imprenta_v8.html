@@ -1395,7 +1395,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.24</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.25</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -1603,6 +1603,28 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         || (o.cliente || '').toLowerCase().includes(q)
         || (o.notas || '').toLowerCase().includes(q);
     }
+    function getMaqInfo(o) {
+      const maq = o.maquina;
+      if (maq === 'oce6320') return { key: 'oce6320', label: 'OCE 6320',          color: '#94a3b8', order: 1 };
+      if (maq === 'titan')   return { key: 'titan',   label: 'Titan 6180',        color: '#64748b', order: 2 };
+      if (maq === 'c1352')   return { key: 'c1352',   label: 'Color 1352',        color: '#fb923c', order: 3 };
+      if (maq === 'c1351')   return { key: 'c1351',   label: 'Color 1351',        color: '#f97316', order: 4 };
+      if (maq === 'c10010')  return { key: 'c10010',  label: 'Color 10010',       color: '#ea580c', order: 5 };
+      if (o.tipoInteriores === 'byn') return { key: 'byn', label: 'OCE / Titan', color: '#94a3b8', order: 0 };
+      return { key: 'color', label: '1352 / 1351 / 10010',                        color: '#fb923c', order: 6 };
+    }
+    function impSecciones(list) {
+      const map = {};
+      list.forEach(o => {
+        const maq   = getMaqInfo(o);
+        const papel = o.gramaje === 'grueso' ? 'Grueso >200g' : 'Normal ≤150g';
+        const tam   = o.tamano || 'tabloide';
+        const key   = `${String(maq.order).padStart(2,'0')}|${papel}|${tam}`;
+        if (!map[key]) map[key] = { maq, papel, tam, items: [], key };
+        map[key].items.push(o);
+      });
+      return Object.values(map).sort((a, b) => a.key.localeCompare(b.key));
+    }
     function boardHTML() {
       // Build visible columns: impresion + acab steps that have orders + empaque + listo
       const etapas = allEtapas(orders);
@@ -1613,6 +1635,22 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const all = allTotal.filter(o => matchSearch(o));
       const isAcab = isAcabEtapa(et.id);
       const badgeLabel = searchQ && all.length !== allTotal.length ? `${all.length}/${allTotal.length}` : `${allTotal.length}`;
+      const emptyMsg = `<div style="color:#334155;font-size:12px;text-align:center;padding:20px 0;border:2px dashed #1e293b;border-radius:8px;margin:4px 0">${searchQ ? '🔍 Sin resultados' : (isAcab ? 'Arrastra aquí' : 'Sin órdenes')}</div>`;
+      let body;
+      if (et.id === 'impresion' && all.length > 0) {
+        const secs = impSecciones(all);
+        body = secs.map(sec => {
+          const tamLabel = sec.tam === 'carta' ? 'Carta' : sec.tam === 'oficio' ? 'Oficio' : 'Tabloide';
+          const isByn = sec.maq.key === 'byn' || sec.maq.key === 'oce6320' || sec.maq.key === 'titan';
+          return `<div style="margin:6px 0 2px;padding:4px 8px;background:${sec.maq.color}18;border-radius:6px;border-left:3px solid ${sec.maq.color}">
+        <div style="font-size:10px;font-weight:700;color:${sec.maq.color}">${isByn ? '⬛' : '🎨'} ${sec.maq.label}</div>
+        <div style="font-size:10px;color:#64748b">${sec.papel} · ${tamLabel} <span style="color:${sec.maq.color};font-weight:700">${sec.items.length}</span></div>
+      </div>
+      ${sec.items.map(o => cardHTML(o, et, ei, false, etapas)).join('')}`;
+        }).join('');
+      } else {
+        body = all.length === 0 ? emptyMsg : all.map(o => cardHTML(o, et, ei, false, etapas)).join('');
+      }
       return `<div class="col${isAcab ? ' acab-col' : ''}" id="col_${et.id}" ondragover="onDragOver(event,'${et.id}')" ondragleave="onDragLeave(event)" ondrop="onDrop(event,'${et.id}')">
     <div class="col-hdr" style="border-color:${et.color}">
       <div style="display:flex;align-items:center;gap:6px"><span style="font-size:18px">${et.icon}</span>
@@ -1623,7 +1661,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       </div>
       <span class="badge" style="background:${et.color}33;color:${et.color}">${badgeLabel}</span>
     </div>
-    ${all.length === 0 ? `<div style="color:#334155;font-size:12px;text-align:center;padding:20px 0;border:2px dashed #1e293b;border-radius:8px;margin:4px 0">${searchQ ? '🔍 Sin resultados' : (isAcab ? 'Arrastra aquí' : 'Sin órdenes')}</div>` : all.map(o => cardHTML(o, et, ei, false, etapas)).join('')}
+    ${body}
   </div>`;
     }
 
@@ -1696,13 +1734,14 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         ppt: +g('f_ppt') || 8, portaPpt: +g('f_portappt') || 2,
         tabloidesSrc: +g('f_tabs') || 0,
         tipoInteriores: g('f_tint'), gramaje: g('f_gram'), tipoEncuadernacion: g('f_enc'),
+        maquina: g('f_maq') || 'auto', tamano: g('f_tam') || 'tabloide',
         fechaLimite: g('f_dl'), urgente: gc('f_urg'), notas: g('f_not'),
         _split: gc('f_split'),
       };
     }
     function modalHTML() {
       const isNew = modalId === null;
-      const ord = isNew ? { cliente: '', titulo: '', cantidad: 100, paginas: 200, ppt: 8, portaPpt: 2, tipoInteriores: 'byn', gramaje: 'normal', tipoEncuadernacion: 'normal', fechaLimite: '', urgente: false, notas: '' } : orders.find(o => o.id === modalId) || {};
+      const ord = isNew ? { cliente: '', titulo: '', cantidad: 100, paginas: 200, ppt: 8, portaPpt: 2, tipoInteriores: 'byn', gramaje: 'normal', tipoEncuadernacion: 'normal', maquina: 'auto', tamano: 'tabloide', fechaLimite: '', urgente: false, notas: '' } : orders.find(o => o.id === modalId) || {};
       const segBtns = (name, opts, val) => opts.map(([v, l, c]) => `<button class="seg${val === v ? ' on' : ''}" id="seg_${name}_${v}" style="${val === v ? `background:${c || '#3b82f6'};color:#0f172a;border-color:transparent` : ''}" onclick="setSeg('${name}','${v}')">${l}</button>`).join('');
       const tipo = ord.tipo || 'normal';
       const tipoLabel = tipo === 'int_sub' ? '📄 Interiores' : tipo === 'port_sub' ? '🎨 Portada' : tipo === 'union_result' ? '🔗 Unido' : '🖨️ Normal';
@@ -1735,6 +1774,12 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       <span class="lbl">Gramaje</span>
       <div style="display:flex;gap:6px;margin-top:6px"><input type="hidden" id="f_gram" value="${e(ord.gramaje || 'normal')}">
         ${segBtns('gram', [['normal', '≤ 150g', '#60a5fa'], ['grueso', '> 200g', '#f97316']], ord.gramaje || 'normal')}</div>
+      <span class="lbl">Máquina de impresión</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><input type="hidden" id="f_maq" value="${e(ord.maquina || 'auto')}">
+        ${segBtns('maq', [['auto','⚙️ Auto','#334155'],['oce6320','OCE 6320','#94a3b8'],['titan','Titan 6180','#64748b'],['c1352','Color 1352','#fb923c'],['c1351','Color 1351','#f97316'],['c10010','Color 10010','#ea580c']], ord.maquina || 'auto')}</div>
+      <span class="lbl">Tamaño de papel</span>
+      <div style="display:flex;gap:6px;margin-top:6px"><input type="hidden" id="f_tam" value="${e(ord.tamano || 'tabloide')}">
+        ${segBtns('tam', [['tabloide','Tabloide','#3b82f6'],['carta','Carta','#22c55e'],['oficio','Oficio','#a855f7']], ord.tamano || 'tabloide')}</div>
       <span class="lbl">Tipo de encuadernación</span>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><input type="hidden" id="f_enc" value="${e(ord.tipoEncuadernacion || 'normal')}">
         ${TIPOS_ENC.map(t => `<button class="seg${(ord.tipoEncuadernacion || 'normal') === t.id ? ' on' : ''}" id="seg_enc_${t.id}" style="${(ord.tipoEncuadernacion || 'normal') === t.id ? `background:${t.color};color:#0f172a;border-color:transparent` : ''}" onclick="setSeg('enc','${t.id}')">${t.icon} ${t.label}</button>`).join('')}
