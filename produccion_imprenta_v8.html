@@ -1395,7 +1395,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.31</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.32</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -1538,24 +1538,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       };
       const defaultUnit = { metric: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null, unit: 'lib/min', col: 'Libros' };
 
-      const MAQ_LABEL = { oce6320: 'OCE 6320', titan: 'Titan 6180', c1352: 'Color 1352', c1351: 'Color 1351', c10010: 'Color 10010' };
       const byStation = {};
-      rows.forEach(r => {
-        let key, sub = '';
-        if (r.etapa === 'impresion') {
-          const maq  = (r.maquina && r.maquina !== 'auto') ? (MAQ_LABEL[r.maquina] || r.maquina) : '';
-          const gram = r.gramaje === 'grueso' ? 'Grueso >200g' : r.gramaje === 'normal' ? 'Normal ≤150g' : '';
-          const tam  = r.tamano === 'carta' ? 'Carta' : r.tamano === 'oficio' ? 'Oficio' : r.tamano === 'tabloide' ? 'Tabloide' : '';
-          sub = [maq, gram, tam].filter(Boolean).join(' · ');
-          key = sub ? `${r.label}||${sub}` : r.label;
-        } else {
-          key = r.label;
-        }
-        if (!byStation[key]) byStation[key] = { label: r.label, sub, items: [] };
-        byStation[key].items.push(r);
-      });
+      rows.forEach(r => { if (!byStation[r.label]) byStation[r.label] = []; byStation[r.label].push(r); });
 
-      const stationBlocks = Object.values(byStation).map(({ label, sub, items }) => {
+      const stationBlocks = Object.entries(byStation).map(([label, items]) => {
         const etapa = items[0]?.etapa || '';
         const unitCfg = ETAPA_UNIT[etapa] || defaultUnit;
         const speeds = items.map(unitCfg.metric).filter(v => v !== null);
@@ -1564,10 +1550,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         const tableRows = items.map(r => {
           const spd = unitCfg.metric(r);
           const spdStr = spd !== null ? spd.toFixed(2) : '—';
-          const gramBadge = r.gramaje ? `<span style="background:#1e293b;color:#64748b;padding:1px 5px;border-radius:4px;font-size:10px;margin-left:4px">${r.gramaje === 'grueso' ? '>200g' : '≤150g'}</span>` : '';
-          const tamBadge  = r.tamano && r.tamano !== 'tabloide' ? `<span style="background:#1e293b;color:#64748b;padding:1px 5px;border-radius:4px;font-size:10px;margin-left:2px">${r.tamano}</span>` : '';
           return `<tr style="border-top:1px solid #0f172a">
-            <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(r.titulo.substring(0, 28))}${gramBadge}${tamBadge}</td>
+            <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(r.titulo.substring(0, 32))}</td>
             <td style="padding:6px 8px;text-align:right;color:#f1f5f9;font-weight:600">${useHojas ? (r.hojas || '—') : r.cantidad}</td>
             <td style="padding:6px 8px;text-align:right;color:#60a5fa">${r.mins} min</td>
             <td style="padding:6px 8px;text-align:right;color:#4ade80;font-weight:700">${spdStr}</td>
@@ -1576,10 +1560,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         }).join('');
         return `<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:14px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-            <div>
-              <div style="font-size:15px;font-weight:800;color:#f1f5f9">${e(label)}</div>
-              ${sub ? `<div style="font-size:11px;color:#64748b;margin-top:2px">${e(sub)}</div>` : ''}
-            </div>
+            <div style="font-size:15px;font-weight:800;color:#f1f5f9">${e(label)}</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <span style="background:#0a2040;border:1px solid #1d4ed8;padding:3px 10px;border-radius:6px;font-size:12px;color:#60a5fa">${items.length} registros</span>
               <span style="background:#0a2e1a;border:1px solid #166534;padding:3px 10px;border-radius:6px;font-size:12px;color:#4ade80;font-weight:700">Prom: ${avg.toFixed(2)} ${unitCfg.unit}</span>
