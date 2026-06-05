@@ -1203,8 +1203,11 @@
           const prev = existingSheets.find(x => x.id === newO.id);
           const yaVista = seenIds.has(newO.id);
 
+          // Si ya fue unida con otra orden (int+port → union_result), no resucitar del sheet
+          if (prev && prev._merged) return null;
+
           // Si la orden ya fue movida a acabados o más adelante, no regresar a impresión
-          if (prev && prev.etapa !== 'impresion' && !prev._merged) {
+          if (prev && prev.etapa !== 'impresion') {
             if (!yaVista) { countNuevas++; seenIds.add(newO.id); } else { countSinCambio++; }
             return { ...newO, etapa: prev.etapa, tiemposReales: prev.tiemposReales || [] };
           }
@@ -1215,9 +1218,8 @@
           } else {
             countActualizadas++;
           }
-          // Siempre preservar tiemposReales aunque la orden se actualice
           return prev ? { ...newO, tiemposReales: prev.tiemposReales || [] } : newO;
-        });
+        }).filter(Boolean);
 
         // Guardar historial actualizado
         try { localStorage.setItem('imp_seen', JSON.stringify([...seenIds])); } catch { }
@@ -1406,7 +1408,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.49</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.50</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
