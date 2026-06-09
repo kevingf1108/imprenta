@@ -1036,8 +1036,9 @@
       // Determina si es INT o PORT desde el status o asumimos "union_result" si solo hay 1 fila
       // En acabados normalmente ya vienen como trabajo unido
       const enc = detectEnc(acab, '');
-      // listo=TRUE en acabados → pasó a empaque (no terminado completamente)
-      const etapa = listo ? 'empaque' : 'acab_pl';
+      // etapa_actual en el sheet manda sobre todo lo demás
+      const etapaActual = col(row, 'etapa_actual', 'etapa actual', 'etapa');
+      const etapa = etapaActual ? etapaActual : (listo ? 'empaque' : 'acab_pl');
 
       return {
         id: `${itemNum}-A`,
@@ -1056,32 +1057,27 @@
     }
 
     // Marca Listo=TRUE en Google Sheets cuando se avanza una orden
-    function markListoInSheets(order, fromEtapa) {
-      if (!cfg.scriptUrl) { showToast('⚠️ Falta URL del Script en ⚙️ Configuración → Conexión con Sheets'); return; }
-      if (!order._fromSheets) { return; } // orden manual, sin fila en Sheets
-      const itemNum = (order.grupoId || '');
-      if (!itemNum) { showToast('⚠️ Orden sin # ITEM, no se puede marcar en Sheets'); return; }
-      const hoja = fromEtapa === 'impresion' ? 'impresion' : 'acabados';
-      const po = order.tipo === 'int_sub' ? 'interior' : order.tipo === 'port_sub' ? 'portada' : '';
-      let url = `${cfg.scriptUrl}?item=${encodeURIComponent(itemNum)}&hoja=${encodeURIComponent(hoja)}&po=${encodeURIComponent(po)}`;
-      if (fromEtapa === 'impresion') {
-        url += `&addAcab=1`
-          + `&titulo=${encodeURIComponent(order.titulo || '')}`
-          + `&nombre=${encodeURIComponent(order.cliente || order.baseTitulo || '')}`
-          + `&cantidad=${encodeURIComponent(order.cantidad || 0)}`
-          + `&hojas=${encodeURIComponent(order.tabloidesSrc || 0)}`
-          + `&tabloides=${encodeURIComponent(order.tabloidesSrc || 0)}`
-          + `&colorBn=${encodeURIComponent(order.tipoInteriores || '')}`
-          + `&papel=${encodeURIComponent(order.gramaje || '')}`
-          + `&entrega=${encodeURIComponent(order.fechaLimite || '')}`
-          + `&urgente=${encodeURIComponent(order.urgente ? 'URGENTE' : '')}`;
+    function callScript(order, toEtapa) {
+      if (!cfg.scriptUrl || !order._fromSheets) return;
+      const item = String(order.grupoId || '').trim();
+      if (!item) return;
+      const from = order.etapa;
+      let action = '', extra = '';
+      if (toEtapa === 'listo') {
+        action = 'marcarListo';
+      } else if (toEtapa === 'empaque') {
+        action = 'moverAempacado';
+      } else if (isAcabEtapa(toEtapa) && from === 'impresion') {
+        action = 'moverAacabados';
+      } else if (isAcabEtapa(toEtapa)) {
+        action = 'updateEtapa';
+        extra = '&etapa=' + encodeURIComponent(toEtapa);
       }
-      const tit = (order.titulo || order.baseTitulo || itemNum).substring(0, 30);
-      showToast(`📤 Enviando a Sheets: ${tit}...`);
-      fetch(url, { mode: 'no-cors' })
-        .then(() => showToast(`✅ Enviado a Sheets: ${tit}`))
-        .catch(() => showToast('❌ Error de conexión con Sheets'));
+      if (!action) return;
+      const url = cfg.scriptUrl + '?action=' + action + '&item=' + encodeURIComponent(item) + extra;
+      fetch(url, { mode: 'no-cors' }).catch(() => {});
     }
+    function markListoInSheets(order, fromEtapa) { callScript(order, 'listo'); }
 
     async function testScriptUrl() {
       if (!cfg.scriptUrl) { showToast('⚠️ Ingresa la URL del Script primero'); return; }
@@ -1373,7 +1369,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const idx = orders.findIndex(x => x.id === _dragId);
       orders[idx] = { ...orders[idx], etapa: colId };
       if (colId === 'listo') { clearOrderTimers(_dragId); pushHistorial(orders[idx]); }
-      if (colId === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
+      callScript(orders[idx], colId);
       autoMergeCheck(); saveS(); render();
       _dragId = null;
     }
@@ -1397,7 +1393,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.51</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.52</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
@@ -2213,14 +2209,14 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         if (!target) return;
         orders[idx] = { ...orders[idx], etapa: target.id };
         if (target.id === 'listo') { clearOrderTimers(id); pushHistorial(orders[idx]); }
-        if (target.id === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
+        callScript(orders[idx], target.id);
         autoMergeCheck(); saveS(); render(); return;
       }
       const ni = ei + dir;
       if (ni < 0 || ni >= flow.length) return;
       orders[idx] = { ...orders[idx], etapa: flow[ni].id };
       if (flow[ni].id === 'listo') { clearOrderTimers(id); pushHistorial(orders[idx]); }
-      if (flow[ni].id === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
+      callScript(orders[idx], flow[ni].id);
       autoMergeCheck();
       saveS(); render();
     }
@@ -2413,7 +2409,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         }
         orders[idx] = { ...orders[idx], etapa: nextStep.id };
         if (nextStep.id === 'listo') pushHistorial(orders[idx]);
-        if (nextStep.id === 'listo' || fromEtapa === 'impresion') markListoInSheets(orders[idx], fromEtapa);
+        callScript(orders[idx], nextStep.id);
         if (proc && proc.logScan) fetchLastSalidaRow(proc.label);
         movedLabels.push(nextStep.label);
       });
