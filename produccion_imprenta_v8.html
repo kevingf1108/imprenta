@@ -1170,65 +1170,54 @@
           countAcab = newOrders.length - countImp;
         }
 
-        // Deduplicar por ID
-        const _seenNewIds = new Set();
-        newOrders = newOrders.filter(o => { if (_seenNewIds.has(o.id)) return false; _seenNewIds.add(o.id); return true; });
+        // Deduplicar sheet orders por grupoId (Impresion org tiene prioridad)
+        const _seenGrupos = new Set();
+        newOrders = newOrders.filter(o => {
+          if (!o.grupoId || _seenGrupos.has(o.grupoId)) return false;
+          _seenGrupos.add(o.grupoId);
+          return true;
+        });
 
-        if (!newOrders.length) {
-          const impOk = respImp && respImp.ok;
-          let msg = '<span style="color:#ef4444">⚠️ No se encontraron órdenes.</span><br><br>';
-          if (!impOk) {
-            msg += '<span style="color:#f97316">❌ No se pudo conectar a las hojas. Posibles causas:</span><br>';
-            msg += '<span style="color:#94a3b8;font-size:12px">• La hoja no está publicada como CSV<br>• La URL del spreadsheet cambió<br>• Problema de red o CORS</span><br><br>';
-          } else {
-            msg += '<span style="color:#f97316">La hoja conectó pero no tiene filas con datos válidos.</span><br>';
-            msg += '<span style="color:#94a3b8;font-size:12px">Verifica que las columnas tengan encabezados: <b>nombre, # item, p_o, listo, entrega</b></span><br><br>';
-          }
-          msg += '<span style="color:#64748b;font-size:11px">Para publicar: Archivo → Compartir → Publicar en la web → selecciona la hoja → formato CSV → Publicar.</span>';
-          if (log) log.innerHTML = msg;
+        if (!respImp && !respAcab) {
+          if (log) log.innerHTML = '<span style="color:#ef4444">❌ No se pudo conectar a ninguna hoja. Verifica la red o que las hojas estén publicadas como CSV.</span>';
           if (btn) btn.disabled = false;
           return;
         }
 
-        // Cargar historial de IDs ya vistos (para detectar nuevas vs ya conocidas)
-        let seenIds = new Set();
-        try { seenIds = new Set(JSON.parse(localStorage.getItem('imp_seen') || '[]')); } catch { }
-
-        const manual = _snap.filter(o => !o._fromSheets);
-        const existingSheets = _snap.filter(o => o._fromSheets);
+        // ── SYNC ADITIVO ────────────────────────────────────────────
+        // Firebase es la fuente de verdad para el estado de las órdenes.
+        // Los sheets solo AGREGAN órdenes nuevas — nunca modifican etapa.
+        // ────────────────────────────────────────────────────────────
+        const snapById    = new Map(_snap.map(o => [o.id, o]));
+        const snapByGrupo = new Map(_snap.filter(o => o.grupoId).map(o => [o.grupoId, o]));
 
         let countNuevas = 0, countActualizadas = 0, countSinCambio = 0;
+        const toAdd = [];
 
-        newOrders = newOrders.map(newO => {
-          const prev = existingSheets.find(x => x.id === newO.id);
-          const yaVista = seenIds.has(newO.id);
-
-          // Si ya fue unida con otra orden (int+port → union_result), no resucitar del sheet
-          if (prev && prev._merged) return null;
-
-          // Si la orden ya fue movida a acabados o más adelante, no regresar a impresión
-          if (prev && prev.etapa !== 'impresion') {
-            if (!yaVista) { countNuevas++; seenIds.add(newO.id); } else { countSinCambio++; }
-            return { ...newO, etapa: prev.etapa, tiemposReales: prev.tiemposReales || [] };
-          }
-
-          if (!yaVista) {
-            countNuevas++;
-            seenIds.add(newO.id);
+        for (const sheetO of newOrders) {
+          const existing = snapById.get(sheetO.id) || snapByGrupo.get(sheetO.grupoId);
+          if (existing) {
+            // Actualizar solo campos de datos (nunca etapa ni estado de la app)
+            const changed = existing.baseTitulo !== sheetO.baseTitulo ||
+                            existing.fechaLimite !== sheetO.fechaLimite ||
+                            existing.cantidad    !== sheetO.cantidad;
+            if (changed) {
+              existing.baseTitulo   = sheetO.baseTitulo   || existing.baseTitulo;
+              existing.fechaLimite  = sheetO.fechaLimite  || existing.fechaLimite;
+              existing.cantidad     = sheetO.cantidad      || existing.cantidad;
+              existing.tabloidesSrc = sheetO.tabloidesSrc || existing.tabloidesSrc;
+              countActualizadas++;
+            } else {
+              countSinCambio++;
+            }
           } else {
-            countActualizadas++;
+            toAdd.push(sheetO);
+            countNuevas++;
           }
-          return prev ? { ...newO, tiemposReales: prev.tiemposReales || [] } : newO;
-        }).filter(Boolean);
+        }
 
-        // Guardar historial actualizado
-        try { localStorage.setItem('imp_seen', JSON.stringify([...seenIds])); } catch { }
-
-        const newIds = new Set(newOrders.map(o => o.id));
-        const orphaned = existingSheets.filter(o =>
-          !newIds.has(o.id) && o.etapa !== 'impresion' && o.etapa !== 'listo' && !o._merged
-        );
-        orders = [...manual, ...newOrders, ...orphaned];
+        // Conservar TODOS los órdenes de Firebase + agregar los verdaderamente nuevos
+        orders = [..._snap, ...toAdd];
         autoMergeCheck();
         await saveS();
 
@@ -1240,7 +1229,7 @@
             <span style="background:#0a1f3a;border:1px solid #1d4ed8;padding:4px 10px;border-radius:6px;color:#60a5fa">🔄 ${countActualizadas} actualizadas</span>
             <span style="background:#0f172a;border:1px solid #334155;padding:4px 10px;border-radius:6px;color:#64748b">✓ ${countSinCambio} sin cambio</span>
           </div>
-          <div style="margin-top:6px;font-size:11px;color:#475569">Total en sistema: ${newOrders.length} · Historial acumulado: ${seenIds.size} órdenes</div>
+          <div style="margin-top:6px;font-size:11px;color:#475569">Total en sistema: ${orders.length} · De sheets: ${newOrders.length}</div>
           <details style="margin-top:10px"><summary style="font-size:11px;color:#64748b;cursor:pointer">🔍 Ver tabloides leídos de Impresión</summary>
           <div style="margin-top:6px;max-height:180px;overflow-y:auto;background:#0f172a;border-radius:6px;padding:8px;font-size:11px;font-family:monospace">
           ${_debugImp.map(d => `<div style="color:${d.tabs===0?'#ef4444':'#94a3b8'}">${e(d.id)} → <b style="color:${d.tabs===0?'#ef4444':'#4ade80'}">${d.tabs} tab</b>${d.tabs===0?' ⚠️ NO ENCONTRÓ COLUMNA':''}${d.tabs>0&&d.tabs<100?' ⚠️ NÚMERO SOSPECHOSO':''}</div>`).join('')}
@@ -1408,7 +1397,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.50</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.51</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
