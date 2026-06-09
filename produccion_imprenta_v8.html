@@ -611,46 +611,25 @@
         const data = snap.val();
         const firstLoad = !_fbReady;
         _fbReady = true;
-        if (data && data.orders) {
-          const raw = data.orders;
-          orders = (Array.isArray(raw) ? raw : Object.values(raw)).filter(Boolean);
+        // Firebase solo guarda cfg, stats e historial — las órdenes vienen de los sheets
+        if (data) {
           cfg = data.cfg ? { ...JSON.parse(JSON.stringify(CFG0)), ...data.cfg } : JSON.parse(JSON.stringify(CFG0));
-        } else if (!data && orders.length > 0) {
-          return;
-        } else {
-          orders = [];
-          cfg = JSON.parse(JSON.stringify(CFG0));
+          const rawSH = data.statsHistory;
+          statsHistory = rawSH ? (Array.isArray(rawSH) ? rawSH : Object.values(rawSH)).filter(Boolean) : [];
+          const rawH = data.historial;
+          historial = rawH ? (Array.isArray(rawH) ? rawH : Object.values(rawH)).filter(Boolean) : [];
         }
-        const rawSH = data && data.statsHistory;
-        statsHistory = rawSH ? (Array.isArray(rawSH) ? rawSH : Object.values(rawSH)).filter(Boolean) : [];
-        const rawH = data && data.historial;
-        historial = rawH ? (Array.isArray(rawH) ? rawH : Object.values(rawH)).filter(Boolean) : [];
-        // Migrar tiemposReales de órdenes existentes que aún no estén en el historial
-        const knownTs = new Set(statsHistory.map(s => s.ts));
-        let migrated = false;
-        orders.forEach(o => {
-          (o.tiemposReales || []).forEach(t => {
-            if (t.ts && !knownTs.has(t.ts)) {
-              statsHistory.push({ ordId: o.id, titulo: o.titulo || o.baseTitulo || o.id, etapa: t.etapa, label: t.label || t.etapa, mins: t.mins, cantidad: o.cantidad || 0, hojas: o.tabloidesSrc || 0, gramaje: o.gramaje || '', tamano: o.tamano || '', maquina: o.maquina || '', ts: t.ts });
-              knownTs.add(t.ts);
-              migrated = true;
-            }
-          });
-        });
-        if (migrated) saveS();
-        autoMergeCheck();
         render();
         if (firstLoad) setTimeout(() => setAutoSync(true), 500);
       }, err => {
         console.error('Firebase error:', err);
-        // Fallback a localStorage si no hay conexión
-        try { const o = localStorage.getItem('imp_o'), c = localStorage.getItem('imp_c'), sh = localStorage.getItem('imp_sh'); orders = o ? JSON.parse(o) : []; cfg = c ? JSON.parse(c) : JSON.parse(JSON.stringify(CFG0)); statsHistory = sh ? JSON.parse(sh) : []; } catch { orders = []; cfg = JSON.parse(JSON.stringify(CFG0)); statsHistory = []; }
-        autoMergeCheck(); render();
+        try { const c = localStorage.getItem('imp_c'), sh = localStorage.getItem('imp_sh'); cfg = c ? JSON.parse(c) : JSON.parse(JSON.stringify(CFG0)); statsHistory = sh ? JSON.parse(sh) : []; } catch { cfg = JSON.parse(JSON.stringify(CFG0)); statsHistory = []; }
+        render();
       });
     }
     function saveS() {
-      return _ref.set({ orders, cfg, statsHistory, historial }).catch(e => {
-        try { localStorage.setItem('imp_o', JSON.stringify(orders)); localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); localStorage.setItem('imp_h', JSON.stringify(historial)); } catch { }
+      return _ref.set({ cfg, statsHistory, historial }).catch(e => {
+        try { localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); localStorage.setItem('imp_h', JSON.stringify(historial)); } catch { }
       });
     }
     function pushHistorial(o) {
@@ -1180,40 +1159,15 @@
           return;
         }
 
-        // ── SYNC ADITIVO ────────────────────────────────────────────
-        // Firebase es la fuente de verdad para el estado de las órdenes.
-        // Los sheets solo AGREGAN órdenes nuevas — nunca modifican etapa.
+        // ── SHEETS COMO FUENTE DE VERDAD ────────────────────────────
+        // Las órdenes se reconstruyen completamente desde los sheets.
+        // Se conservan solo las órdenes manuales (no vienen de sheets).
         // ────────────────────────────────────────────────────────────
-        const snapById    = new Map(_snap.map(o => [o.id, o]));
-        const snapByGrupo = new Map(_snap.filter(o => o.grupoId).map(o => [o.grupoId, o]));
+        const manual = _snap.filter(o => !o._fromSheets);
+        const countNuevas = newOrders.length;
+        const countActualizadas = 0, countSinCambio = 0;
 
-        let countNuevas = 0, countActualizadas = 0, countSinCambio = 0;
-        const toAdd = [];
-
-        for (const sheetO of newOrders) {
-          const existing = snapById.get(sheetO.id) || snapByGrupo.get(sheetO.grupoId);
-          if (existing) {
-            // Actualizar solo campos de datos (nunca etapa ni estado de la app)
-            const changed = existing.baseTitulo !== sheetO.baseTitulo ||
-                            existing.fechaLimite !== sheetO.fechaLimite ||
-                            existing.cantidad    !== sheetO.cantidad;
-            if (changed) {
-              existing.baseTitulo   = sheetO.baseTitulo   || existing.baseTitulo;
-              existing.fechaLimite  = sheetO.fechaLimite  || existing.fechaLimite;
-              existing.cantidad     = sheetO.cantidad      || existing.cantidad;
-              existing.tabloidesSrc = sheetO.tabloidesSrc || existing.tabloidesSrc;
-              countActualizadas++;
-            } else {
-              countSinCambio++;
-            }
-          } else {
-            toAdd.push(sheetO);
-            countNuevas++;
-          }
-        }
-
-        // Conservar TODOS los órdenes de Firebase + agregar los verdaderamente nuevos
-        orders = [..._snap, ...toAdd];
+        orders = [...manual, ...newOrders];
         autoMergeCheck();
         await saveS();
 
@@ -1393,7 +1347,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
       const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
       return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.52</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.53</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
