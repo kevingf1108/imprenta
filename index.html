@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.61';
+        const APP_VERSION = 'v8.62';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1064,6 +1064,7 @@
         // Marca Listo=TRUE en Google Sheets cuando se avanza una orden
         // fromEtapa: etapa anterior (antes del movimiento)
         function callScript(order, toEtapa, fromEtapa) {
+            console.log('[callScript]', { tipo: order.tipo, fromSheets: order._fromSheets, grupoId: order.grupoId, fromEtapa, toEtapa, hasUrl: !!cfg.scriptUrl });
             if (!cfg.scriptUrl) return;
             // union_result no tiene _fromSheets pero representa INT+PORT — marcar ambos en acabados
             if (order.tipo === 'union_result' && order.grupoId && (toEtapa === 'listo' || toEtapa === 'empaque')) {
