@@ -621,8 +621,11 @@
                     // Restaurar órdenes manuales (union_results) guardadas en Firebase
                     const rawMO = data.manualOrders;
                     if (rawMO) {
-                        const mo = (Array.isArray(rawMO) ? rawMO : Object.values(rawMO)).filter(Boolean);
-                        orders = mo;
+                        // Forzar _fromSheets: false para que sobrevivan el filtro del sync
+                        const mo = (Array.isArray(rawMO) ? rawMO : Object.values(rawMO))
+                            .filter(Boolean).map(o => ({ ...o, _fromSheets: false }));
+                        // Mezclar con órdenes de sheets existentes en lugar de reemplazar todo
+                        orders = [...orders.filter(o => o._fromSheets), ...mo];
                     }
                 }
                 render();
@@ -1172,7 +1175,9 @@
                 // Las órdenes se reconstruyen completamente desde los sheets.
                 // Se conservan solo las órdenes manuales (no vienen de sheets).
                 // ────────────────────────────────────────────────────────────
-                const manual = _snap.filter(o => !o._fromSheets);
+                // Preservar union_results aunque hereden _fromSheets:true de versiones viejas
+                const manual = _snap.filter(o => !o._fromSheets || o.tipo === 'union_result')
+                                    .map(o => ({ ...o, _fromSheets: false }));
                 const countNuevas = newOrders.length;
                 const countActualizadas = 0, countSinCambio = 0;
 
@@ -1372,7 +1377,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
             const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
             return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.57</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.58</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
