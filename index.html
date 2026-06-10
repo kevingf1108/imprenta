@@ -423,6 +423,24 @@
     <div id="root"></div>
     <script>
         'use strict';
+        // ── Auto-actualización ───────────────────────────────
+        const APP_VERSION = 'v8.59';
+        async function checkForUpdate() {
+            try {
+                const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
+                if (!r.ok) return;
+                const v = (await r.text()).trim();
+                if (v && v !== APP_VERSION && !document.getElementById('update-banner')) {
+                    const el = document.createElement('div');
+                    el.id = 'update-banner';
+                    el.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#1d4ed8;color:#fff;padding:10px 18px;display:flex;align-items:center;justify-content:space-between;z-index:9999;font-size:13px;font-weight:600;box-shadow:0 2px 8px #0004';
+                    el.innerHTML = `<span>🆕 Nueva versión disponible (${v})</span><button onclick="location.reload(true)" style="background:#fff;color:#1d4ed8;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:700;font-size:13px">Actualizar ahora</button>`;
+                    document.body.prepend(el);
+                }
+            } catch {}
+        }
+        setTimeout(checkForUpdate, 4000);
+        setInterval(checkForUpdate, 5 * 60 * 1000);
         // ── Firebase ────────────────────────────────────────
         firebase.initializeApp({
             apiKey: "AIzaSyB40xYmdLxTlIFyPbP3sqnru35WMNpHs_0",
