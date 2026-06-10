@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.60';
+        const APP_VERSION = 'v8.61';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1062,27 +1062,36 @@
         }
 
         // Marca Listo=TRUE en Google Sheets cuando se avanza una orden
-        function callScript(order, toEtapa) {
-            if (!cfg.scriptUrl || !order._fromSheets) return;
+        // fromEtapa: etapa anterior (antes del movimiento)
+        function callScript(order, toEtapa, fromEtapa) {
+            if (!cfg.scriptUrl) return;
+            // union_result no tiene _fromSheets pero representa INT+PORT — marcar ambos en acabados
+            if (order.tipo === 'union_result' && order.grupoId && (toEtapa === 'listo' || toEtapa === 'empaque')) {
+                const base = cfg.scriptUrl + '?action=marcarListo&item=' + encodeURIComponent(String(order.grupoId).trim()) + '&hoja=acabados';
+                fetch(base + '&po=int', { mode: 'no-cors' }).catch(() => {});
+                fetch(base + '&po=port', { mode: 'no-cors' }).catch(() => {});
+                return;
+            }
+            if (!order._fromSheets) return;
             const item = String(order.grupoId || '').trim();
             if (!item) return;
-            const from = order.etapa;
-            let action = '', extra = '';
-            if (toEtapa === 'listo') {
-                action = 'marcarListo';
-            } else if (toEtapa === 'empaque') {
-                action = 'moverAempacado';
-            } else if (isAcabEtapa(toEtapa) && from === 'impresion') {
-                action = 'moverAacabados';
-            } else if (isAcabEtapa(toEtapa)) {
-                action = 'updateEtapa';
-                extra = '&etapa=' + encodeURIComponent(toEtapa);
+            const tipo = order.tipo || 'normal';
+            const esImpresion = tipo === 'int_sub' || tipo === 'port_sub';
+            const hoja = esImpresion ? 'impresion' : 'acabados';
+            const po = tipo === 'int_sub' ? 'int' : tipo === 'port_sub' ? 'port' : '';
+
+            // Sale de Impresión hacia Acabados → marcar listo en hoja Impresion
+            if (fromEtapa === 'impresion' && isAcabEtapa(toEtapa)) {
+                fetch(cfg.scriptUrl + '?action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=impresion' + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => {});
+                return;
             }
-            if (!action) return;
-            const url = cfg.scriptUrl + '?action=' + action + '&item=' + encodeURIComponent(item) + extra;
-            fetch(url, { mode: 'no-cors' }).catch(() => { });
+            // Llega a Empaque o Listo → marcar listo en su hoja correspondiente
+            if (toEtapa === 'listo' || toEtapa === 'empaque') {
+                fetch(cfg.scriptUrl + '?action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=' + hoja + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => {});
+                return;
+            }
         }
-        function markListoInSheets(order, fromEtapa) { callScript(order, 'listo'); }
+        function markListoInSheets(order, fromEtapa) { callScript(order, 'listo', fromEtapa); }
 
         async function testScriptUrl() {
             if (!cfg.scriptUrl) { showToast('⚠️ Ingresa la URL del Script primero'); return; }
@@ -1365,7 +1374,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             orders[idx] = { ...orders[idx], etapa: colId };
             etapaMap[_dragId] = colId;
             if (colId === 'listo') { delete etapaMap[_dragId]; clearOrderTimers(_dragId); pushHistorial(orders[idx]); }
-            callScript(orders[idx], colId);
+            callScript(orders[idx], colId, fromEtapa);
             autoMergeCheck(); saveS(); render();
             _dragId = null;
         }
@@ -2206,7 +2215,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 orders[idx] = { ...orders[idx], etapa: target.id };
                 etapaMap[id] = target.id;
                 if (target.id === 'listo') { delete etapaMap[id]; clearOrderTimers(id); pushHistorial(orders[idx]); }
-                callScript(orders[idx], target.id);
+                callScript(orders[idx], target.id, fromEtapa);
                 autoMergeCheck(); saveS(); render(); return;
             }
             const ni = ei + dir;
@@ -2214,7 +2223,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             orders[idx] = { ...orders[idx], etapa: flow[ni].id };
             etapaMap[id] = flow[ni].id;
             if (flow[ni].id === 'listo') { delete etapaMap[id]; clearOrderTimers(id); pushHistorial(orders[idx]); }
-            callScript(orders[idx], flow[ni].id);
+            callScript(orders[idx], flow[ni].id, fromEtapa);
             autoMergeCheck();
             saveS(); render();
         }
@@ -2410,7 +2419,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 orders[idx] = { ...orders[idx], etapa: nextStep.id };
                 etapaMap[o.id] = nextStep.id;
                 if (nextStep.id === 'listo') { delete etapaMap[o.id]; pushHistorial(orders[idx]); }
-                callScript(orders[idx], nextStep.id);
+                callScript(orders[idx], nextStep.id, fromEtapa);
                 if (proc && proc.logScan) fetchLastSalidaRow(proc.label);
                 movedLabels.push(nextStep.label);
             });
