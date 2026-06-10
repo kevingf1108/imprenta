@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.62';
+        const APP_VERSION = 'v8.63';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1064,7 +1064,6 @@
         // Marca Listo=TRUE en Google Sheets cuando se avanza una orden
         // fromEtapa: etapa anterior (antes del movimiento)
         function callScript(order, toEtapa, fromEtapa) {
-            console.log('[callScript]', { tipo: order.tipo, fromSheets: order._fromSheets, grupoId: order.grupoId, fromEtapa, toEtapa, hasUrl: !!cfg.scriptUrl });
             if (!cfg.scriptUrl) return;
             // union_result no tiene _fromSheets pero representa INT+PORT — marcar ambos en acabados
             if (order.tipo === 'union_result' && order.grupoId && (toEtapa === 'listo' || toEtapa === 'empaque')) {
@@ -1081,9 +1080,9 @@
             const hoja = esImpresion ? 'impresion' : 'acabados';
             const po = tipo === 'int_sub' ? 'int' : tipo === 'port_sub' ? 'port' : '';
 
-            // Sale de Impresión hacia Acabados → marcar listo en hoja Impresion
+            // Sale de Impresión hacia Acabados → mover fila de Impresion org a Acabado org
             if (fromEtapa === 'impresion' && isAcabEtapa(toEtapa)) {
-                fetch(cfg.scriptUrl + '?action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=impresion' + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => {});
+                fetch(cfg.scriptUrl + '?action=moverAacabados&item=' + encodeURIComponent(item) + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => {});
                 return;
             }
             // Llega a Empaque o Listo → marcar listo en su hoja correspondiente
