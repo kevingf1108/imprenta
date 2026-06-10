@@ -424,18 +424,14 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.59';
+        const APP_VERSION = 'v8.60';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
                 if (!r.ok) return;
                 const v = (await r.text()).trim();
-                if (v && v !== APP_VERSION && !document.getElementById('update-banner')) {
-                    const el = document.createElement('div');
-                    el.id = 'update-banner';
-                    el.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#1d4ed8;color:#fff;padding:10px 18px;display:flex;align-items:center;justify-content:space-between;z-index:9999;font-size:13px;font-weight:600;box-shadow:0 2px 8px #0004';
-                    el.innerHTML = `<span>🆕 Nueva versión disponible (${v})</span><button onclick="location.reload(true)" style="background:#fff;color:#1d4ed8;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:700;font-size:13px">Actualizar ahora</button>`;
-                    document.body.prepend(el);
+                if (v && v !== APP_VERSION) {
+                    location.reload(true);
                 }
             } catch {}
         }
@@ -1393,7 +1389,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
             const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
             return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.59</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.60</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
