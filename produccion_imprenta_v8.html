@@ -778,7 +778,8 @@
             const startStep = getUnionStartStep(enc);
             orders.push({
                 ...intSub, id: nextId(), tipo: 'union_result',
-                titulo: intSub.baseTitulo || intSub.titulo.replace('INT — ', ''), etapa: startStep
+                titulo: intSub.baseTitulo || intSub.titulo.replace('INT — ', ''), etapa: startStep,
+                _fromSheets: false
             });
             orders = orders.map(o => (o.id === intSub.id || o.id === portSub.id) ? { ...o, etapa: 'listo', _merged: true } : o);
             delete etapaMap[intSub.id]; delete etapaMap[portSub.id];
@@ -1365,7 +1366,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
             const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
             return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.55</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.56</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
