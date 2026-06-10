@@ -611,7 +611,6 @@
                 const data = snap.val();
                 const firstLoad = !_fbReady;
                 _fbReady = true;
-                // Firebase solo guarda cfg, stats e historial — las órdenes vienen de los sheets
                 if (data) {
                     cfg = data.cfg ? { ...JSON.parse(JSON.stringify(CFG0)), ...data.cfg } : JSON.parse(JSON.stringify(CFG0));
                     const rawSH = data.statsHistory;
@@ -619,6 +618,12 @@
                     const rawH = data.historial;
                     historial = rawH ? (Array.isArray(rawH) ? rawH : Object.values(rawH)).filter(Boolean) : [];
                     etapaMap = data.etapaMap || {};
+                    // Restaurar órdenes manuales (union_results) guardadas en Firebase
+                    const rawMO = data.manualOrders;
+                    if (rawMO) {
+                        const mo = (Array.isArray(rawMO) ? rawMO : Object.values(rawMO)).filter(Boolean);
+                        orders = mo;
+                    }
                 }
                 render();
                 if (firstLoad) setTimeout(() => setAutoSync(true), 500);
@@ -629,7 +634,8 @@
             });
         }
         function saveS() {
-            return _ref.set({ cfg, statsHistory, historial, etapaMap }).catch(e => {
+            const manualOrders = orders.filter(o => !o._fromSheets);
+            return _ref.set({ cfg, statsHistory, historial, etapaMap, manualOrders }).catch(e => {
                 try { localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); localStorage.setItem('imp_h', JSON.stringify(historial)); } catch { }
             });
         }
@@ -1366,7 +1372,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
             const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
             return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.56</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.57</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
