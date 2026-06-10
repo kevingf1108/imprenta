@@ -1142,10 +1142,9 @@
                 if (respAcab && respAcab.ok) {
                     const text = await respAcab.text();
                     const rows = parseCSV(text);
-                    // grupoIds ya cubiertos: los de Impresion org + los que ya existen en Firebase
+                    // grupoIds ya cubiertos: solo los de Impresion org (no usar orders viejos)
                     const gruposCubiertos = new Set([
                         ...newOrders.map(o => o.grupoId).filter(Boolean),
-                        ...orders.filter(o => o._fromSheets && o.grupoId).map(o => o.grupoId),
                     ]);
                     rows.forEach(row => {
                         const o = mapAcabRow(row);
@@ -1176,8 +1175,7 @@
                 // Se conservan solo las órdenes manuales (no vienen de sheets).
                 // ────────────────────────────────────────────────────────────
                 // Preservar union_results aunque hereden _fromSheets:true de versiones viejas
-                const manual = _snap.filter(o => !o._fromSheets || o.tipo === 'union_result')
-                                    .map(o => ({ ...o, _fromSheets: false }));
+                const manual = _snap.filter(o => !o._fromSheets);
                 const countNuevas = newOrders.length;
                 const countActualizadas = 0, countSinCambio = 0;
 
@@ -1377,7 +1375,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
             const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
             return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.58</span>
+    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">v8.59</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
       ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
