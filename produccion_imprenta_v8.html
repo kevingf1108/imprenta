@@ -1169,9 +1169,18 @@
                 const countNuevas = newOrders.length;
                 const countActualizadas = 0, countSinCambio = 0;
 
-                // Aplicar posiciones guardadas en Firebase (etapaMap) sobre lo que dicen los sheets,
-                // excepto si Sheets ya marcó la orden como listo (Sheets gana en ese caso)
+                // Grupos que ya tienen un union_result activo — no re-unir en este sync
+                const _activeUnions = new Set(
+                    manual.filter(o => o.tipo === 'union_result' && o.grupoId && !o._merged && o.etapa !== 'listo')
+                          .map(o => o.grupoId)
+                );
+
+                // Aplicar posiciones guardadas en Firebase (etapaMap) sobre lo que dicen los sheets
                 orders = [...manual, ...newOrders.map(o => {
+                    // Si ya existe un union_result para este grupo, ocultar INT/PORT para no re-unirlos
+                    if (_activeUnions.has(o.grupoId) && (o.tipo === 'int_sub' || o.tipo === 'port_sub')) {
+                        return { ...o, _merged: true, etapa: 'listo' };
+                    }
                     if (o.etapa === 'listo' && etapaMap[o.id]) { delete etapaMap[o.id]; return o; }
                     if (etapaMap[o.id] && o.etapa !== 'listo') return { ...o, etapa: etapaMap[o.id] };
                     return o;
