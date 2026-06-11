@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.66';
+        const APP_VERSION = 'v8.67';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1065,11 +1065,16 @@
         // fromEtapa: etapa anterior (antes del movimiento)
         function callScript(order, toEtapa, fromEtapa) {
             if (!cfg.scriptUrl) return;
-            // union_result no tiene _fromSheets pero representa INT+PORT — marcar ambos en acabados
-            if (order.tipo === 'union_result' && order.grupoId && (toEtapa === 'listo' || toEtapa === 'empaque')) {
-                const base = cfg.scriptUrl + '?action=marcarListo&item=' + encodeURIComponent(String(order.grupoId).trim()) + '&hoja=acabados';
-                fetch(base + '&po=int', { mode: 'no-cors' }).catch(() => {});
-                fetch(base + '&po=port', { mode: 'no-cors' }).catch(() => {});
+            // union_result representa INT+PORT — mover/eliminar ambas filas en Acabado org
+            if (order.tipo === 'union_result' && order.grupoId) {
+                const it = encodeURIComponent(String(order.grupoId).trim());
+                if (toEtapa === 'empaque') {
+                    fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + it, { mode: 'no-cors' }).catch(() => {});
+                    fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + it, { mode: 'no-cors' }).catch(() => {});
+                } else if (toEtapa === 'listo') {
+                    fetch(cfg.scriptUrl + '?action=marcarListo&item=' + it + '&hoja=acabados&po=int', { mode: 'no-cors' }).catch(() => {});
+                    fetch(cfg.scriptUrl + '?action=marcarListo&item=' + it + '&hoja=acabados&po=port', { mode: 'no-cors' }).catch(() => {});
+                }
                 return;
             }
             if (!order._fromSheets) return;
