@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.64';
+        const APP_VERSION = 'v8.65';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1085,8 +1085,13 @@
                 fetch(cfg.scriptUrl + '?action=moverAacabados&item=' + encodeURIComponent(item) + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => {});
                 return;
             }
-            // Llega a Empaque o Listo → marcar listo en su hoja correspondiente
-            if (toEtapa === 'listo' || toEtapa === 'empaque') {
+            // Llega a Empaque → mover fila de Acabado org a Empacado
+            if (toEtapa === 'empaque') {
+                fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + encodeURIComponent(item), { mode: 'no-cors' }).catch(() => {});
+                return;
+            }
+            // Llega a Listo → eliminar de Acabado org / Empacado
+            if (toEtapa === 'listo') {
                 fetch(cfg.scriptUrl + '?action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=' + hoja + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => {});
                 return;
             }
