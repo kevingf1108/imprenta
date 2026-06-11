@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.63';
+        const APP_VERSION = 'v8.64';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1089,6 +1089,10 @@
             if (toEtapa === 'listo' || toEtapa === 'empaque') {
                 fetch(cfg.scriptUrl + '?action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=' + hoja + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => {});
                 return;
+            }
+            // Movimiento dentro de Acabados → actualizar etapa_actual en Acabado org
+            if (isAcabEtapa(toEtapa)) {
+                fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + encodeURIComponent(item) + '&etapa=' + encodeURIComponent(toEtapa), { mode: 'no-cors' }).catch(() => {});
             }
         }
         function markListoInSheets(order, fromEtapa) { callScript(order, 'listo', fromEtapa); }
