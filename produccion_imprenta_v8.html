@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.68';
+        const APP_VERSION = 'v8.69';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1077,6 +1077,8 @@
             // Sale de Impresión hacia Acabados → mover fila de Impresion org a Acabado org
             if (fromEtapa === 'impresion' && isAcabEtapa(toEtapa)) {
                 fetch(cfg.scriptUrl + '?action=moverAacabados&item=' + encodeURIComponent(item) + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => {});
+                // Pre-registrar posición para la orden union_result que aparecerá en el próximo sync
+                etapaMap[item + '-A'] = toEtapa;
                 return;
             }
             // Llega a Empaque → mover fila de Acabado org a Empacado
@@ -1200,13 +1202,22 @@
                 // Las órdenes se reconstruyen completamente desde los sheets.
                 // Se conservan solo las órdenes manuales (no vienen de sheets).
                 // ────────────────────────────────────────────────────────────
-                // Preservar union_results aunque hereden _fromSheets:true de versiones viejas
                 const manual = _snap.filter(o => !o._fromSheets);
                 const countNuevas = newOrders.length;
                 const countActualizadas = 0, countSinCambio = 0;
 
+                // Ocultar INT/PORT de sheets si ya existe un union_result manual activo para ese grupo
+                // (órdenes fusionadas antes de v8.68 — no crea nuevas fusiones)
+                const _legacyUnions = new Set(
+                    manual.filter(o => o.tipo === 'union_result' && o.grupoId && !o._merged && o.etapa !== 'listo')
+                          .map(o => o.grupoId)
+                );
+
                 // Aplicar posiciones guardadas en Firebase (etapaMap) sobre lo que dicen los sheets
                 orders = [...manual, ...newOrders.map(o => {
+                    if (_legacyUnions.has(o.grupoId) && (o.tipo === 'int_sub' || o.tipo === 'port_sub')) {
+                        return { ...o, _merged: true, etapa: 'listo' };
+                    }
                     if (o.etapa === 'listo' && etapaMap[o.id]) { delete etapaMap[o.id]; return o; }
                     if (etapaMap[o.id] && o.etapa !== 'listo') return { ...o, etapa: etapaMap[o.id] };
                     return o;
