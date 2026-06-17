@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.67';
+        const APP_VERSION = 'v8.68';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -810,18 +810,7 @@
         }
 
         // Revisa si algún grupo tiene ambas (INT + PORT) en Acabados y las une automáticamente
-        function autoMergeCheck() {
-            const inAcab = orders.filter(o => isAcabEtapa(o.etapa) && !o._merged && (o.tipo === 'int_sub' || o.tipo === 'port_sub'));
-            const grupos = {};
-            inAcab.forEach(o => { if (o.grupoId) { if (!grupos[o.grupoId]) grupos[o.grupoId] = []; grupos[o.grupoId].push(o); } });
-            let merged = false;
-            Object.entries(grupos).forEach(([gid, ords]) => {
-                if (ords.some(o => o.tipo === 'int_sub') && ords.some(o => o.tipo === 'port_sub')) {
-                    if (mergeOrders(gid)) merged = true;
-                }
-            });
-            return merged;
-        }
+        function autoMergeCheck() { return false; } // Desactivado — INT y PORT se mueven por separado
 
         // ═══════════════════════════════════════════════════
         //  SCHEDULER PARA GANTT
@@ -1065,15 +1054,15 @@
         // fromEtapa: etapa anterior (antes del movimiento)
         function callScript(order, toEtapa, fromEtapa) {
             if (!cfg.scriptUrl) return;
-            // union_result representa INT+PORT — mover/eliminar ambas filas en Acabado org
+            // union_result (filas de "Acabado org") — actualizar etapa o mover según destino
             if (order.tipo === 'union_result' && order.grupoId) {
                 const it = encodeURIComponent(String(order.grupoId).trim());
                 if (toEtapa === 'empaque') {
                     fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + it, { mode: 'no-cors' }).catch(() => {});
-                    fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + it, { mode: 'no-cors' }).catch(() => {});
                 } else if (toEtapa === 'listo') {
-                    fetch(cfg.scriptUrl + '?action=marcarListo&item=' + it + '&hoja=acabados&po=int', { mode: 'no-cors' }).catch(() => {});
-                    fetch(cfg.scriptUrl + '?action=marcarListo&item=' + it + '&hoja=acabados&po=port', { mode: 'no-cors' }).catch(() => {});
+                    fetch(cfg.scriptUrl + '?action=marcarListo&item=' + it + '&hoja=acabados', { mode: 'no-cors' }).catch(() => {});
+                } else if (isAcabEtapa(toEtapa)) {
+                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa), { mode: 'no-cors' }).catch(() => {});
                 }
                 return;
             }
@@ -1216,23 +1205,12 @@
                 const countNuevas = newOrders.length;
                 const countActualizadas = 0, countSinCambio = 0;
 
-                // Grupos que ya tienen un union_result activo — no re-unir en este sync
-                const _activeUnions = new Set(
-                    manual.filter(o => o.tipo === 'union_result' && o.grupoId && !o._merged && o.etapa !== 'listo')
-                          .map(o => o.grupoId)
-                );
-
                 // Aplicar posiciones guardadas en Firebase (etapaMap) sobre lo que dicen los sheets
                 orders = [...manual, ...newOrders.map(o => {
-                    // Si ya existe un union_result para este grupo, ocultar INT/PORT para no re-unirlos
-                    if (_activeUnions.has(o.grupoId) && (o.tipo === 'int_sub' || o.tipo === 'port_sub')) {
-                        return { ...o, _merged: true, etapa: 'listo' };
-                    }
                     if (o.etapa === 'listo' && etapaMap[o.id]) { delete etapaMap[o.id]; return o; }
                     if (etapaMap[o.id] && o.etapa !== 'listo') return { ...o, etapa: etapaMap[o.id] };
                     return o;
                 })];
-                autoMergeCheck();
                 await saveS();
 
                 const ahora = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
@@ -2409,9 +2387,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     etapaMap[o.id] = proc.etapa;
                 }
                 const oActual = orders[idx];
-                const isSubOrd = oActual.tipo === 'int_sub' || oActual.tipo === 'port_sub';
-                // INT y PORT no avanzan solos a empaque — esperan unión via autoMergeCheck
-                const flow = [ETAPAS[0], ...getAcabFlow(oActual).map(sid => ACAB_STEPS.find(s => s.id === sid)).filter(Boolean), ...(isSubOrd ? [] : [ETAPAS[1], ETAPAS[2]])];
+                const flow = [ETAPAS[0], ...getAcabFlow(oActual).map(sid => ACAB_STEPS.find(s => s.id === sid)).filter(Boolean), ETAPAS[1], ETAPAS[2]];
                 const ei = flow.findIndex(et => et && et.id === oActual.etapa);
                 if (ei < 0 || ei >= flow.length - 1) return;
                 const nextStep = flow[ei + 1];
