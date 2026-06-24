@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.79';
+        const APP_VERSION = 'v8.80';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -2479,7 +2479,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         }
 
         function handleScan(raw) {
-            const raw2 = raw.trim().toUpperCase();
+            const raw2 = raw.trim().toUpperCase().replace(/%W/g, '');
             // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
             const logPre = SCAN_LOG_PRE.find(p => raw2.startsWith(p));
             if (logPre) { sendScanToSheets(raw2); return; }
