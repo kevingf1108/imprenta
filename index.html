@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.69';
+        const APP_VERSION = 'v8.75';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -569,6 +569,7 @@
             { id: 'termo', label: 'Termo Empaque', steps: ['te'], grupo: '📦 Empaque' },
         ];
         const ORD_COLORS = ['#3b82f6', '#22c55e', '#f97316', '#a855f7', '#ec4899', '#14b8a6', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#84cc16', '#f43f5e'];
+        const MUESTRA_COLORS = ['#93c5fd', '#86efac', '#fdba74', '#d8b4fe', '#f9a8d4', '#5eead4', '#fde68a', '#c4b5fd', '#fca5a5', '#67e8f9', '#d9f99d', '#fda4af'];
         const CFG0 = {
             nombreImprenta: 'Mi Imprenta', horasDia: 10, startHour: 8, pptDefault: 8, portaPptDefault: 2,
             bufferFactor: 1.3, calibRangeMin: 0.5, calibRangeMax: 2.0,
@@ -610,6 +611,8 @@
         // URLs pre-configuradas de Google Sheets
         const SHEET_IMP = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIlfUFRnj_VYEvovfEKY4Gj44uRgb1VOr9VVc3F1tlS2aHwHA4pJ-vib1SbHhJq0pR_PbHSs853ImS/pub?gid=438428152&single=true&output=csv';
         const SHEET_ACAB = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIlfUFRnj_VYEvovfEKY4Gj44uRgb1VOr9VVc3F1tlS2aHwHA4pJ-vib1SbHhJq0pR_PbHSs853ImS/pub?gid=1109183930&single=true&output=csv';
+        const SHEET_MUESTRAS = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIlfUFRnj_VYEvovfEKY4Gj44uRgb1VOr9VVc3F1tlS2aHwHA4pJ-vib1SbHhJq0pR_PbHSs853ImS/pub?gid=237903557&single=true&output=csv';
+        const TRACKING_SHEET_ID = '1eETCQFaBl3Ae4iPhW1uejUsEm6JO8tvMg2Qy3H5UjAc';
 
         function loadS() {
             document.getElementById('root').innerHTML = `
@@ -819,7 +822,7 @@
             const machAvail = {}; MAQUINAS.forEach(m => machAvail[m.id] = 0);
             const ordState = {}, blocks = [], colorMap = {};
             const sorted = [...ordList].filter(o => o.etapa !== 'listo' && !o._merged).sort(prioSort);
-            sorted.forEach((o, oi) => { colorMap[o.id] = ORD_COLORS[oi % ORD_COLORS.length]; });
+            sorted.forEach((o, oi) => { colorMap[o.id] = o._isMuestra ? MUESTRA_COLORS[oi % MUESTRA_COLORS.length] : ORD_COLORS[oi % ORD_COLORS.length]; });
             const etapaFaseStart = { impresion: 0, empaque: 2, listo: 3 };
             ACAB_STEPS.forEach(s => { etapaFaseStart[s.id] = 1; });
 
@@ -922,6 +925,7 @@
                         stepId: step.id, stepNom: step.nom, machId: mach.id, machLabel: mach.label,
                         start, end, dur: step.min, color, urgente: o.urgente, fechaLimite: o.fechaLimite,
                         buddyGroup: buddyKey[o.id] || null,
+                        _isMuestra: o._isMuestra || false,
                     });
                 });
             });
@@ -1050,10 +1054,66 @@
             };
         }
 
+        // Mapea una fila de la hoja de MUESTRAS a una orden
+        function mapMuestraRow(row) {
+            const nombre = col(row, 'nombre', 'name', 'titulo');
+            const itemNum = col(row, '# item', 'item', '#item');
+            const urg = col(row, 'urgencia', 'urgency', 'prioridad');
+            const entrega = col(row, 'entrega', 'delivery');
+            const procesado = col(row, 'eliminar', 'procesado', 'listo', 'done', 'ready').toLowerCase() === 'true';
+            const qty = parseInt(col(row, 'quantity', 'cantidad', 'qty')) || 1;
+            const hojas = parseInt(col(row, 'hojas', 'sheets', 'tabloides', 'tabs')) || 2;
+            const acab = col(row, 'acabados', 'terminados', 'actividades');
+            const etapaActual = col(row, 'etapa_actual', 'etapa actual', 'etapa');
+
+            if (!nombre || !itemNum) return null;
+            if (procesado) return null;
+
+            const enc = detectEnc(acab, '') || 'normal';
+            const etapa = etapaActual ? etapaActual : 'impresion';
+
+            return {
+                id: `${itemNum}-M`,
+                grupoId: `${itemNum}-M`,
+                tipo: 'muestra', baseTitulo: nombre, titulo: `M · ${nombre}`,
+                cliente: '', cantidad: qty,
+                paginas: hojas * 2, tabloidesSrc: hojas, ppt: 8, portaPpt: 2,
+                tipoInteriores: 'byn', gramaje: 'normal',
+                tipoEncuadernacion: enc,
+                fechaLimite: parseDMDate(entrega),
+                etapa, urgente: urg.toLowerCase().includes('urgente'),
+                notas: '',
+                _fromSheets: true,
+                _isMuestra: true,
+                fechaCreacion: new Date().toISOString().split('T')[0],
+            };
+        }
+
+        // Actualiza Status + "Fecha queue" en el spreadsheet de tracking externo
+        function callTracking(order, toEtapa) {
+            if (!cfg.scriptUrl) return;
+            const item = encodeURIComponent(String(order.grupoId || order.id).replace(/-[MAPm]$/, '').trim());
+            const etapaTracking = order._isMuestra ? 'M ' + toEtapa : toEtapa;
+            fetch(cfg.scriptUrl + '?action=updateTracking&item=' + item + '&etapa=' + encodeURIComponent(etapaTracking) + '&trackingId=' + encodeURIComponent(TRACKING_SHEET_ID), { mode: 'no-cors' }).catch(() => {});
+        }
+
         // Marca Listo=TRUE en Google Sheets cuando se avanza una orden
         // fromEtapa: etapa anterior (antes del movimiento)
         function callScript(order, toEtapa, fromEtapa) {
             if (!cfg.scriptUrl) return;
+            callTracking(order, toEtapa);
+            // muestras — actualizar etapa_actual en hoja Muestras en cada movimiento
+            if (order._isMuestra && order.grupoId) {
+                const it = encodeURIComponent(String(order.grupoId).replace(/-M$/, '').trim());
+                if (toEtapa === 'empaque') {
+                    fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + it + '&hoja=muestras', { mode: 'no-cors' }).catch(() => {});
+                } else if (toEtapa === 'listo') {
+                    fetch(cfg.scriptUrl + '?action=marcarProcesado&item=' + it, { mode: 'no-cors' }).catch(() => {});
+                } else {
+                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent('M ' + toEtapa) + '&hoja=muestras', { mode: 'no-cors' }).catch(() => {});
+                }
+                return;
+            }
             // union_result (filas de "Acabado org") — actualizar etapa o mover según destino
             if (order.tipo === 'union_result' && order.grupoId) {
                 const it = encodeURIComponent(String(order.grupoId).trim());
@@ -1146,13 +1206,14 @@
                     }
                     return null;
                 }
-                const [respImp, respAcab] = await Promise.all([
+                const [respImp, respAcab, respMuestras] = await Promise.all([
                     fetchCSV(SHEET_IMP),
                     fetchCSV(SHEET_ACAB),
+                    fetchCSV(SHEET_MUESTRAS),
                 ]);
 
                 let newOrders = [];
-                let countImp = 0, countAcab = 0;
+                let countImp = 0, countAcab = 0, countMuestras = 0;
 
                 // Impresion org — fuente principal
                 let _debugImp = [];
@@ -1184,6 +1245,18 @@
                     countAcab = newOrders.length - countImp;
                 }
 
+                // Muestras — se añaden siempre como entradas independientes (id sufijo -M)
+                if (respMuestras && respMuestras.ok) {
+                    const text = await respMuestras.text();
+                    const rows = parseCSV(text);
+                    const prevLen = newOrders.length;
+                    rows.forEach(row => {
+                        const o = mapMuestraRow(row);
+                        if (o) newOrders.push(o);
+                    });
+                    countMuestras = newOrders.length - prevLen;
+                }
+
                 // Deduplicar por id exacto (INT y PORT del mismo trabajo tienen distinto id)
                 const _seenIds = new Set();
                 newOrders = newOrders.filter(o => {
@@ -1192,7 +1265,7 @@
                     return true;
                 });
 
-                if (!respImp && !respAcab) {
+                if (!respImp && !respAcab && !respMuestras) {
                     if (log) log.innerHTML = '<span style="color:#ef4444">❌ No se pudo conectar a ninguna hoja. Verifica la red o que las hojas estén publicadas como CSV.</span>';
                     if (btn) btn.disabled = false;
                     return;
@@ -1232,7 +1305,7 @@
             <span style="background:#0a1f3a;border:1px solid #1d4ed8;padding:4px 10px;border-radius:6px;color:#60a5fa">🔄 ${countActualizadas} actualizadas</span>
             <span style="background:#0f172a;border:1px solid #334155;padding:4px 10px;border-radius:6px;color:#64748b">✓ ${countSinCambio} sin cambio</span>
           </div>
-          <div style="margin-top:6px;font-size:11px;color:#475569">Total en sistema: ${orders.length} · De sheets: ${newOrders.length}</div>
+          <div style="margin-top:6px;font-size:11px;color:#475569">Total en sistema: ${orders.length} · De sheets: ${newOrders.length} (🔬 ${countMuestras} muestras)</div>
           <details style="margin-top:10px"><summary style="font-size:11px;color:#64748b;cursor:pointer">🔍 Ver tabloides leídos de Impresión</summary>
           <div style="margin-top:6px;max-height:180px;overflow-y:auto;background:#0f172a;border-radius:6px;padding:8px;font-size:11px;font-family:monospace">
           ${_debugImp.map(d => `<div style="color:${d.tabs === 0 ? '#ef4444' : '#94a3b8'}">${e(d.id)} → <b style="color:${d.tabs === 0 ? '#ef4444' : '#4ade80'}">${d.tabs} tab</b>${d.tabs === 0 ? ' ⚠️ NO ENCONTRÓ COLUMNA' : ''}${d.tabs > 0 && d.tabs < 100 ? ' ⚠️ NÚMERO SOSPECHOSO' : ''}</div>`).join('')}
@@ -1259,8 +1332,9 @@
       <div style="background:#0f172a;border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px">
         <div style="color:#60a5fa;font-weight:700;margin-bottom:8px">📋 Hojas configuradas:</div>
         <div style="color:#94a3b8;margin-bottom:4px">🖨️ <b style="color:#fb923c">Impresión</b> — gid=438428152</div>
-        <div style="color:#94a3b8">✂️ <b style="color:#c084fc">Acabados</b> — gid=1109183930</div>
-        <div style="color:#475569;font-size:11px;margin-top:8px">Las URLs están guardadas en el sistema. Para cambiarlas edita las constantes SHEET_IMP y SHEET_ACAB en ⚙️ Configuración.</div>
+        <div style="color:#94a3b8;margin-bottom:4px">✂️ <b style="color:#c084fc">Acabados</b> — gid=1109183930</div>
+        <div style="color:#94a3b8">🔬 <b style="color:#86efac">Muestras</b> — gid=237903557</div>
+        <div style="color:#475569;font-size:11px;margin-top:8px">Las URLs están guardadas en el sistema. Para cambiarlas edita las constantes SHEET_IMP / SHEET_ACAB / SHEET_MUESTRAS en ⚙️ Configuración.</div>
       </div>
       <div style="background:#0a1f0a;border-radius:10px;padding:12px;margin-bottom:16px;font-size:12px;color:#64748b">
         <b style="color:#4ade80">Cómo funciona:</b><br>
@@ -1279,33 +1353,108 @@
           4. "Ejecutar como": <b style="color:#94a3b8">Yo</b> · "Quién tiene acceso": <b style="color:#94a3b8">Cualquier usuario</b><br>
           5. Copia la URL y pégala en <b style="color:#94a3b8">⚙️ Configuración → URL Apps Script</b>
         </div>
-        <div style="margin-top:10px;background:#020617;border-radius:6px;padding:10px;font-size:11px;color:#4ade80;font-family:monospace;white-space:pre-wrap;max-height:200px;overflow-y:auto">function doGet(e){
+        <div style="margin-top:10px;background:#020617;border-radius:6px;padding:10px;font-size:11px;color:#4ade80;font-family:monospace;white-space:pre-wrap;max-height:220px;overflow-y:auto">function doGet(e){
   try{
     const ss=SpreadsheetApp.getActiveSpreadsheet();
+    const action=(e.parameter.action||'marcarListo').toLowerCase();
     const item=(e.parameter.item||'').toString().trim();
     const hoja=(e.parameter.hoja||'').toLowerCase();
     const po=(e.parameter.po||'').toLowerCase();
+    const etapa=(e.parameter.etapa||'').toString().trim();
+    const trackingId=(e.parameter.trackingId||'').toString().trim();
     if(!item)return r('ERROR:falta item');
-    const nombreHoja=hoja==='impresion'?'Impresion org':'Acabado org';
+
+    // updateTracking — actualiza Status + "Fecha queue" en spreadsheet externo
+    if(action==='updatetracking'&&trackingId){
+      try{
+        const tss=SpreadsheetApp.openById(trackingId);
+        const tsh=tss.getSheets()[0];
+        const tdata=tsh.getDataRange().getValues();
+        const theads=tdata[0].map(h=>h.toString().toLowerCase().trim());
+        const tci=theads.findIndex(h=>['# item','item','#item'].includes(h));
+        const tcs=theads.findIndex(h=>h==='status');
+        const tcf=theads.findIndex(h=>h==='fecha queue');
+        if(tci<0)return r('ERROR:tracking no tiene columna item');
+        if(tcs<0&&tcf<0)return r('ERROR:tracking no tiene columna Status ni "Fecha queue"');
+        const now=new Date();
+        const fmt=Utilities.formatDate(now,Session.getScriptTimeZone(),'dd/MM/yyyy HH:mm:ss');
+        let n=0;
+        for(let i=1;i<tdata.length;i++){
+          const rItem=tdata[i][tci]?.toString().trim();
+          if(rItem!==item)continue;
+          if(tcs>=0&&etapa)tsh.getRange(i+1,tcs+1).setValue(etapa);
+          if(tcf>=0)tsh.getRange(i+1,tcf+1).setValue(fmt);
+          n++;
+        }
+        return r('OK:tracking '+n+' filas actualizadas');
+      }catch(ex){return r('ERROR:tracking:'+ex.message);}
+    }
+
+    // marcarProcesado — marca Procesado=TRUE en hoja Muestras
+    if(action==='marcarprocesado'){
+      const sh=ss.getSheets().find(s=>s.getName().trim()==='Muestras');
+      if(!sh)return r('ERROR:hoja "Muestras" no encontrada');
+      const data=sh.getDataRange().getValues();
+      const heads=data[0].map(h=>h.toString().toLowerCase().trim());
+      const ci=heads.findIndex(h=>['# item','item','#item'].includes(h));
+      const cp2=heads.findIndex(h=>['eliminar','procesado','listo','done','ready'].includes(h));
+      if(ci<0)return r('ERROR:no columna "# item"');
+      if(cp2<0)return r('ERROR:no columna "eliminar"');
+      let n=0;
+      for(let i=1;i<data.length;i++){
+        if(data[i][ci]?.toString().trim()===item){sh.getRange(i+1,cp2+1).setValue(true);n++;}
+      }
+      return r('OK:'+n+' muestras marcadas como Eliminar');
+    }
+
+    // moverAempacado — mueve fila a hoja "Empacado" (o actualiza etapa_actual si no existe)
+    if(action==='moveraempacado'){
+      const srcNombre=hoja==='muestras'?'Muestras':'Acabado org';
+      const empNombre=hoja==='muestras'?'M emp':'Empacado';
+      const src=ss.getSheets().find(s=>s.getName().trim()===srcNombre);
+      if(!src)return r('ERROR:hoja "'+srcNombre+'" no encontrada');
+      const emp=ss.getSheets().find(s=>s.getName().trim()===empNombre);
+      const d2=src.getDataRange().getValues();
+      const h2=d2[0].map(h=>h.toString().toLowerCase().trim());
+      const ci2=h2.findIndex(h=>['# item','item','#item'].includes(h));
+      const ce=h2.findIndex(h=>['etapa_actual','etapa actual','etapa'].includes(h));
+      if(ci2<0)return r('ERROR:no columna "# item"');
+      let n=0;
+      for(let i=d2.length-1;i>=1;i--){
+        if(d2[i][ci2]?.toString().trim()!==item)continue;
+        if(emp){
+          emp.appendRow(d2[i]);
+          src.deleteRow(i+1);
+        }else if(ce>=0){
+          src.getRange(i+1,ce+1).setValue('empaque');
+        }
+        n++;
+      }
+      return r('OK:'+n+' filas movidas a '+empNombre);
+    }
+
+    const nombreHoja=hoja==='impresion'?'Impresion org':hoja==='muestras'?'Muestras':'Acabado org';
     const sh=ss.getSheets().find(s=>s.getName().trim()===nombreHoja);
     if(!sh)return r('ERROR:hoja "'+nombreHoja+'" no encontrada');
     const data=sh.getDataRange().getValues();
     const heads=data[0].map(h=>h.toString().toLowerCase().trim());
     const ci=heads.findIndex(h=>['# item','item','#item'].includes(h));
-    const cl=heads.findIndex(h=>['listo','done','ready'].includes(h));
-    const cp=heads.findIndex(h=>['p_o','po','tipo'].includes(h));
+    const cl=heads.findIndex(h=>['listo','done','ready','procesado'].includes(h));
+    const cpO=heads.findIndex(h=>['p_o','po','tipo'].includes(h));
+    const cetapa=heads.findIndex(h=>['etapa_actual','etapa actual','etapa'].includes(h));
     if(ci<0)return r('ERROR:no encontré columna "# item"');
-    if(cl<0)return r('ERROR:no encontré columna "listo"');
+    if(cl<0)return r('ERROR:no encontré columna "listo/procesado"');
     let n=0;
     for(let i=1;i<data.length;i++){
       const rItem=data[i][ci]?.toString().trim();
-      const rPO=cp>=0?data[i][cp]?.toString().toLowerCase():'';
+      const rPO=cpO>=0?data[i][cpO]?.toString().toLowerCase():'';
       if(rItem!==item)continue;
       if(po&&rPO&&!rPO.includes(po))continue;
-      sh.getRange(i+1,cl+1).setValue(true);
+      if(action==='updateetapa'&&cetapa>=0&&etapa){sh.getRange(i+1,cetapa+1).setValue(etapa);}
+      else{sh.getRange(i+1,cl+1).setValue(true);}
       n++;
     }
-    return r('OK:'+n+' filas marcadas');
+    return r('OK:'+n+' filas actualizadas');
   }catch(ex){return r('ERROR:'+ex.message);}
 }
 function r(m){return ContentService.createTextOutput(m).setMimeType(ContentService.MimeType.TEXT);}</div>
@@ -2053,8 +2202,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 const bars = mb.map((b, bi) => {
                     // Posición = minutos laborales directamente (0 = inicio de jornada)
                     const x = b.start * pxM, w = Math.max(b.dur * pxM, 6);
-                    const brd = isOD(b.fechaLimite) ? 'border:2px solid #ef4444' : isSoon(b.fechaLimite) ? 'border:2px solid #f59e0b' : '';
-                    const tipoBadge = b.tipo === 'int_sub' ? 'I·' : b.tipo === 'port_sub' ? 'P·' : b.tipo === 'union_result' ? '🔗' : '';
+                    const brd = isOD(b.fechaLimite) ? 'border:2px solid #ef4444' : isSoon(b.fechaLimite) ? 'border:2px solid #f59e0b' : b._isMuestra ? 'border:2px dashed #94a3b8' : '';
+                    const muestraStyle = b._isMuestra ? 'opacity:0.82;' : '';
+                    const tipoBadge = b.tipo === 'muestra' ? '🔬' : b.tipo === 'int_sub' ? 'I·' : b.tipo === 'port_sub' ? 'P·' : b.tipo === 'union_result' ? '🔗' : '';
                     const buddyBadge = b.buddyGroup ? '🔗' : '';
                     const shortId = e(b.ordId);
                     const shortTit = b.titulo.length > 20 ? b.titulo.substring(0, 18) + '…' : b.titulo;
@@ -2062,10 +2212,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     // Primera barra y es muy angosta → etiqueta a la izquierda
                     if (bi === 0 && w <= 38) {
                         const leftLabel = `<div style="position:absolute;left:${x - 4}px;top:50%;transform:translate(-100%,-50%);font-size:10px;color:#e2e8f0;white-space:nowrap;pointer-events:none;font-weight:700;background:#0f172a;padding:0 3px;border-radius:3px">${tipoBadge}${buddyBadge}${shortId}</div>`;
-                        return leftLabel + `<div class="gantt-bar" style="left:${x}px;width:${w}px;background:${b.color};${brd};overflow:hidden;text-overflow:clip" title="${e(b.ordId)}: ${e(b.titulo)}&#10;${e(b.stepNom)} · ${mStr(b.dur)}${b.urgente ? '&#10;⚡ URGENTE' : ''}${buddyTip}"></div>`;
+                        return leftLabel + `<div class="gantt-bar" style="left:${x}px;width:${w}px;background:${b.color};${brd};${muestraStyle}overflow:hidden;text-overflow:clip" title="${e(b.ordId)}: ${e(b.titulo)}&#10;${e(b.stepNom)} · ${mStr(b.dur)}${b.urgente ? '&#10;⚡ URGENTE' : ''}${b._isMuestra ? '&#10;🔬 MUESTRA' : ''}${buddyTip}"></div>`;
                     }
                     const barLabel = w > 90 ? `${tipoBadge}${buddyBadge}${shortId} ${e(shortTit)}` : w > 38 ? `${tipoBadge}${buddyBadge}${shortId}` : tipoBadge || buddyBadge;
-                    return `<div class="gantt-bar" style="left:${x}px;width:${w}px;background:${b.color};${brd};overflow:hidden;text-overflow:clip" title="${e(b.ordId)}: ${e(b.titulo)}&#10;${e(b.stepNom)} · ${mStr(b.dur)}${b.urgente ? '&#10;⚡ URGENTE' : ''}${buddyTip}">${barLabel}</div>`;
+                    return `<div class="gantt-bar" style="left:${x}px;width:${w}px;background:${b.color};${brd};${muestraStyle}overflow:hidden;text-overflow:clip" title="${e(b.ordId)}: ${e(b.titulo)}&#10;${e(b.stepNom)} · ${mStr(b.dur)}${b.urgente ? '&#10;⚡ URGENTE' : ''}${b._isMuestra ? '&#10;🔬 MUESTRA' : ''}${buddyTip}">${barLabel}</div>`;
                 }).join('');
                 const gh = mach.grupo !== lastG ? `<div style="display:flex;border-bottom:1px solid #334155;background:#060d1a"><div style="width:160px;flex-shrink:0;padding:3px 10px;font-size:10px;color:#475569;font-weight:700;border-right:1px solid #1e293b">${e(mach.grupo)}</div><div style="flex:1"></div></div>` : '';
                 lastG = mach.grupo;
@@ -2321,6 +2471,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 }
             }
 
+            // ── 2b. Detectar prefijo 'm' de muestra ──────────────────────
+            // Ej: Im12345 → proc=I (impresión), M antes del número → es muestra
+            const scanMuestra = ordId.startsWith('M') && /^\d/.test(ordId.slice(1));
+            if (scanMuestra) ordId = ordId.slice(1); // quitar la M
+
             // ── 3. Buscar orden(es) ──────────────────────────────────────
             // grupo:true  → 5 dígitos, mueve todo el grupo (pegado y después)
             // grupo:false → 6 dígitos exactos, mueve SOLO esa orden (impresión, CI, plastificado…)
@@ -2333,11 +2488,13 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             if (esGrupo && prefix5.length >= 5) {
                 // Pasos de unión: busca todo el grupo por primeros 5 dígitos
                 matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
+                    (scanMuestra ? !!x._isMuestra : !x._isMuestra) &&
                     ((x.grupoId && x.grupoId.toString().replace(/\D/g, '').startsWith(prefix5)) ||
                         x.id.replace(/\D/g, '').startsWith(prefix5)));
             } else {
                 // Pasos individuales: coincidencia por 6 dígitos exactos (id o grupoId)
                 matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
+                    (scanMuestra ? !!x._isMuestra : !x._isMuestra) &&
                     (x.id.replace(/\D/g, '') === digits6 ||
                         (x.grupoId && x.grupoId.toString().replace(/\D/g, '') === digits6)));
                 // Si hay varios (INT + PORT del mismo grupo), quedarse solo con los del paso actual
