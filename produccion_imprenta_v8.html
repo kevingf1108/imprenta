@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.74';
+        const APP_VERSION = 'v8.75';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1060,7 +1060,7 @@
             const itemNum = col(row, '# item', 'item', '#item');
             const urg = col(row, 'urgencia', 'urgency', 'prioridad');
             const entrega = col(row, 'entrega', 'delivery');
-            const procesado = col(row, 'procesado', 'listo', 'done', 'ready').toLowerCase() === 'true';
+            const procesado = col(row, 'eliminar', 'procesado', 'listo', 'done', 'ready').toLowerCase() === 'true';
             const qty = parseInt(col(row, 'quantity', 'cantidad', 'qty')) || 1;
             const hojas = parseInt(col(row, 'hojas', 'sheets', 'tabloides', 'tabs')) || 2;
             const acab = col(row, 'acabados', 'terminados', 'actividades');
@@ -1397,14 +1397,14 @@
       const data=sh.getDataRange().getValues();
       const heads=data[0].map(h=>h.toString().toLowerCase().trim());
       const ci=heads.findIndex(h=>['# item','item','#item'].includes(h));
-      const cp2=heads.findIndex(h=>['procesado','listo','done','ready'].includes(h));
+      const cp2=heads.findIndex(h=>['eliminar','procesado','listo','done','ready'].includes(h));
       if(ci<0)return r('ERROR:no columna "# item"');
-      if(cp2<0)return r('ERROR:no columna "procesado"');
+      if(cp2<0)return r('ERROR:no columna "eliminar"');
       let n=0;
       for(let i=1;i<data.length;i++){
         if(data[i][ci]?.toString().trim()===item){sh.getRange(i+1,cp2+1).setValue(true);n++;}
       }
-      return r('OK:'+n+' muestras marcadas como Procesado');
+      return r('OK:'+n+' muestras marcadas como Eliminar');
     }
 
     // moverAempacado — mueve fila a hoja "Empacado" (o actualiza etapa_actual si no existe)
