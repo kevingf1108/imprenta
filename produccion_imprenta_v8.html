@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.76';
+        const APP_VERSION = 'v8.77';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1056,15 +1056,15 @@
 
         // Mapea una fila de la hoja de MUESTRAS a una orden
         function mapMuestraRow(row) {
-            const nombre = col(row, 'nombre', 'name', 'titulo');
-            const itemNum = col(row, '# item', 'item', '#item');
+            const nombre = col(row, 'group name', 'nombre', 'name', 'titulo');
+            const itemNum = col(row, '#item', '# item', '#order', 'item');
             const urg = col(row, 'urgencia', 'urgency', 'prioridad');
             const entrega = col(row, 'entrega', 'delivery');
-            const procesado = col(row, 'eliminar', 'procesado', 'listo', 'done', 'ready').toLowerCase() === 'true';
-            const qty = parseInt(col(row, 'quantity', 'cantidad', 'qty')) || 1;
+            const procesado = col(row, 'eliminar', 'procesado', 'terminado', 'listo', 'done', 'ready').toLowerCase() === 'true';
+            const qty = parseInt(col(row, 'up (pz tab)', 'quantity', 'cantidad', 'qty')) || 1;
             const hojas = parseInt(col(row, 'hojas', 'sheets', 'tabloides', 'tabs')) || 2;
             const acab = col(row, 'acabados', 'terminados', 'actividades');
-            const etapaActual = col(row, 'etapa_actual', 'etapa actual', 'etapa');
+            const etapaActual = col(row, 'status', 'etapa_actual', 'etapa actual', 'etapa');
 
             if (!nombre || !itemNum) return null;
             if (procesado) return null;
