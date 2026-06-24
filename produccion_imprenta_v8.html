@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.77';
+        const APP_VERSION = 'v8.78';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -698,12 +698,23 @@
             // Tabloides: usar valor directo de la hoja si existe, si no calcular desde páginas
             const tabInt = esPort ? 0 : (o.tabloidesSrc || 0);
             const tabPort = esPort ? (o.tabloidesSrc || 0) : Math.ceil(Q / portPpt);
-            if (!Q || (!tabInt && tipo !== 'port_sub' && tipo !== 'union_result')) return { pasos: [], total: 0, paralelo: 0, tabInt: 0, tabPort: 0 };
+            if (!Q || (!tabInt && tipo !== 'port_sub' && tipo !== 'union_result' && tipo !== 'muestra')) return { pasos: [], total: 0, paralelo: 0, tabInt: 0, tabPort: 0 };
             const ppmI = col ? (gru ? m.color_grueso : m.color_normal) : m.byn_fast;
             const ppmP = gru ? m.color_grueso : m.color_normal;
             const sidI = col ? 'iic' : 'iib';
             const rP = v => Math.max(0.4, m.pegado_150 - (v - 150) / (500 - 150) * (m.pegado_150 - m.pegado_500));
             const rC = v => Math.max(1, m.cf_150 - (v - 150) / (500 - 150) * (m.cf_150 - m.cf_500));
+
+            if (tipo === 'muestra') {
+                // Muestras: impresión rápida + corte inicial
+                const tabM = Math.max(o.tabloidesSrc || 0, 2);
+                const sidM = col ? 'iic' : 'iib';
+                add(sidM, 'Impresión muestra', s[col ? 'color' : 'byn'] + tabM / ppmI, col ? 'Color' : 'B&N', 'imp');
+                if (enc !== 'normal') add('pl', 'Plastificado muestra', s.plastificado + (tabM * m.plast_hoja) / m.plast_vel, 'Plastificadora', 'acab');
+                add('ci', 'Corte muestra', tabM / (m.corteInicial / 4), 'Cortadora inicial', 'acab');
+                const total = Math.round(ps.reduce((acc, p) => acc + p.min, 0));
+                return { pasos: ps, total, paralelo: total, tabInt: tabM, tabPort: 0 };
+            }
 
             if (tipo === 'int_sub') {
                 // Solo pasos de interiores
