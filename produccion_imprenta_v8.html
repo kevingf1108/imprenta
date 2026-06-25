@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.82';
+        const APP_VERSION = 'v8.83';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1408,10 +1408,11 @@
         if(tcs<0&&tcf<0)return r('ERROR:tracking no tiene columna Status ni "Fecha queue"');
         const now=new Date();
         const fmt=Utilities.formatDate(now,Session.getScriptTimeZone(),'dd/MM/yyyy HH:mm:ss');
+        const item5=item.toString().slice(0,5);
         let n=0;
         for(let i=1;i<tdata.length;i++){
-          const rItem=tdata[i][tci]?.toString().trim();
-          if(rItem!==item)continue;
+          const rItem=tdata[i][tci]?.toString().trim().slice(0,5);
+          if(rItem!==item5)continue;
           if(tcs>=0&&etapa)tsh.getRange(i+1,tcs+1).setValue(etapa);
           if(tcf>=0)tsh.getRange(i+1,tcf+1).setValue(fmt);
           n++;
