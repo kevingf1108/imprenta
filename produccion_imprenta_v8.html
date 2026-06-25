@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.84';
+        const APP_VERSION = 'v8.85';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1423,7 +1423,7 @@
 
     // marcarProcesado — marca Procesado=TRUE en hoja Muestras
     if(action==='marcarprocesado'){
-      const sh=ss.getSheets().find(s=>s.getName().trim()==='Muestras');
+      const sh=ss.getSheets().find(s=>s.getName().trim()==='M imp');
       if(!sh)return r('ERROR:hoja "Muestras" no encontrada');
       const data=sh.getDataRange().getValues();
       const heads=data[0].map(h=>h.toString().toLowerCase().trim());
@@ -1440,7 +1440,7 @@
 
     // moverAempacado — mueve fila a hoja "Empacado" (o actualiza etapa_actual si no existe)
     if(action==='moveraempacado'){
-      const srcNombre=hoja==='muestras'?'Muestras':'Acabado org';
+      const srcNombre=hoja==='muestras'?'M imp':'Acabado org';
       const empNombre=hoja==='muestras'?'M emp':'Empacado';
       const src=ss.getSheets().find(s=>s.getName().trim()===srcNombre);
       if(!src)return r('ERROR:hoja "'+srcNombre+'" no encontrada');
@@ -1464,7 +1464,7 @@
       return r('OK:'+n+' filas movidas a '+empNombre);
     }
 
-    const nombreHoja=hoja==='impresion'?'Impresion org':hoja==='muestras'?'Muestras':'Acabado org';
+    const nombreHoja=hoja==='impresion'?'Impresion org':hoja==='muestras'?'M imp':'Acabado org';
     const sh=ss.getSheets().find(s=>s.getName().trim()===nombreHoja);
     if(!sh)return r('ERROR:hoja "'+nombreHoja+'" no encontrada');
     const data=sh.getDataRange().getValues();
