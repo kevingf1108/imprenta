@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.83';
+        const APP_VERSION = 'v8.84';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1401,7 +1401,7 @@
         const tsh=tss.getSheets()[0];
         const tdata=tsh.getDataRange().getValues();
         const theads=tdata[0].map(h=>h.toString().toLowerCase().trim());
-        const tci=theads.findIndex(h=>['# item','item','#item'].includes(h));
+        const tci=theads.findIndex(h=>['# item','item','#item','orden #','orden','order #','order'].includes(h));
         const tcs=theads.findIndex(h=>h==='status');
         const tcf=theads.findIndex(h=>h==='fecha queue');
         if(tci<0)return r('ERROR:tracking no tiene columna item');
