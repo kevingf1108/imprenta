@@ -1188,11 +1188,11 @@
         }
 
         // Toast de notificación rápida
-        function showToast(msg) {
+        function showToast(msg, ms) {
             let t = document.getElementById('toast');
-            if (!t) { t = document.createElement('div'); t.id = 'toast'; t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:999;transition:opacity .3s;pointer-events:none'; document.body.appendChild(t); }
+            if (!t) { t = document.createElement('div'); t.id = 'toast'; t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:999;transition:opacity .3s;pointer-events:none;max-width:90vw;word-break:break-all'; document.body.appendChild(t); }
             t.textContent = msg; t.style.opacity = '1';
-            clearTimeout(t._to); t._to = setTimeout(() => { t.style.opacity = '0'; }, 3000);
+            clearTimeout(t._to); t._to = setTimeout(() => { t.style.opacity = '0'; }, ms || 3000);
         }
 
         // Función principal de sincronización
@@ -2538,7 +2538,12 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
 
 
             if (!matches.length) {
-                showToast('❌ No encontrada: ' + ordId + (proc ? ' [' + proc.label + ']' : ''));
+                // Debug: busca cualquier orden que tenga ese número (sin filtros de etapa/_merged)
+                const anyMatch = orders.filter(x => x.id.replace(/\D/g,'') === digits6 || x.grupoId?.toString().replace(/\D/g,'') === digits6);
+                const debugInfo = anyMatch.length
+                    ? 'Existe en orders pero filtrada: ' + anyMatch.map(x => x.id + '|etapa=' + x.etapa + (x._merged ? '|MERGED' : '') + (x._isMuestra ? '|MUESTRA' : '')).join(', ')
+                    : 'No existe en orders con digits=' + digits6 + ' (total orders=' + orders.length + ')';
+                showToast('❌ No encontrada: ' + ordId + (proc ? ' [' + proc.label + ']' : '') + ' — ' + debugInfo, 6000);
                 return;
             }
 
