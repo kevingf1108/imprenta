@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.81';
+        const APP_VERSION = 'v8.82';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -2479,7 +2479,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         }
 
         function handleScan(raw) {
-            const raw2 = raw.trim().toUpperCase().replace(/%W/g, '');
+            const raw2 = raw.trim().toUpperCase();
             // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
             const logPre = SCAN_LOG_PRE.find(p => raw2.startsWith(p));
             if (logPre) { sendScanToSheets(raw2); return; }
@@ -2502,9 +2502,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             }
 
             // ── 2b. Detectar prefijo 'm' de muestra ──────────────────────
-            // Ej: Im12345 → proc=I (impresión), M antes del número → es muestra
-            const scanMuestra = ordId.startsWith('M') && /^\d/.test(ordId.slice(1));
-            if (scanMuestra) ordId = ordId.slice(1); // quitar la M
+            // Formatos: Im283381 → ordId=M283381, IM%W283381 → ordId=M%W283381
+            // El escáner puede insertar %W entre M y el número de item
+            const mMatch = ordId.match(/^M(%W)?(\d)/);
+            const scanMuestra = !!mMatch;
+            if (scanMuestra) ordId = ordId.replace(/^M(%W)?/, '');
 
             // ── 3. Buscar orden(es) ──────────────────────────────────────
             // grupo:true  → 5 dígitos, mueve todo el grupo (pegado y después)
