@@ -424,7 +424,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.85';
+        const APP_VERSION = 'v8.86';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1119,13 +1119,20 @@
         function callScript(order, toEtapa, fromEtapa) {
             if (!cfg.scriptUrl) return;
             callTracking(order, toEtapa);
-            // muestras — actualizar etapa_actual en hoja Muestras en cada movimiento
+            // muestras — flujo M imp → M Acab → M emp
             if (order._isMuestra && order.grupoId) {
                 const it = encodeURIComponent(String(order.grupoId).replace(/-M$/, '').trim());
                 if (toEtapa === 'empaque') {
+                    // Mueve de M Acab (o M imp) a M emp
                     fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + it + '&hoja=muestras', { mode: 'no-cors' }).catch(() => {});
                 } else if (toEtapa === 'listo') {
                     fetch(cfg.scriptUrl + '?action=marcarProcesado&item=' + it, { mode: 'no-cors' }).catch(() => {});
+                } else if (fromEtapa === 'impresion' && isAcabEtapa(toEtapa)) {
+                    // Sale de impresión → mueve de M imp a M Acab y registra etapa
+                    fetch(cfg.scriptUrl + '?action=moverMuestraAcab&item=' + it + '&etapa=' + encodeURIComponent('M ' + toEtapa), { mode: 'no-cors' }).catch(() => {});
+                } else if (isAcabEtapa(toEtapa)) {
+                    // Ya está en M Acab → solo actualiza etapa_actual
+                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent('M ' + toEtapa) + '&hoja=macab', { mode: 'no-cors' }).catch(() => {});
                 } else {
                     fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent('M ' + toEtapa) + '&hoja=muestras', { mode: 'no-cors' }).catch(() => {});
                 }
