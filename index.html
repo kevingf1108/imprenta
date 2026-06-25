@@ -1428,13 +1428,20 @@
       }catch(ex){return r('ERROR:tracking:'+ex.message);}
     }
 
-    // marcarProcesado — marca Procesado=TRUE en hoja Muestras
+    // marcarProcesado — busca en M Acab primero, luego M imp
     if(action==='marcarprocesado'){
-      const sh=ss.getSheets().find(s=>s.getName().trim()==='M imp');
-      if(!sh)return r('ERROR:hoja "Muestras" no encontrada');
-      const data=sh.getDataRange().getValues();
-      const heads=data[0].map(h=>h.toString().toLowerCase().trim());
-      const ci=heads.findIndex(h=>['# item','item','#item'].includes(h));
+      let sh=ss.getSheets().find(s=>s.getName().trim()==='M Acab');
+      let data=sh?sh.getDataRange().getValues():null;
+      let heads=data?data[0].map(h=>h.toString().toLowerCase().trim()):null;
+      let ci=heads?heads.findIndex(h=>['# item','item','#item'].includes(h)):-1;
+      const inAcab=data&&ci>=0&&data.slice(1).some(row=>row[ci]?.toString().trim()===item);
+      if(!inAcab){
+        sh=ss.getSheets().find(s=>s.getName().trim()==='M imp');
+        if(!sh)return r('ERROR:hoja M imp no encontrada');
+        data=sh.getDataRange().getValues();
+        heads=data[0].map(h=>h.toString().toLowerCase().trim());
+        ci=heads.findIndex(h=>['# item','item','#item'].includes(h));
+      }
       const cp2=heads.findIndex(h=>['eliminar','procesado','listo','done','ready'].includes(h));
       if(ci<0)return r('ERROR:no columna "# item"');
       if(cp2<0)return r('ERROR:no columna "eliminar"');
@@ -1445,10 +1452,44 @@
       return r('OK:'+n+' muestras marcadas como Eliminar');
     }
 
-    // moverAempacado — mueve fila a hoja "Empacado" (o actualiza etapa_actual si no existe)
+    // moverMuestraAcab — mueve de M imp a M Acab al llegar a acabados
+    if(action==='movermuestraacab'){
+      const src=ss.getSheets().find(s=>s.getName().trim()==='M imp');
+      const dst=ss.getSheets().find(s=>s.getName().trim()==='M Acab');
+      if(!src)return r('ERROR:hoja "M imp" no encontrada');
+      if(!dst)return r('ERROR:hoja "M Acab" no encontrada');
+      const d=src.getDataRange().getValues();
+      const h=d[0].map(v=>v.toString().toLowerCase().trim());
+      const ci=h.findIndex(v=>['# item','item','#item'].includes(v));
+      const ce=h.findIndex(v=>['etapa_actual','etapa actual','etapa'].includes(v));
+      if(ci<0)return r('ERROR:no columna "# item"');
+      let n=0;
+      for(let i=d.length-1;i>=1;i--){
+        if(d[i][ci]?.toString().trim()!==item)continue;
+        const row=[...d[i]];
+        if(ce>=0)row[ce]=etapa;
+        dst.appendRow(row);
+        src.deleteRow(i+1);
+        n++;
+      }
+      return r('OK:'+n+' muestras movidas a M Acab');
+    }
+
+    // moverAempacado — para muestras busca en M Acab primero, luego M imp
     if(action==='moveraempacado'){
-      const srcNombre=hoja==='muestras'?'M imp':'Acabado org';
-      const empNombre=hoja==='muestras'?'M emp':'Empacado';
+      let srcNombre,empNombre;
+      if(hoja==='muestras'){
+        const shA=ss.getSheets().find(s=>s.getName().trim()==='M Acab');
+        const dA=shA?shA.getDataRange().getValues():null;
+        const hA=dA?dA[0].map(v=>v.toString().toLowerCase().trim()):null;
+        const ciA=hA?hA.findIndex(v=>['# item','item','#item'].includes(v)):-1;
+        const inAcab=dA&&ciA>=0&&dA.slice(1).some(row=>row[ciA]?.toString().trim()===item);
+        srcNombre=inAcab?'M Acab':'M imp';
+        empNombre='M emp';
+      }else{
+        srcNombre='Acabado org';
+        empNombre='Empacado';
+      }
       const src=ss.getSheets().find(s=>s.getName().trim()===srcNombre);
       if(!src)return r('ERROR:hoja "'+srcNombre+'" no encontrada');
       const emp=ss.getSheets().find(s=>s.getName().trim()===empNombre);
@@ -1460,17 +1501,33 @@
       let n=0;
       for(let i=d2.length-1;i>=1;i--){
         if(d2[i][ci2]?.toString().trim()!==item)continue;
-        if(emp){
-          emp.appendRow(d2[i]);
-          src.deleteRow(i+1);
-        }else if(ce>=0){
-          src.getRange(i+1,ce+1).setValue('empaque');
-        }
+        if(emp){emp.appendRow(d2[i]);src.deleteRow(i+1);}
+        else if(ce>=0){src.getRange(i+1,ce+1).setValue('empaque');}
         n++;
       }
       return r('OK:'+n+' filas movidas a '+empNombre);
     }
 
+    // updateEtapa en M Acab (muestra ya en acabados moviéndose entre etapas)
+    if(action==='updateetapa'&&hoja==='macab'){
+      const sh=ss.getSheets().find(s=>s.getName().trim()==='M Acab');
+      if(!sh)return r('ERROR:hoja "M Acab" no encontrada');
+      const data=sh.getDataRange().getValues();
+      const heads=data[0].map(h=>h.toString().toLowerCase().trim());
+      const ci=heads.findIndex(h=>['# item','item','#item'].includes(h));
+      const ce=heads.findIndex(h=>['etapa_actual','etapa actual','etapa'].includes(h));
+      if(ci<0)return r('ERROR:no columna "# item"');
+      if(ce<0)return r('ERROR:no columna etapa_actual en M Acab');
+      let n=0;
+      for(let i=1;i<data.length;i++){
+        if(data[i][ci]?.toString().trim()!==item)continue;
+        sh.getRange(i+1,ce+1).setValue(etapa);
+        n++;
+      }
+      return r('OK:'+n+' filas actualizadas en M Acab');
+    }
+
+    // handler genérico: marcarListo, updateEtapa (impresion/muestras/acabados), moverAacabados
     const nombreHoja=hoja==='impresion'?'Impresion org':hoja==='muestras'?'M imp':'Acabado org';
     const sh=ss.getSheets().find(s=>s.getName().trim()===nombreHoja);
     if(!sh)return r('ERROR:hoja "'+nombreHoja+'" no encontrada');
