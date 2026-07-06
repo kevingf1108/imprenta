@@ -2424,9 +2424,12 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           <button onclick="testScriptUrl()" style="padding:7px 12px;border-radius:8px;border:1px solid #166534;background:#0a2e1a;color:#4ade80;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap">🔌 Probar</button>
         </div>
         <div style="font-size:11px;color:#475569;margin-top:6px">Cuando avances una orden con ▶, automáticamente marcará <b style="color:#4ade80">Listo = TRUE</b> en tu hoja de Google Sheets y enviará a Acabado org.</div>
-        <span class="lbl" style="margin-top:12px;color:#f59e0b">URL Script — Log HE / DI / T (Terminado)</span>
+        <span class="lbl" style="margin-top:12px;color:#f59e0b">URL Script — Log HE / DI / KE / IS / AD / T (Empacado)</span>
         <input class="inp" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.scanLogUrl || '')}" oninput="cfg.scanLogUrl=this.value;saveS()">
-        <div style="font-size:11px;color:#475569;margin-top:6px">Al escanear <b style="color:#f59e0b">HE</b>, <b style="color:#f59e0b">DI</b> o <b style="color:#f59e0b">T</b>, el app lee la última fila de tu hoja de producción y la manda a este script para que la escriba en Sheets. No mueve ninguna orden.</div>
+        <div style="font-size:11px;color:#475569;margin-top:6px">Al escanear <b style="color:#f59e0b">HE</b>, <b style="color:#f59e0b">DI</b>, <b style="color:#f59e0b">KE</b>, <b style="color:#f59e0b">IS</b>, <b style="color:#f59e0b">AD</b> o <b style="color:#f59e0b">T</b>, manda el scan a este script. No mueve ninguna orden.</div>
+        <span class="lbl" style="margin-top:12px;color:#38bdf8">URL Script — Log Máquinas (F| / P| / O| / IM|)</span>
+        <input class="inp" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.maqScanUrl || '')}" oninput="cfg.maqScanUrl=this.value;saveS()">
+        <div style="font-size:11px;color:#475569;margin-top:6px">Al escanear <b style="color:#38bdf8">F%W</b>, <b style="color:#38bdf8">P%W</b>, <b style="color:#38bdf8">O%W</b> o <b style="color:#38bdf8">IM%W</b> + número de máquina (10010, 1352, 6180, 6320…), manda a la hoja "Log Maquinas". Si se deja vacío usa el script principal.</div>
         <div style="font-size:11px;color:#166534;margin-top:4px">📋 Ver instrucciones para crear el script → botón 🔄 Sheets → "Cómo configurar"</div>
       </div>
       <div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px">
@@ -2560,6 +2563,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         ];
         // Prefijos especiales: NO avanzan el kanban, solo mandan la última fila de la hoja a Sheets
         const SCAN_LOG_PRE = ['HE', 'DI', 'KE', 'IS', 'AD', 'T'];
+        // Prefijos de máquina: F%W, P%W, O%W, IM%W → mandan a hoja de log de máquinas
+        const MAQ_SCAN_PRE = ['IM%W', 'F%W', 'P%W', 'O%W'];
 
         let _scanTimers = {};
         try { _scanTimers = JSON.parse(localStorage.getItem('imp_timers') || '{}'); } catch { }
@@ -2576,6 +2581,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
             const logPre = SCAN_LOG_PRE.find(p => raw2.startsWith(p));
             if (logPre) { sendScanToSheets(raw2); return; }
+            // ── 0b. Prefijos de máquina: F%W, P%W, O%W, IM%W → log maquinas ──
+            const maqPre = MAQ_SCAN_PRE.find(p => raw2.startsWith(p));
+            if (maqPre) { sendMaqScanToSheets(raw2); return; }
             // ── 1. Parsear sufijo i/p ────────────────────────────────────
             // i = Inicia (llega a este paso, arranca timer)
             // p = Pasa   (terminó este paso, avanza al siguiente)
@@ -2725,6 +2733,14 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const clean = scanStr.replace(/%W/g, '|');
             fetch(`${url}?scan=${encodeURIComponent(clean)}`, { mode: 'no-cors' }).catch(() => { });
             showToast('📊 Enviado: ' + clean);
+        }
+
+        function sendMaqScanToSheets(scanStr) {
+            const url = cfg.maqScanUrl || cfg.scanLogUrl || cfg.scriptUrl;
+            if (!url) { showToast('⚠️ Configura URL Script Máquinas en ⚙️ Configuración'); return; }
+            const clean = scanStr.replace(/%W/g, '|');
+            fetch(`${url}?action=maqscan&scan=${encodeURIComponent(clean)}`, { mode: 'no-cors' }).catch(() => { });
+            showToast('🖨️ Máquina registrada: ' + clean);
         }
 
         function showScanFlash(titulo, etapa, color) {
