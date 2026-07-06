@@ -1508,20 +1508,41 @@
       return r('OK:'+n+' filas movidas a '+empNombre);
     }
 
-    // updateEtapa en M Acab (muestra ya en acabados moviéndose entre etapas)
+    // updateEtapa en M Acab — si no está ahí, busca en M imp y la mueve (migración automática)
     if(action==='updateetapa'&&hoja==='macab'){
-      const sh=ss.getSheets().find(s=>s.getName().trim()==='M Acab');
-      if(!sh)return r('ERROR:hoja "M Acab" no encontrada');
-      const data=sh.getDataRange().getValues();
-      const heads=data[0].map(h=>h.toString().toLowerCase().trim());
-      const ci=heads.findIndex(h=>['# item','item','#item'].includes(h));
-      const ce=heads.findIndex(h=>['etapa_actual','etapa actual','etapa'].includes(h));
-      if(ci<0)return r('ERROR:no columna "# item"');
+      const shAcab=ss.getSheets().find(s=>s.getName().trim()==='M Acab');
+      const dAcab=shAcab?shAcab.getDataRange().getValues():null;
+      const hAcab=dAcab?dAcab[0].map(h=>h.toString().toLowerCase().trim()):null;
+      const ciAcab=hAcab?hAcab.findIndex(h=>['# item','item','#item'].includes(h)):-1;
+      const inAcab=dAcab&&ciAcab>=0&&dAcab.slice(1).some(row=>row[ciAcab]?.toString().trim()===item);
+      if(!inAcab){
+        // No está en M Acab — migrar desde M imp
+        const src=ss.getSheets().find(s=>s.getName().trim()==='M imp');
+        const dst=shAcab;
+        if(!src)return r('ERROR:hoja M imp no encontrada');
+        if(!dst)return r('ERROR:hoja M Acab no encontrada');
+        const d=src.getDataRange().getValues();
+        const h=d[0].map(v=>v.toString().toLowerCase().trim());
+        const ciSrc=h.findIndex(v=>['# item','item','#item'].includes(v));
+        const ce=h.findIndex(v=>['etapa_actual','etapa actual','etapa'].includes(v));
+        if(ciSrc<0)return r('ERROR:no columna # item en M imp');
+        let n=0;
+        for(let i=d.length-1;i>=1;i--){
+          if(d[i][ciSrc]?.toString().trim()!==item)continue;
+          const row=[...d[i]];
+          if(ce>=0)row[ce]=etapa;
+          dst.appendRow(row);
+          src.deleteRow(i+1);
+          n++;
+        }
+        return r('OK:migrada de M imp a M Acab '+n+' filas');
+      }
+      const ce=hAcab.findIndex(h=>['etapa_actual','etapa actual','etapa'].includes(h));
       if(ce<0)return r('ERROR:no columna etapa_actual en M Acab');
       let n=0;
-      for(let i=1;i<data.length;i++){
-        if(data[i][ci]?.toString().trim()!==item)continue;
-        sh.getRange(i+1,ce+1).setValue(etapa);
+      for(let i=1;i<dAcab.length;i++){
+        if(dAcab[i][ciAcab]?.toString().trim()!==item)continue;
+        shAcab.getRange(i+1,ce+1).setValue(etapa);
         n++;
       }
       return r('OK:'+n+' filas actualizadas en M Acab');
