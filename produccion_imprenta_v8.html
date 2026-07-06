@@ -434,7 +434,7 @@
                 if (v && v !== APP_VERSION) {
                     location.reload(true);
                 }
-            } catch {}
+            } catch { }
         }
         setTimeout(checkForUpdate, 4000);
         setInterval(checkForUpdate, 5 * 60 * 1000);
@@ -1073,7 +1073,7 @@
         }
 
         // Mapea una fila de la hoja de MUESTRAS a una orden
-        const _ETAPAS_VALIDAS = new Set(['impresion','empaque','listo','acab_pl','acab_ci','acab_pg','acab_cf','acab_cdc','acab_cc','acab_ap','acab_ms','acab_pi','acab_pp','acab_en','acab_es','acab_te']);
+        const _ETAPAS_VALIDAS = new Set(['impresion', 'empaque', 'listo', 'acab_pl', 'acab_ci', 'acab_pg', 'acab_cf', 'acab_cdc', 'acab_cc', 'acab_ap', 'acab_ms', 'acab_pi', 'acab_pp', 'acab_en', 'acab_es', 'acab_te']);
         function mapMuestraRow(row) {
             const nombre = col(row, 'group name', 'nombre', 'name', 'titulo');
             const itemNum = col(row, '# item', '#item', '# item', '#order', 'item');
@@ -1118,7 +1118,7 @@
             if (!cfg.scriptUrl) return;
             const item = encodeURIComponent(String(order.grupoId || order.id).replace(/-[MAPm]$/, '').trim());
             const etapaTracking = order._isMuestra ? 'M ' + toEtapa : toEtapa;
-            fetch(cfg.scriptUrl + '?action=updateTracking&item=' + item + '&etapa=' + encodeURIComponent(etapaTracking) + '&trackingId=' + encodeURIComponent(TRACKING_SHEET_ID), { mode: 'no-cors' }).catch(() => {});
+            fetch(cfg.scriptUrl + '?action=updateTracking&item=' + item + '&etapa=' + encodeURIComponent(etapaTracking) + '&trackingId=' + encodeURIComponent(TRACKING_SHEET_ID), { mode: 'no-cors' }).catch(() => { });
         }
 
         // Marca Listo=TRUE en Google Sheets cuando se avanza una orden
@@ -1131,17 +1131,17 @@
                 const it = encodeURIComponent(String(order.grupoId).replace(/-M$/, '').trim());
                 if (toEtapa === 'empaque') {
                     // Mueve de M Acab (o M imp) a M emp
-                    fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + it + '&hoja=muestras', { mode: 'no-cors' }).catch(() => {});
+                    fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + it + '&hoja=muestras', { mode: 'no-cors' }).catch(() => { });
                 } else if (toEtapa === 'listo') {
-                    fetch(cfg.scriptUrl + '?action=marcarProcesado&item=' + it, { mode: 'no-cors' }).catch(() => {});
+                    fetch(cfg.scriptUrl + '?action=marcarProcesado&item=' + it, { mode: 'no-cors' }).catch(() => { });
                 } else if (fromEtapa === 'impresion' && isAcabEtapa(toEtapa)) {
                     // Sale de impresión → mueve de M imp a M Acab y registra etapa
-                    fetch(cfg.scriptUrl + '?action=moverMuestraAcab&item=' + it + '&etapa=' + encodeURIComponent('M ' + toEtapa), { mode: 'no-cors' }).catch(() => {});
+                    fetch(cfg.scriptUrl + '?action=moverMuestraAcab&item=' + it + '&etapa=' + encodeURIComponent('M ' + toEtapa), { mode: 'no-cors' }).catch(() => { });
                 } else if (isAcabEtapa(toEtapa)) {
                     // Ya está en M Acab → solo actualiza etapa_actual
-                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent('M ' + toEtapa) + '&hoja=macab', { mode: 'no-cors' }).catch(() => {});
+                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent('M ' + toEtapa) + '&hoja=macab', { mode: 'no-cors' }).catch(() => { });
                 } else {
-                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent('M ' + toEtapa) + '&hoja=muestras', { mode: 'no-cors' }).catch(() => {});
+                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent('M ' + toEtapa) + '&hoja=muestras', { mode: 'no-cors' }).catch(() => { });
                 }
                 return;
             }
@@ -1149,11 +1149,11 @@
             if (order.tipo === 'union_result' && order.grupoId) {
                 const it = encodeURIComponent(String(order.grupoId).trim());
                 if (toEtapa === 'empaque') {
-                    fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + it, { mode: 'no-cors' }).catch(() => {});
+                    fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + it, { mode: 'no-cors' }).catch(() => { });
                 } else if (toEtapa === 'listo') {
-                    fetch(cfg.scriptUrl + '?action=marcarListo&item=' + it + '&hoja=acabados', { mode: 'no-cors' }).catch(() => {});
+                    fetch(cfg.scriptUrl + '?action=marcarListo&item=' + it + '&hoja=acabados', { mode: 'no-cors' }).catch(() => { });
                 } else if (isAcabEtapa(toEtapa)) {
-                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa), { mode: 'no-cors' }).catch(() => {});
+                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa), { mode: 'no-cors' }).catch(() => { });
                 }
                 return;
             }
@@ -1167,24 +1167,24 @@
 
             // Sale de Impresión hacia Acabados → mover fila de Impresion org a Acabado org
             if (fromEtapa === 'impresion' && isAcabEtapa(toEtapa)) {
-                fetch(cfg.scriptUrl + '?action=moverAacabados&item=' + encodeURIComponent(item) + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => {});
+                fetch(cfg.scriptUrl + '?action=moverAacabados&item=' + encodeURIComponent(item) + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => { });
                 // Pre-registrar posición para la orden union_result que aparecerá en el próximo sync
                 etapaMap[item + '-A'] = toEtapa;
                 return;
             }
             // Llega a Empaque → mover fila de Acabado org a Empacado
             if (toEtapa === 'empaque') {
-                fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + encodeURIComponent(item), { mode: 'no-cors' }).catch(() => {});
+                fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + encodeURIComponent(item), { mode: 'no-cors' }).catch(() => { });
                 return;
             }
             // Llega a Listo → eliminar de Acabado org / Empacado
             if (toEtapa === 'listo') {
-                fetch(cfg.scriptUrl + '?action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=' + hoja + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => {});
+                fetch(cfg.scriptUrl + '?action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=' + hoja + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => { });
                 return;
             }
             // Movimiento dentro de Acabados → actualizar etapa_actual en Acabado org
             if (isAcabEtapa(toEtapa)) {
-                fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + encodeURIComponent(item) + '&etapa=' + encodeURIComponent(toEtapa), { mode: 'no-cors' }).catch(() => {});
+                fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + encodeURIComponent(item) + '&etapa=' + encodeURIComponent(toEtapa), { mode: 'no-cors' }).catch(() => { });
             }
         }
         function markListoInSheets(order, fromEtapa) { callScript(order, 'listo', fromEtapa); }
@@ -1322,7 +1322,7 @@
                 // (órdenes fusionadas antes de v8.68 — no crea nuevas fusiones)
                 const _legacyUnions = new Set(
                     manual.filter(o => o.tipo === 'union_result' && o.grupoId && !o._merged && o.etapa !== 'listo')
-                          .map(o => o.grupoId)
+                        .map(o => o.grupoId)
                 );
 
                 // Aplicar posiciones guardadas en Firebase (etapaMap) sobre lo que dicen los sheets
@@ -2559,7 +2559,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             { pre: 'H', etapa: 'acab_pg', label: 'Hotmelt', grupo: true },
         ];
         // Prefijos especiales: NO avanzan el kanban, solo mandan la última fila de la hoja a Sheets
-        const SCAN_LOG_PRE = ['HE', 'DI', 'T'];
+        const SCAN_LOG_PRE = ['HE', 'DI', 'KE', 'IS', 'AD', 'T'];
 
         let _scanTimers = {};
         try { _scanTimers = JSON.parse(localStorage.getItem('imp_timers') || '{}'); } catch { }
@@ -2634,7 +2634,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
 
             if (!matches.length) {
                 // Debug: busca cualquier orden que tenga ese número (sin filtros de etapa/_merged)
-                const anyMatch = orders.filter(x => x.id.replace(/\D/g,'') === digits6 || x.grupoId?.toString().replace(/\D/g,'') === digits6);
+                const anyMatch = orders.filter(x => x.id.replace(/\D/g, '') === digits6 || x.grupoId?.toString().replace(/\D/g, '') === digits6);
                 const debugInfo = anyMatch.length
                     ? 'Existe en orders pero filtrada: ' + anyMatch.map(x => x.id + '|etapa=' + x.etapa + (x._merged ? '|MERGED' : '') + (x._isMuestra ? '|MUESTRA' : '')).join(', ')
                     : 'No existe en orders con digits=' + digits6 + ' (total orders=' + orders.length + ')';
