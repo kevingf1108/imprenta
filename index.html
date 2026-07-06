@@ -2563,8 +2563,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         ];
         // Prefijos especiales: NO avanzan el kanban, solo mandan la última fila de la hoja a Sheets
         const SCAN_LOG_PRE = ['HE', 'DI', 'KE', 'IS', 'AD', 'T'];
-        // Prefijos de máquina: F%W, P%W, O%W, IM%W → mandan a hoja de log de máquinas
-        const MAQ_SCAN_PRE = ['IM%W', 'F%W', 'P%W', 'O%W'];
+        // Prefijos de máquina: F%W, P%W, O%W → mandan a hoja de log de máquinas
+        const MAQ_SCAN_PRE = ['F%W', 'P%W', 'O%W'];
 
         let _scanTimers = {};
         try { _scanTimers = JSON.parse(localStorage.getItem('imp_timers') || '{}'); } catch { }
