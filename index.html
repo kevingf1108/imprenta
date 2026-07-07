@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.86';
+        const APP_VERSION = 'v8.88';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1024,6 +1024,7 @@
                 titulo: `${esInt ? 'INT' : 'PORT'} — ${nombre}`,
                 cliente: '', cantidad,
                 tabloidesSrc: tabs, ppt: 8, portaPpt: 2,
+                paginas: tabs * 8,
                 tipoInteriores: colorBn.toLowerCase().includes('bn') || colorBn.toLowerCase().includes('b/n') ? 'byn' : 'color',
                 gramaje: detectGramaje(papel),
                 tipoEncuadernacion: enc,
@@ -1711,10 +1712,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             if (isAcabEtapa(o.etapa)) {
                 const acabFlow = getAcabFlow(o);
                 const ci = acabFlow.indexOf(o.etapa);
-                const fraction = ci >= 0 && acabFlow.length > 1 ? (acabFlow.length - ci) / acabFlow.length : 1;
-                const acabMin = t.pasos.filter(p => p.fase === 'acab').reduce((s, p) => s + p.min, 0);
+                const remIds = new Set((ci >= 0 ? acabFlow.slice(ci) : acabFlow).map(s => s.replace('acab_', '')));
+                const acabMin = t.pasos.filter(p => p.fase === 'acab' && remIds.has(p.id)).reduce((s, p) => s + p.min, 0);
                 const empMin = t.pasos.filter(p => p.fase === 'emp').reduce((s, p) => s + p.min, 0);
-                return acabMin * fraction + empMin;
+                return acabMin + empMin;
             }
             return t.pasos.filter(p => p.fase === 'imp').reduce((s, p) => s + p.min, 0) || t.paralelo;
         }
@@ -1728,8 +1729,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             if (isAcabEtapa(o.etapa)) {
                 const acabFlow = getAcabFlow(o);
                 const ci = acabFlow.indexOf(o.etapa);
-                const fraction = ci >= 0 && acabFlow.length > 1 ? (acabFlow.length - ci) / acabFlow.length : 1;
-                return acabMin * fraction + empMin;
+                const remIds = new Set((ci >= 0 ? acabFlow.slice(ci) : acabFlow).map(s => s.replace('acab_', '')));
+                return t.pasos.filter(p => p.fase === 'acab' && remIds.has(p.id)).reduce((s, p) => s + p.min, 0) + empMin;
             }
             return impMin + acabMin + empMin;
         }
@@ -1739,15 +1740,20 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const bf = cfg.bufferFactor || 1.0;
             let qMin;
             if (isAcabEtapa(o.etapa)) {
-                // Acabados: cada máquina corre en paralelo, solo contar órdenes en el MISMO sub-paso
+                // Acabados: contar órdenes que comparten la misma máquina física, usando minutos reales restantes
+                const myStepId = o.etapa.replace('acab_', '');
+                const machsForStep = MAQUINAS.filter(m => m.steps.includes(myStepId));
+                const machCount = Math.max(machsForStep.length, 1);
+                const sharedStepIds = new Set(machsForStep.flatMap(m => m.steps));
                 qMin = orders
-                    .filter(x => x.id !== o.id && !x._merged && x.etapa === o.etapa)
+                    .filter(x => x.id !== o.id && !x._merged && isAcabEtapa(x.etapa) && sharedStepIds.has(x.etapa.replace('acab_', '')))
                     .reduce((s, x) => {
                         const xt = calcT(x, cfg);
                         const xFlow = getAcabFlow(x);
-                        const xAcabMin = xt.pasos.filter(p => p.fase === 'acab').reduce((a, p) => a + p.min, 0);
-                        return s + (xFlow.length > 0 ? xAcabMin / xFlow.length : xAcabMin);
-                    }, 0);
+                        const xCi = xFlow.indexOf(x.etapa);
+                        const xRemIds = new Set((xCi >= 0 ? xFlow.slice(xCi) : xFlow).map(sid => sid.replace('acab_', '')));
+                        return s + xt.pasos.filter(p => p.fase === 'acab' && xRemIds.has(p.id) && sharedStepIds.has(p.id)).reduce((a, p) => a + p.min, 0);
+                    }, 0) / machCount;
             } else {
                 const myPhase = o.etapa === 'empaque' ? 'emp' : 'imp';
                 qMin = orders
@@ -2038,8 +2044,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     // Desglose para tooltip
                     const t2 = calcT(o, cfg);
                     const bf = cfg.bufferFactor || 1.0;
+                    const _ms2 = o.etapa.replace('acab_', ''), _mf2 = MAQUINAS.filter(m => m.steps.includes(_ms2)), _mc2 = Math.max(_mf2.length, 1), _ss2 = new Set(_mf2.flatMap(m => m.steps));
                     const qMin = isAcabEtapa(o.etapa)
-                        ? orders.filter(x => x.id !== o.id && !x._merged && x.etapa === o.etapa).reduce((s, x) => { const xt = calcT(x, cfg); const xf = getAcabFlow(x); const xam = xt.pasos.filter(p => p.fase === 'acab').reduce((a, p) => a + p.min, 0); return s + (xf.length > 0 ? xam / xf.length : xam); }, 0)
+                        ? orders.filter(x => x.id !== o.id && !x._merged && isAcabEtapa(x.etapa) && _ss2.has(x.etapa.replace('acab_', ''))).reduce((s, x) => { const xt = calcT(x, cfg); const xf = getAcabFlow(x); const xCi = xf.indexOf(x.etapa); const xRi = new Set((xCi >= 0 ? xf.slice(xCi) : xf).map(sid => sid.replace('acab_', ''))); return s + xt.pasos.filter(p => p.fase === 'acab' && xRi.has(p.id) && _ss2.has(p.id)).reduce((a, p) => a + p.min, 0); }, 0) / _mc2
                         : orders.filter(x => x.id !== o.id && !x._merged && x.etapa !== 'listo').filter(x => { const xp = isAcabEtapa(x.etapa) ? 'acab' : x.etapa === 'empaque' ? 'emp' : 'imp'; return xp === (o.etapa === 'empaque' ? 'emp' : 'imp'); }).reduce((s, x) => s + calcRemainingMin(x), 0);
                     const impM = t2.pasos.filter(p => p.fase === 'imp').reduce((s, p) => s + p.min, 0);
                     const acabM = t2.pasos.filter(p => p.fase === 'acab').reduce((s, p) => s + p.min, 0);
@@ -2180,12 +2187,17 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const orderEtapa = existing.etapa || 'impresion';
             let qMin;
             if (isAcabEtapa(orderEtapa)) {
-                qMin = active.filter(x => x.etapa === orderEtapa).reduce((s, x) => {
+                const _ueStep = orderEtapa.replace('acab_', '');
+                const _ueMachs = MAQUINAS.filter(m => m.steps.includes(_ueStep));
+                const _ueMc = Math.max(_ueMachs.length, 1);
+                const _ueSs = new Set(_ueMachs.flatMap(m => m.steps));
+                qMin = active.filter(x => isAcabEtapa(x.etapa) && _ueSs.has(x.etapa.replace('acab_', ''))).reduce((s, x) => {
                     const xt = calcT(x, cfg);
                     const xf = getAcabFlow(x);
-                    const xam = xt.pasos.filter(p => p.fase === 'acab').reduce((a, p) => a + p.min, 0);
-                    return s + (xf.length > 0 ? xam / xf.length : xam);
-                }, 0);
+                    const xCi = xf.indexOf(x.etapa);
+                    const xRi = new Set((xCi >= 0 ? xf.slice(xCi) : xf).map(sid => sid.replace('acab_', '')));
+                    return s + xt.pasos.filter(p => p.fase === 'acab' && xRi.has(p.id) && _ueSs.has(p.id)).reduce((a, p) => a + p.min, 0);
+                }, 0) / _ueMc;
             } else {
                 const myPhase = orderEtapa === 'empaque' ? 'emp' : 'imp';
                 qMin = active.filter(x => {
@@ -2236,6 +2248,71 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const byEt = _allEt.map(et => ({ ...et, cnt: orders.filter(o => o.etapa === et.id && !o._merged).length }));
             const bott = byEt.slice(0, 5).reduce((a, b) => b.cnt > a.cnt ? b : a, byEt[0]);
             const kpis = [['📦', 'Activas', active.length, '#60a5fa'], ['✅', 'Completadas', done.length, '#4ade80'], ['⚡', 'Urgentes', urg.length, '#f59e0b'], ['🔴', 'Vencidas', od.length, '#ef4444'], ['🟡', 'Vencen 48h', sn.length, '#f97316'], ['⏱', 'T promedio', mStr(avg), '#c084fc']];
+
+            // ── Carga por máquina ──────────────────────────────────────────
+            const capDia = (cfg.horasDia || 10) * 60;
+            const machLoad = {};
+            MAQUINAS.forEach(m => { machLoad[m.id] = { mach: m, pendMin: 0, ords: new Set() }; });
+            active.forEach(o => {
+                calcT(o, cfg).pasos.forEach(p => {
+                    const ms = MAQUINAS.filter(m => m.steps.includes(p.id));
+                    if (!ms.length) return;
+                    const share = p.min / ms.length;
+                    ms.forEach(m => { machLoad[m.id].pendMin += share; machLoad[m.id].ords.add(o.id); });
+                });
+            });
+            const grupos = [...new Set(MAQUINAS.map(m => m.grupo))];
+            const machGruposHTML = grupos.map(gr => {
+                const ms = MAQUINAS.filter(m => m.grupo === gr);
+                const rows = ms.map(m => {
+                    const ld = machLoad[m.id];
+                    const pct = Math.min(200, Math.round(ld.pendMin / capDia * 100));
+                    const barW = Math.min(100, pct);
+                    const co = pct >= 100 ? '#ef4444' : pct >= 70 ? '#f59e0b' : pct > 0 ? '#22c55e' : '#334155';
+                    const label = pct >= 100 ? '🔴 ' + pct + '%' : pct >= 70 ? '⚠️ ' + pct + '%' : pct > 0 ? pct + '%' : '—';
+                    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
+  <div style="width:130px;font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${m.label}">${m.label}</div>
+  <div style="flex:1;background:#0f172a;border-radius:4px;height:12px;overflow:hidden"><div style="height:100%;border-radius:4px;width:${barW}%;background:${co}"></div></div>
+  <div style="width:70px;text-align:right;font-size:11px;color:${co};font-weight:700">${label}</div>
+  <div style="width:50px;text-align:right;font-size:11px;color:#475569">${ld.ords.size > 0 ? ld.ords.size + ' ord' : ''}</div>
+  <div style="width:55px;text-align:right;font-size:11px;color:#334155">${ld.pendMin > 0 ? mStr(Math.round(ld.pendMin)) : ''}</div>
+</div>`;
+                }).join('');
+                const grParts = gr.split(' '); const grIc = grParts[0]; const grLbl = grParts.slice(1).join(' ').toUpperCase();
+                return `<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px;letter-spacing:.05em">${grIc} ${grLbl}</div>${rows}</div>`;
+            }).join('');
+            const totalPendMin = Object.values(machLoad).reduce((s, v) => s + v.pendMin, 0);
+            const totalCapMin = MAQUINAS.length * capDia;
+            const globalPct = Math.round(totalPendMin / totalCapMin * 100);
+            const globalCo = globalPct >= 80 ? '#ef4444' : globalPct >= 50 ? '#f59e0b' : '#22c55e';
+
+            // ── Historial por etapa (donde se detiene más) ─────────────────
+            const etStat = {};
+            statsHistory.filter(r => r.mins > 0 && r.etapa).forEach(r => {
+                if (!etStat[r.etapa]) etStat[r.etapa] = { label: r.label || r.etapa, vals: [] };
+                etStat[r.etapa].vals.push(r.mins);
+            });
+            const etRows = Object.entries(etStat)
+                .map(([id, d]) => ({ id, label: d.label, avg: Math.round(d.vals.reduce((s, v) => s + v, 0) / d.vals.length), max: Math.round(Math.max(...d.vals)), n: d.vals.length }))
+                .filter(r => r.n >= 2)
+                .sort((a, b) => b.avg - a.avg)
+                .slice(0, 10);
+            const maxAvg = etRows.length > 0 ? Math.max(...etRows.map(r => r.avg), 1) : 1;
+            const etHTML = etRows.length === 0
+                ? '<div style="color:#334155;padding:10px 0;font-size:12px">Sin suficiente historial aún (mínimo 2 registros por etapa)</div>'
+                : etRows.map((r, i) => {
+                    const barW = Math.round(r.avg / maxAvg * 100);
+                    const co = i === 0 ? '#ef4444' : i <= 2 ? '#f59e0b' : '#60a5fa';
+                    const badge = i === 0 ? ' 🔴 Mayor demora' : '';
+                    return `<div style="margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+    <div style="font-size:12px;color:#cbd5e1;font-weight:${i < 3 ? '700' : '400'}">${r.label}${badge}</div>
+    <div style="font-size:11px;color:${co};font-weight:700">${mStr(r.avg)} <span style="color:#475569;font-weight:400">prom · máx ${mStr(r.max)} · ${r.n} reg</span></div>
+  </div>
+  <div style="background:#0f172a;border-radius:4px;height:10px;overflow:hidden"><div style="height:100%;border-radius:4px;width:${barW}%;background:${co}"></div></div>
+</div>`;
+                }).join('');
+
             return `<div style="padding:20px;max-width:1100px;margin:0 auto">
     <h2 style="font-size:20px;font-weight:800;margin-bottom:16px">📊 Indicadores de Producción</h2>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">
@@ -2254,7 +2331,26 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     <div class="kcard" style="margin-bottom:12px"><div style="font-size:12px;color:#64748b;font-weight:700;margin-bottom:12px">📋 POR ETAPA</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">${byEt.map(et => `<div style="flex:1;min-width:80px;background:#0f172a;border-radius:10px;padding:12px;border-top:3px solid ${et.color}"><div style="font-size:26px;font-weight:800;color:${et.color}">${et.cnt}</div><div style="font-size:11px;color:#94a3b8;margin-top:3px">${et.icon} ${et.label}</div></div>`).join('')}</div>
     </div>
-    ${(od.length || sn.length) ? `<div class="kcard" style="border-left:3px solid #ef4444"><div style="font-size:12px;color:#ef4444;font-weight:700;margin-bottom:10px">🚨 EN RIESGO</div>${[...od, ...sn].map(o => `<div style="display:flex;justify-content:space-between;padding:8px 10px;background:#0f172a;border-radius:8px;margin-bottom:6px;gap:8px"><div><span style="font-weight:700;color:#f1f5f9">${e(o.titulo)}</span><span style="color:#64748b;font-size:12px"> · ${e(o.cliente)} · ${etOf(o.etapa).full}</span></div><span style="color:${isOD(o.fechaLimite) ? '#ef4444' : '#f59e0b'};font-weight:700;font-size:12px;white-space:nowrap">${isOD(o.fechaLimite) ? '🔴 VENCIDA' : '🟡'} ${fDate(o.fechaLimite)}</span></div>`).join('')}</div>` : ''}
+    ${(od.length || sn.length) ? `<div class="kcard" style="margin-bottom:12px;border-left:3px solid #ef4444"><div style="font-size:12px;color:#ef4444;font-weight:700;margin-bottom:10px">🚨 EN RIESGO</div>${[...od, ...sn].map(o => `<div style="display:flex;justify-content:space-between;padding:8px 10px;background:#0f172a;border-radius:8px;margin-bottom:6px;gap:8px"><div><span style="font-weight:700;color:#f1f5f9">${e(o.titulo)}</span><span style="color:#64748b;font-size:12px"> · ${e(o.cliente)} · ${etOf(o.etapa).full}</span></div><span style="color:${isOD(o.fechaLimite) ? '#ef4444' : '#f59e0b'};font-weight:700;font-size:12px;white-space:nowrap">${isOD(o.fechaLimite) ? '🔴 VENCIDA' : '🟡'} ${fDate(o.fechaLimite)}</span></div>`).join('')}</div>` : ''}
+    <div class="kcard" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div style="font-size:12px;color:#64748b;font-weight:700">🏭 CARGA POR MÁQUINA</div>
+        <div style="font-size:11px;color:${globalCo};font-weight:700">${globalPct}% utilización global · ${mStr(Math.round(totalPendMin))} pendiente</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:14px">
+        <span style="font-size:11px;color:#475569">Leyenda:</span>
+        <span style="font-size:11px;color:#22c55e">● En uso</span>
+        <span style="font-size:11px;color:#f59e0b">● Ocupada (≥70%)</span>
+        <span style="font-size:11px;color:#ef4444">● Saturada (≥100%)</span>
+        <span style="font-size:11px;color:#334155">● Sin trabajo</span>
+      </div>
+      ${machGruposHTML}
+    </div>
+    <div class="kcard" style="margin-bottom:12px">
+      <div style="font-size:12px;color:#64748b;font-weight:700;margin-bottom:4px">⏱ DONDE SE DETIENEN MÁS <span style="font-weight:400;color:#334155">(tiempo promedio real por etapa)</span></div>
+      <div style="font-size:11px;color:#334155;margin-bottom:12px">Basado en historial de escaneos — muestra dónde las órdenes tardan más</div>
+      ${etHTML}
+    </div>
   </div>`;
         }
 
