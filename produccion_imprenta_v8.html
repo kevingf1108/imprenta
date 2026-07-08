@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.88';
+        const APP_VERSION = 'v8.89';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -2286,6 +2286,66 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const globalPct = Math.round(totalPendMin / totalCapMin * 100);
             const globalCo = globalPct >= 80 ? '#ef4444' : globalPct >= 50 ? '#f59e0b' : '#22c55e';
 
+            // ── Órdenes paradas (tiempo en etapa actual sin moverse) ────────
+            const nowMs = Date.now();
+            const fIdle = min => {
+                if (min < 60) return min + 'm';
+                const h = Math.floor(min / 60), d = Math.floor(h / 24), rh = h % 24;
+                return d > 0 ? `${d}d ${rh}h` : `${h}h`;
+            };
+            const idleCo = min => min > 1440 ? '#ef4444' : min > 480 ? '#f97316' : min > 120 ? '#f59e0b' : '#60a5fa';
+            const orderIdle = active.map(o => {
+                // Buscar el registro más reciente en el historial para esta orden
+                const lastRec = statsHistory.filter(r => r.ordId === o.id).sort((a, b) => (b.ts || 0) - (a.ts || 0))[0];
+                const entTs = lastRec?.ts
+                    || (o.fechaCreacion ? new Date(o.fechaCreacion + 'T00:00:00').getTime() : null);
+                if (!entTs) return null;
+                const idleMin = Math.max(0, Math.round((nowMs - entTs) / 60000));
+                return { o, idleMin };
+            }).filter(Boolean).sort((a, b) => b.idleMin - a.idleMin);
+
+            // Agrupar por etapa
+            const stageIdle = {};
+            orderIdle.forEach(({ o, idleMin }) => {
+                if (!stageIdle[o.etapa]) stageIdle[o.etapa] = { et: etOf(o.etapa), items: [] };
+                stageIdle[o.etapa].items.push({ o, idleMin });
+            });
+            const stageIdleRows = Object.values(stageIdle)
+                .map(s => ({ ...s, totalMin: s.items.reduce((a, b) => a + b.idleMin, 0) }))
+                .sort((a, b) => b.totalMin - a.totalMin);
+
+            const idleTopHTML = orderIdle.slice(0, 10).map(({ o, idleMin }) => {
+                const et = etOf(o.etapa);
+                const co = idleCo(idleMin);
+                return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:#0f172a;border-radius:8px;margin-bottom:5px;border-left:3px solid ${co}">
+  <div style="flex:1;min-width:0">
+    <div style="font-size:12px;color:#f1f5f9;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e(o.titulo)}${o._isMuestra ? ' 🔬' : ''}${o.urgente ? ' ⚡' : ''}</div>
+    <div style="font-size:11px;color:#475569;margin-top:2px">${et.icon || ''} ${et.full || et.label}${o.cliente ? ' · ' + e(o.cliente) : ''}</div>
+  </div>
+  <div style="text-align:right;white-space:nowrap">
+    <div style="font-size:15px;font-weight:800;color:${co}">${fIdle(idleMin)}</div>
+    <div style="font-size:10px;color:#334155">sin mover</div>
+  </div>
+</div>`;
+            }).join('');
+
+            const stageIdleHTML = stageIdleRows.map((s, i) => {
+                const co = i === 0 ? '#ef4444' : i <= 1 ? '#f97316' : '#f59e0b';
+                const maxIt = Math.max(...s.items.map(x => x.idleMin), 1);
+                return `<div style="margin-bottom:14px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <div style="font-size:12px;color:${co};font-weight:700">${s.et.icon || ''} ${s.et.full || s.et.label} <span style="color:#475569;font-weight:400">(${s.items.length} orden${s.items.length > 1 ? 'es' : ''})</span></div>
+    <div style="font-size:11px;color:#475569">${fIdle(s.totalMin)} acumulado</div>
+  </div>
+  ${s.items.slice(0, 5).map(({ o, idleMin }) => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;padding:5px 8px;background:#0f172a;border-radius:6px">
+    <div style="flex:1;font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e(o.titulo)}${o._isMuestra ? ' 🔬' : ''}${o.urgente ? ' ⚡' : ''}</div>
+    <div style="width:80px;background:#1e293b;border-radius:3px;height:6px;overflow:hidden"><div style="height:100%;border-radius:3px;width:${Math.round(idleMin/maxIt*100)}%;background:${idleCo(idleMin)}"></div></div>
+    <div style="font-size:11px;color:${idleCo(idleMin)};font-weight:700;width:40px;text-align:right">${fIdle(idleMin)}</div>
+  </div>`).join('')}
+  ${s.items.length > 5 ? `<div style="font-size:11px;color:#334155;padding-left:8px">+${s.items.length - 5} más...</div>` : ''}
+</div>`;
+            }).join('');
+
             // ── Historial por etapa (donde se detiene más) ─────────────────
             const etStat = {};
             statsHistory.filter(r => r.mins > 0 && r.etapa).forEach(r => {
@@ -2348,9 +2408,18 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     </div>
     <div class="kcard" style="margin-bottom:12px">
       <div style="font-size:12px;color:#64748b;font-weight:700;margin-bottom:4px">⏱ DONDE SE DETIENEN MÁS <span style="font-weight:400;color:#334155">(tiempo promedio real por etapa)</span></div>
-      <div style="font-size:11px;color:#334155;margin-bottom:12px">Basado en historial de escaneos — muestra dónde las órdenes tardan más</div>
+      <div style="font-size:11px;color:#334155;margin-bottom:12px">Basado en historial de escaneos — muestra dónde las órdenes tardan más en procesarse</div>
       ${etHTML}
     </div>
+    <div class="kcard" style="margin-bottom:12px">
+      <div style="font-size:12px;color:#64748b;font-weight:700;margin-bottom:4px">🕐 ÓRDENES SIN MOVERSE <span style="font-weight:400;color:#334155">(tiempo en etapa actual)</span></div>
+      <div style="font-size:11px;color:#334155;margin-bottom:12px">Tiempo desde el último escaneo — las que llevan más tiempo sin avanzar aparecen primero</div>
+      ${orderIdle.length === 0 ? '<div style="color:#334155;font-size:12px;padding:8px 0">Sin datos de historial aún</div>' : idleTopHTML}
+    </div>
+    ${stageIdleRows.length > 0 ? `<div class="kcard" style="margin-bottom:12px">
+      <div style="font-size:12px;color:#64748b;font-weight:700;margin-bottom:12px">📍 PARADAS POR ETAPA <span style="font-weight:400;color:#334155">(qué órdenes están detenidas y dónde)</span></div>
+      ${stageIdleHTML}
+    </div>` : ''}
   </div>`;
         }
 
