@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.89';
+        const APP_VERSION = 'v8.90';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1912,11 +1912,84 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         </table></div>`}
       </div>`;
 
+            // ── Tiempos de espera por estación ─────────────────────────────
+            // Para cada orden con ≥2 registros en el historial, calculamos:
+            // espera en etapa N = (ts_N - mins_N*60000) - ts_N-1
+            // es decir: cuánto tiempo pasó entre que salió del paso anterior
+            // y que alguien empezó a trabajar en el paso actual
+            const byOrd = {};
+            statsHistory.filter(r => r.ts && r.mins > 0).forEach(r => {
+                if (!byOrd[r.ordId]) byOrd[r.ordId] = [];
+                byOrd[r.ordId].push(r);
+            });
+            const waitByStation = {};
+            Object.values(byOrd).forEach(recs => {
+                recs.sort((a, b) => a.ts - b.ts);
+                for (let i = 1; i < recs.length; i++) {
+                    const prev = recs[i - 1], curr = recs[i];
+                    const currStart = curr.ts - curr.mins * 60000; // cuando empezó el escaneo I
+                    const waitMin = Math.round((currStart - prev.ts) / 60000);
+                    if (waitMin < 0 || waitMin > 4320) continue; // ignorar valores imposibles (>3 días)
+                    const key = curr.label || curr.etapa;
+                    if (!waitByStation[key]) waitByStation[key] = { etapa: curr.etapa, label: key, items: [] };
+                    waitByStation[key].items.push({ titulo: curr.titulo, waitMin, ts: curr.ts });
+                }
+            });
+            const waitBlocks = Object.entries(waitByStation)
+                .sort((a, b) => {
+                    const avgA = a[1].items.reduce((s, x) => s + x.waitMin, 0) / a[1].items.length;
+                    const avgB = b[1].items.reduce((s, x) => s + x.waitMin, 0) / b[1].items.length;
+                    return avgB - avgA;
+                })
+                .map(([, st]) => {
+                    const avg = Math.round(st.items.reduce((s, x) => s + x.waitMin, 0) / st.items.length);
+                    const max = Math.max(...st.items.map(x => x.waitMin));
+                    const avgCo = avg > 120 ? '#ef4444' : avg > 30 ? '#f59e0b' : '#22c55e';
+                    const fW = m => m < 60 ? m + 'min' : Math.floor(m/60) + 'h ' + (m%60) + 'min';
+                    const tableRows = [...st.items].sort((a,b) => b.waitMin - a.waitMin).map(x => {
+                        const co = x.waitMin > 120 ? '#ef4444' : x.waitMin > 30 ? '#f59e0b' : '#22c55e';
+                        const barW = Math.round(x.waitMin / max * 100);
+                        return `<tr style="border-top:1px solid #0f172a">
+              <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(x.titulo.substring(0, 32))}</td>
+              <td style="padding:6px 8px;min-width:120px">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <div style="flex:1;background:#0f172a;border-radius:3px;height:8px;overflow:hidden"><div style="height:100%;border-radius:3px;width:${barW}%;background:${co}"></div></div>
+                  <span style="font-size:12px;color:${co};font-weight:700;white-space:nowrap;min-width:55px;text-align:right">${fW(x.waitMin)}</span>
+                </div>
+              </td>
+              <td style="padding:6px 8px;text-align:right;color:#475569;font-size:11px;white-space:nowrap">${new Date(x.ts).toLocaleDateString('es', { day: '2-digit', month: 'short' })}</td>
+            </tr>`;
+                    }).join('');
+                    return `<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+            <div style="font-size:15px;font-weight:800;color:#f1f5f9">${e(st.label)}</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <span style="background:#0a2040;border:1px solid #1d4ed8;padding:3px 10px;border-radius:6px;font-size:12px;color:#60a5fa">${st.items.length} registros</span>
+              <span style="background:${avgCo}22;border:1px solid ${avgCo};padding:3px 10px;border-radius:6px;font-size:12px;color:${avgCo};font-weight:700">Espera prom: ${fW(avg)}</span>
+              <span style="background:#1e1a0a;border:1px solid #713f12;padding:3px 10px;border-radius:6px;font-size:12px;color:#fbbf24">Máx: ${fW(max)}</span>
+            </div>
+          </div>
+          <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+            <tr style="color:#475569;font-size:11px;border-bottom:1px solid #334155">
+              <td style="padding:4px 8px">Orden</td>
+              <td style="padding:4px 8px">Tiempo esperando</td>
+              <td style="padding:4px 8px;text-align:right">Fecha</td>
+            </tr>${tableRows}
+          </table></div>
+        </div>`;
+                }).join('');
+
             return `<div style="padding:20px;max-width:1100px;margin:0 auto">
         <h2 style="font-size:20px;font-weight:800;margin-bottom:4px">⏱ Stats de Producción</h2>
         <div style="font-size:13px;color:#475569;margin-bottom:12px">Rendimiento real por estación — registrado con el escáner</div>
         ${calibBar}
         ${stationBlocks}
+        ${waitBlocks.length ? `
+        <div style="margin:28px 0 12px">
+          <div style="font-size:18px;font-weight:800;color:#f1f5f9;margin-bottom:4px">🕐 Tiempo de Espera por Estación</div>
+          <div style="font-size:13px;color:#475569;margin-bottom:14px">Cuánto tiempo esperó cada orden antes de que empezaran a trabajarla — ordenado por mayor espera promedio</div>
+          ${waitBlocks}
+        </div>` : ''}
         ${histBlock}
       </div>`;
         }
