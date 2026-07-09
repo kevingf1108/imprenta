@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.90';
+        const APP_VERSION = 'v8.91';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1428,6 +1428,8 @@
         for(let i=1;i<tdata.length;i++){
           const rItem=tdata[i][tci]?.toString().trim().slice(0,5);
           if(rItem!==item5)continue;
+          const curStatus=tcs>=0?tdata[i][tcs]?.toString().trim():'';
+          if(curStatus==='Posted')continue;
           if(tcs>=0&&etapa)tsh.getRange(i+1,tcs+1).setValue(etapa);
           if(tcf>=0)tsh.getRange(i+1,tcf+1).setValue(fmt);
           n++;
