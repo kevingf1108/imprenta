@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.92';
+        const APP_VERSION = 'v8.93';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1182,6 +1182,21 @@
         }
         function markListoInSheets(order, fromEtapa) { callScript(order, 'listo', fromEtapa); }
 
+        async function runAccionSheets(action, label) {
+            if (!cfg.scriptUrl) { showToast('⚠️ Configura URL del script primero'); return; }
+            const log = document.getElementById('accion-log');
+            if (log) log.textContent = '⏳ ' + label + '...';
+            try {
+                await fetch(cfg.scriptUrl + '?action=' + action, { mode: 'no-cors' });
+                if (log) log.innerHTML = '<span style="color:#4ade80">✅ ' + label + ' — listo. Sincroniza para ver los cambios.</span>';
+                showToast('✅ ' + label);
+            } catch {
+                if (log) log.innerHTML = '<span style="color:#ef4444">❌ Error al conectar con el script</span>';
+            }
+        }
+        function runMoverListos() { runAccionSheets('moverlistos', 'Moviendo listo=TRUE a Acabados'); }
+        function runMigrarMuestras() { runAccionSheets('migrarmuestras', 'Rescatando muestras de M Acab'); }
+
         async function testScriptUrl() {
             if (!cfg.scriptUrl) { showToast('⚠️ Ingresa la URL del Script primero'); return; }
             showToast('🔄 Probando URL del script...');
@@ -1400,6 +1415,8 @@
     const po=(e.parameter.po||'').toLowerCase();
     const etapa=(e.parameter.etapa||'').toString().trim();
     const trackingId=(e.parameter.trackingId||'').toString().trim();
+    const accionRes=doGet_acciones(ss,action);
+    if(accionRes)return accionRes;
     if(!item)return r('ERROR:falta item');
 
     // updateTracking — actualiza Status + "Fecha queue" en spreadsheet externo
@@ -1576,13 +1593,62 @@
     return r('OK:'+n+' filas actualizadas');
   }catch(ex){return r('ERROR:'+ex.message);}
 }
+
+// moverlistos — mueve todas las filas con listo=TRUE de Impresion org → Acabado org
+function moverListos(ss){
+  const src=ss.getSheets().find(s=>s.getName().trim()==='Impresion org');
+  const dst=ss.getSheets().find(s=>s.getName().trim()==='Acabado org');
+  if(!src||!dst)return'ERROR:hojas no encontradas';
+  const data=src.getDataRange().getValues();
+  const heads=data[0].map(h=>h.toString().toLowerCase().trim());
+  const ciL=heads.findIndex(h=>['listo','done','ready'].includes(h));
+  if(ciL<0)return'ERROR:no columna listo';
+  let n=0;
+  for(let i=data.length-1;i>=1;i--){
+    if(data[i][ciL]?.toString().toLowerCase()!=='true')continue;
+    dst.appendRow(data[i]);src.deleteRow(i+1);n++;
+  }
+  return'OK:'+n+' filas movidas';
+}
+
+// migrarmuestras — mueve muestras de M Acab → M imp (recupera las que desaparecieron)
+function migrarMuestras(ss){
+  const src=ss.getSheets().find(s=>s.getName().trim()==='M Acab');
+  const dst=ss.getSheets().find(s=>s.getName().trim()==='M imp');
+  if(!src)return'OK:M Acab no existe o ya está vacía';
+  if(!dst)return'ERROR:M imp no encontrada';
+  const d=src.getDataRange().getValues();
+  const h=d[0].map(v=>v.toString().toLowerCase().trim());
+  const ciE=h.findIndex(v=>['eliminar','procesado','terminado','listo','done'].includes(v));
+  let n=0;
+  for(let i=d.length-1;i>=1;i--){
+    if(ciE>=0&&d[i][ciE]?.toString().toLowerCase()==='true')continue;
+    dst.appendRow(d[i]);src.deleteRow(i+1);n++;
+  }
+  return'OK:'+n+' muestras migradas';
+}
+
+function doGet_acciones(ss,action){
+  if(action==='moverlistos')return r(moverListos(ss));
+  if(action==='migrarmuestras')return r(migrarMuestras(ss));
+  return null;
+}
+
 function r(m){return ContentService.createTextOutput(m).setMimeType(ContentService.MimeType.TEXT);}</div>
       </div>
       <div id="sync-log" style="min-height:24px;font-size:13px;margin-bottom:14px"></div>
+      <div style="background:#0a1525;border:1px solid #1e3a5f;border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:11px;color:#60a5fa;font-weight:700;margin-bottom:8px">⚡ ACCIONES EN SHEETS</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button onclick="runMoverListos()" style="padding:7px 14px;border-radius:8px;border:1px solid #166534;background:#052e16;color:#4ade80;font-weight:700;font-size:13px;cursor:pointer">✅ Mover todos los listo=TRUE → Acabados</button>
+          <button onclick="runMigrarMuestras()" style="padding:7px 14px;border-radius:8px;border:1px solid #5b21b6;background:#1a0040;color:#c084fc;font-weight:700;font-size:13px;cursor:pointer">🔬 Rescatar muestras de M Acab → M imp</button>
+          <button onclick="if(!cfg.scriptUrl){showToast('⚠️ Configura URL del script');return;}fetch(cfg.scriptUrl+'?action=limpiar',{mode:'no-cors'}).catch(()=>{});showToast('🧹 Limpiando Acabado org...')" style="padding:7px 14px;border-radius:8px;border:1px solid #1d4ed8;background:#0a1f3f;color:#60a5fa;font-weight:700;font-size:13px;cursor:pointer">🧹 Limpiar Acabados</button>
+        </div>
+        <div id="accion-log" style="min-height:18px;font-size:12px;color:#94a3b8;margin-top:8px"></div>
+      </div>
       <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap">
         <div style="display:flex;gap:6px">
           <button onclick="if(confirm('¿Borrar TODAS las órdenes? Esto no se puede deshacer.')){orders=[];etapaMap={};saveS();render();closeSync();showToast('🗑 Órdenes borradas');}" style="padding:7px 14px;border-radius:8px;border:1px solid #7f1d1d;background:#1a0000;color:#f87171;font-weight:700;font-size:13px;cursor:pointer">🗑 Borrar todo</button>
-          <button onclick="if(!cfg.scriptUrl){showToast('⚠️ Configura URL del script');return;}fetch(cfg.scriptUrl+'?action=limpiar',{mode:'no-cors'}).catch(()=>{});showToast('🧹 Limpiando Acabado org...')" style="padding:7px 14px;border-radius:8px;border:1px solid #1d4ed8;background:#0a1f3f;color:#60a5fa;font-weight:700;font-size:13px;cursor:pointer">🧹 Limpiar Acabados</button>
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-g" onclick="closeSync()">Cancelar</button>
