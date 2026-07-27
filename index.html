@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.94';
+        const APP_VERSION = 'v8.95';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1198,8 +1198,8 @@
         function runMigrarMuestras() { runAccionSheets('migrarmuestras', 'Rescatando muestras de M Acab'); }
         function runBorrarListos() {
           if (!cfg.scriptUrl) { showToast('⚠️ Configura URL del script primero'); return; }
-          if (!confirm('¿Borrar permanentemente todas las filas con listo=TRUE de Impresion org? Esto no se puede deshacer.')) return;
-          runAccionSheets('borrarlistos', 'Borrando filas listo=TRUE de Impresion org');
+          if (!confirm('¿Borrar permanentemente las filas con listo=TRUE de Impresion org y TODOS los registros de Acabado org? Esto no se puede deshacer.')) return;
+          runAccionSheets('borrarlistos', 'Borrando listo=TRUE de Impresion org + limpiando Acabado org');
         }
 
         async function testScriptUrl() {
@@ -1616,18 +1616,27 @@ function moverListos(ss){
   return'OK:'+n+' filas movidas';
 }
 
-// borrarlistos — elimina permanentemente filas con listo=TRUE de Impresion org
+// borrarlistos — elimina filas con listo=TRUE de Impresion org y TODAS las filas de Acabado org
 function borrarListos(ss){
-  const sh=ss.getSheets().find(s=>s.getName().trim()==='Impresion org');
-  if(!sh)return'ERROR:Impresion org no encontrada';
-  const data=sh.getDataRange().getValues();
-  const heads=data[0].map(h=>h.toString().toLowerCase().trim());
-  const ciL=heads.findIndex(h=>['listo','done','ready'].includes(h));
-  if(ciL<0)return'ERROR:no columna listo';
   let n=0;
-  for(let i=data.length-1;i>=1;i--){
-    if(data[i][ciL]?.toString().toLowerCase()!=='true')continue;
-    sh.deleteRow(i+1);n++;
+  // 1) Impresion org — solo las que tienen listo=TRUE
+  const shImp=ss.getSheets().find(s=>s.getName().trim()==='Impresion org');
+  if(shImp){
+    const data=shImp.getDataRange().getValues();
+    const heads=data[0].map(h=>h.toString().toLowerCase().trim());
+    const ciL=heads.findIndex(h=>['listo','done','ready'].includes(h));
+    if(ciL>=0){
+      for(let i=data.length-1;i>=1;i--){
+        if(data[i][ciL]?.toString().toLowerCase()!=='true')continue;
+        shImp.deleteRow(i+1);n++;
+      }
+    }
+  }
+  // 2) Acabado org — borra todas las filas de datos (deja solo el encabezado)
+  const shAcab=ss.getSheets().find(s=>s.getName().trim()==='Acabado org');
+  if(shAcab){
+    const lastRow=shAcab.getLastRow();
+    if(lastRow>1){shAcab.deleteRows(2,lastRow-1);n+=(lastRow-1);}
   }
   return'OK:'+n+' filas eliminadas';
 }
@@ -1664,7 +1673,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button onclick="runMoverListos()" style="padding:7px 14px;border-radius:8px;border:1px solid #166534;background:#052e16;color:#4ade80;font-weight:700;font-size:13px;cursor:pointer">✅ Mover todos los listo=TRUE → Acabados</button>
           <button onclick="runMigrarMuestras()" style="padding:7px 14px;border-radius:8px;border:1px solid #5b21b6;background:#1a0040;color:#c084fc;font-weight:700;font-size:13px;cursor:pointer">🔬 Rescatar muestras de M Acab → M imp</button>
-          <button onclick="runBorrarListos()" style="padding:7px 14px;border-radius:8px;border:1px solid #7f1d1d;background:#2d0a0a;color:#f87171;font-weight:700;font-size:13px;cursor:pointer">🗑️ Borrar listo=TRUE de Impresion org</button>
+          <button onclick="runBorrarListos()" style="padding:7px 14px;border-radius:8px;border:1px solid #7f1d1d;background:#2d0a0a;color:#f87171;font-weight:700;font-size:13px;cursor:pointer">🗑️ Borrar listo=TRUE + limpiar Acabados</button>
           <button onclick="if(!cfg.scriptUrl){showToast('⚠️ Configura URL del script');return;}fetch(cfg.scriptUrl+'?action=limpiar',{mode:'no-cors'}).catch(()=>{});showToast('🧹 Limpiando Acabado org...')" style="padding:7px 14px;border-radius:8px;border:1px solid #1d4ed8;background:#0a1f3f;color:#60a5fa;font-weight:700;font-size:13px;cursor:pointer">🧹 Limpiar Acabados</button>
         </div>
         <div id="accion-log" style="min-height:18px;font-size:12px;color:#94a3b8;margin-top:8px"></div>
