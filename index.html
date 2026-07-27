@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.91';
+        const APP_VERSION = 'v8.92';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1003,6 +1003,7 @@
             const entrega = col(row, 'entrega', 'delivery', 'fecha entrega', 'f. entrega');
             const listo = col(row, 'listo', 'done', 'ready').toLowerCase() === 'true';
             const desc = col(row, 'description', 'descripcion', 'desc');
+            // _listoInSheets: evita que etapaMap sobreescriba cuando Sheets ya avanzó la orden
             const colorBn = col(row, 'color_bn', 'color', 'tipo color');
             const papel = col(row, 'papel', 'paper', 'papel/cartulina');
             const tabs = parseInt((col(row, 'tabloides') || '').replace(/[^\d]/g, '')) || 0;
@@ -1031,7 +1032,7 @@
                 fechaLimite: parseDMDate(entrega),
                 etapa, urgente: urg.toLowerCase().includes('urgente'),
                 notas: desc.substring(0, 120),
-                _fromSheets: true,
+                _fromSheets: true, _listoInSheets: listo,
                 fechaCreacion: new Date().toISOString().split('T')[0],
             };
         }
@@ -1086,8 +1087,8 @@
             const acab = col(row, 'acabados', 'terminados', 'actividades');
             const colorBn = col(row, 'color_bn', 'color bn', 'tipo_color');
             const notas = col(row, 'description', 'dresciption', 'descripcion', 'notas');
-            // Usar etapa_actual solo si es un valor válido del sistema — ignorar status interno
-            const statusRaw = col(row, 'etapa_actual', 'etapa actual', 'etapa');
+            // Usar etapa_actual solo si es un valor válido — quitar prefijo "M " si existe
+            const statusRaw = col(row, 'etapa_actual', 'etapa actual', 'etapa').replace(/^M\s+/i, '').trim();
             const etapaActual = _ETAPAS_VALIDAS.has(statusRaw) ? statusRaw : '';
 
             if (!nombre || !itemNum) return null;
@@ -1127,22 +1128,13 @@
         function callScript(order, toEtapa, fromEtapa) {
             if (!cfg.scriptUrl) return;
             callTracking(order, toEtapa);
-            // muestras — flujo M imp → M Acab → M emp
+            // muestras — siempre quedan en M imp, solo se actualiza etapa_actual
             if (order._isMuestra && order.grupoId) {
                 const it = encodeURIComponent(String(order.grupoId).replace(/-M$/, '').trim());
-                if (toEtapa === 'empaque') {
-                    // Mueve de M Acab (o M imp) a M emp
-                    fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + it + '&hoja=muestras', { mode: 'no-cors' }).catch(() => { });
-                } else if (toEtapa === 'listo') {
+                if (toEtapa === 'listo') {
                     fetch(cfg.scriptUrl + '?action=marcarProcesado&item=' + it, { mode: 'no-cors' }).catch(() => { });
-                } else if (fromEtapa === 'impresion' && isAcabEtapa(toEtapa)) {
-                    // Sale de impresión → mueve de M imp a M Acab y registra etapa
-                    fetch(cfg.scriptUrl + '?action=moverMuestraAcab&item=' + it + '&etapa=' + encodeURIComponent('M ' + toEtapa), { mode: 'no-cors' }).catch(() => { });
-                } else if (isAcabEtapa(toEtapa)) {
-                    // Ya está en M Acab → solo actualiza etapa_actual
-                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent('M ' + toEtapa) + '&hoja=macab', { mode: 'no-cors' }).catch(() => { });
                 } else {
-                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent('M ' + toEtapa) + '&hoja=muestras', { mode: 'no-cors' }).catch(() => { });
+                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa) + '&hoja=muestras', { mode: 'no-cors' }).catch(() => { });
                 }
                 return;
             }
@@ -1332,7 +1324,8 @@
                         return { ...o, _merged: true, etapa: 'listo' };
                     }
                     if (o.etapa === 'listo' && etapaMap[o.id]) { delete etapaMap[o.id]; return o; }
-                    if (etapaMap[o.id] && o.etapa !== 'listo') return { ...o, etapa: etapaMap[o.id] };
+                    // No sobreescribir si Sheets ya marcó la orden como listo (avanzó de fase)
+                    if (etapaMap[o.id] && o.etapa !== 'listo' && !o._listoInSheets) return { ...o, etapa: etapaMap[o.id] };
                     return o;
                 })];
                 await saveS();
