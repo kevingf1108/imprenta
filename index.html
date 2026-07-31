@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.95';
+        const APP_VERSION = 'v8.96';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1198,8 +1198,8 @@
         function runMigrarMuestras() { runAccionSheets('migrarmuestras', 'Rescatando muestras de M Acab'); }
         function runBorrarListos() {
           if (!cfg.scriptUrl) { showToast('⚠️ Configura URL del script primero'); return; }
-          if (!confirm('¿Borrar permanentemente las filas con listo=TRUE de Impresion org y TODOS los registros de Acabado org? Esto no se puede deshacer.')) return;
-          runAccionSheets('borrarlistos', 'Borrando listo=TRUE de Impresion org + limpiando Acabado org');
+          if (!confirm('¿Borrar permanentemente todas las filas con listo=TRUE de Impresion org y Acabado org? Esto no se puede deshacer.')) return;
+          runAccionSheets('borrarlistos', 'Borrando filas listo=TRUE de Impresion org y Acabado org');
         }
 
         async function testScriptUrl() {
@@ -1616,27 +1616,21 @@ function moverListos(ss){
   return'OK:'+n+' filas movidas';
 }
 
-// borrarlistos — elimina filas con listo=TRUE de Impresion org y TODAS las filas de Acabado org
+// borrarlistos — elimina filas con listo=TRUE de Impresion org y de Acabado org
 function borrarListos(ss){
   let n=0;
-  // 1) Impresion org — solo las que tienen listo=TRUE
-  const shImp=ss.getSheets().find(s=>s.getName().trim()==='Impresion org');
-  if(shImp){
-    const data=shImp.getDataRange().getValues();
+  const hojas=['Impresion org','Acabado org'];
+  for(const nombre of hojas){
+    const sh=ss.getSheets().find(s=>s.getName().trim()===nombre);
+    if(!sh)continue;
+    const data=sh.getDataRange().getValues();
     const heads=data[0].map(h=>h.toString().toLowerCase().trim());
     const ciL=heads.findIndex(h=>['listo','done','ready'].includes(h));
-    if(ciL>=0){
-      for(let i=data.length-1;i>=1;i--){
-        if(data[i][ciL]?.toString().toLowerCase()!=='true')continue;
-        shImp.deleteRow(i+1);n++;
-      }
+    if(ciL<0)continue;
+    for(let i=data.length-1;i>=1;i--){
+      if(data[i][ciL]?.toString().toLowerCase()!=='true')continue;
+      sh.deleteRow(i+1);n++;
     }
-  }
-  // 2) Acabado org — borra todas las filas de datos (deja solo el encabezado)
-  const shAcab=ss.getSheets().find(s=>s.getName().trim()==='Acabado org');
-  if(shAcab){
-    const lastRow=shAcab.getLastRow();
-    if(lastRow>1){shAcab.deleteRows(2,lastRow-1);n+=(lastRow-1);}
   }
   return'OK:'+n+' filas eliminadas';
 }
