@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.96';
+        const APP_VERSION = 'v8.97';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -668,7 +668,7 @@
         }
         function pushHistorial(o) {
             if (historial.find(h => h.id === o.id && h.ts && Date.now() - h.ts < 5000)) return;
-            historial.push({ id: o.id, titulo: o.titulo || o.baseTitulo || o.id, cliente: o.cliente || '', cantidad: o.cantidad || 0, tipoEncuadernacion: o.tipoEncuadernacion || '', ts: Date.now() });
+            historial.push({ id: o.id, titulo: o.titulo || o.baseTitulo || o.id, cliente: o.cliente || '', cantidad: o.cantidad || 0, tipoEncuadernacion: o.tipoEncuadernacion || '', fechaLimite: o.fechaLimite || '', fechaCreacion: o.fechaCreacion || '', ts: Date.now() });
         }
 
         // ═══════════════════════════════════════════════════
@@ -1890,6 +1890,36 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // ═══════════════════════════════════════════════════
         //  STATS
         // ═══════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════
+        //  MÉTRICAS DE CUMPLIMIENTO
+        // ═══════════════════════════════════════════════════
+        function calcOrderMetrics() {
+            const result = [];
+            historial.forEach(h => {
+                const recs = statsHistory.filter(r => r.ordId === h.id && r.mins > 0);
+                const impRec = [...recs].reverse().find(r => r.etapa === 'impresion');
+                const empRec = [...recs].reverse().find(r => r.etapa === 'empaque');
+                const firstStart = recs.length ? Math.min(...recs.map(r => r.ts - r.mins * 60000)) : null;
+                const impEnd = impRec?.ts || null;
+                const empEnd = empRec?.ts || null;
+                const completedTs = empEnd || h.ts;
+                const totalMin = (firstStart && completedTs && completedTs > firstStart) ? Math.round((completedTs - firstStart) / 60000) : null;
+                const impMin = impRec?.mins || null;
+                const impToEmpMin = (impEnd && empEnd && empEnd > impEnd) ? Math.round((empEnd - impEnd) / 60000) : null;
+                const impStart = impRec ? (impRec.ts - impRec.mins * 60000) : null;
+                const createdTs = h.fechaCreacion ? new Date(h.fechaCreacion + 'T00:00:00').getTime() : null;
+                const queueMin = (createdTs && impStart && impStart > createdTs) ? Math.round((impStart - createdTs) / 60000) : null;
+                const fechaLimite = h.fechaLimite || null;
+                let onTime = null, diasDiff = null;
+                if (fechaLimite && completedTs) {
+                    diasDiff = Math.round((completedTs - new Date(fechaLimite + 'T23:59:59').getTime()) / 86400000);
+                    onTime = diasDiff <= 0;
+                }
+                result.push({ id: h.id, titulo: h.titulo, cliente: h.cliente || '', cantidad: h.cantidad || 0, fechaLimite, completedTs, totalMin, impMin, impToEmpMin, queueMin, onTime, diasDiff });
+            });
+            return result.sort((a, b) => (b.completedTs || 0) - (a.completedTs || 0));
+        }
+
         function statsHTML() {
             const rows = statsHistory.filter(r => r.mins && r.mins > 0);
             if (!rows.length) return `<div style="padding:60px;text-align:center">
@@ -1972,6 +2002,76 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             ).join('');
 
             const calibCount = CALIB_MAP.filter(({ etapa }) => statsHistory.filter(r => r.etapa === etapa).length >= 3).length;
+            // ── Métricas de cumplimiento ──────────────────────────────────
+            const metrics = calcOrderMetrics();
+            const fT = m => { if (m === null || m === undefined) return '—'; const hh = Math.floor(m/60), dd = Math.floor(hh/24), rh = hh%24, rm = m%60; return dd > 0 ? `${dd}d ${rh}h` : hh > 0 ? `${hh}h ${rm}m` : `${m}m`; };
+            const withDL = metrics.filter(m => m.onTime !== null);
+            const onTimeM = withDL.filter(m => m.onTime);
+            const lateM = withDL.filter(m => !m.onTime);
+            const pctOT = withDL.length ? Math.round(onTimeM.length / withDL.length * 100) : null;
+            const avgTotalMet = metrics.filter(m => m.totalMin).reduce((s,m,_,a) => s + m.totalMin/a.filter(x=>x.totalMin).length, 0) || null;
+            const avgImpToEmp = metrics.filter(m => m.impToEmpMin).reduce((s,m,_,a) => s + m.impToEmpMin/a.filter(x=>x.impToEmpMin).length, 0) || null;
+            const avgImp = metrics.filter(m => m.impMin).reduce((s,m,_,a) => s + m.impMin/a.filter(x=>x.impMin).length, 0) || null;
+            const avgQueue = metrics.filter(m => m.queueMin).reduce((s,m,_,a) => s + m.queueMin/a.filter(x=>x.queueMin).length, 0) || null;
+            const metricsBlock = !metrics.length ? '' : `
+<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:14px">
+  <div style="font-size:15px;font-weight:800;color:#f1f5f9;margin-bottom:4px">📊 Cumplimiento de Entregas</div>
+  <div style="font-size:12px;color:#475569;margin-bottom:14px">Órdenes completadas vs fecha límite — lista para conectar a HubSpot</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+    <div style="background:#0a2e1a;border:1px solid #166534;border-radius:10px;padding:12px 16px;flex:1;min-width:90px;text-align:center">
+      <div style="font-size:28px;font-weight:800;color:#4ade80">${onTimeM.length}</div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">✅ A tiempo</div>
+    </div>
+    <div style="background:#2d0a0a;border:1px solid #7f1d1d;border-radius:10px;padding:12px 16px;flex:1;min-width:90px;text-align:center">
+      <div style="font-size:28px;font-weight:800;color:#ef4444">${lateM.length}</div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">🔴 Retrasadas</div>
+    </div>
+    ${pctOT !== null ? `<div style="background:#0a1f3a;border:1px solid #1d4ed8;border-radius:10px;padding:12px 16px;flex:1;min-width:90px;text-align:center">
+      <div style="font-size:28px;font-weight:800;color:#60a5fa">${pctOT}%</div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">📈 Cumplimiento</div>
+    </div>` : ''}
+    ${avgTotalMet ? `<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px 16px;flex:1;min-width:90px;text-align:center">
+      <div style="font-size:20px;font-weight:800;color:#c084fc">${fT(Math.round(avgTotalMet))}</div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">⏱ T.prod prom</div>
+    </div>` : ''}
+    ${avgQueue ? `<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px 16px;flex:1;min-width:90px;text-align:center">
+      <div style="font-size:20px;font-weight:800;color:#f59e0b">${fT(Math.round(avgQueue))}</div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">📋 Cola→Imp prom</div>
+    </div>` : ''}
+    ${avgImpToEmp ? `<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px 16px;flex:1;min-width:90px;text-align:center">
+      <div style="font-size:20px;font-weight:800;color:#38bdf8">${fT(Math.round(avgImpToEmp))}</div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">🖨️→📦 Imp→Emp prom</div>
+    </div>` : ''}
+  </div>
+  <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr style="color:#475569;font-size:11px;border-bottom:1px solid #334155">
+      <td style="padding:5px 8px">Orden</td>
+      <td style="padding:5px 8px;text-align:right;white-space:nowrap">Límite</td>
+      <td style="padding:5px 8px;text-align:right;white-space:nowrap">Entregado</td>
+      <td style="padding:5px 8px;text-align:right;white-space:nowrap">Estado</td>
+      <td style="padding:5px 8px;text-align:right;white-space:nowrap">T.Total</td>
+      <td style="padding:5px 8px;text-align:right;white-space:nowrap">T.Imp</td>
+      <td style="padding:5px 8px;text-align:right;white-space:nowrap">Cola→Imp</td>
+      <td style="padding:5px 8px;text-align:right;white-space:nowrap">Imp→Emp</td>
+    </tr>
+    ${metrics.map(m => {
+      const oc = m.onTime === null ? '#475569' : m.onTime ? '#4ade80' : '#ef4444';
+      const ol = m.onTime === null ? '—' : m.onTime ? (m.diasDiff < 0 ? `✅ ${Math.abs(m.diasDiff)}d antes` : '✅ En fecha') : `🔴 ${m.diasDiff}d tarde`;
+      const ed = m.completedTs ? new Date(m.completedTs).toLocaleDateString('es',{day:'2-digit',month:'short'}) : '—';
+      return `<tr style="border-top:1px solid #0f172a">
+        <td style="padding:6px 8px"><div style="color:#f1f5f9;font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e(m.titulo)}">${e(m.titulo.substring(0,28))}</div><div style="color:#475569;font-size:10px">${e(m.cliente)}${m.cantidad ? ' · '+m.cantidad+' ej' : ''}</div></td>
+        <td style="padding:6px 8px;text-align:right;color:#64748b;white-space:nowrap">${m.fechaLimite ? fDate(m.fechaLimite) : '—'}</td>
+        <td style="padding:6px 8px;text-align:right;color:#94a3b8;white-space:nowrap">${ed}</td>
+        <td style="padding:6px 8px;text-align:right;white-space:nowrap"><span style="color:${oc};font-weight:700;font-size:11px">${ol}</span></td>
+        <td style="padding:6px 8px;text-align:right;color:#c084fc;font-weight:700">${fT(m.totalMin)}</td>
+        <td style="padding:6px 8px;text-align:right;color:#60a5fa">${fT(m.impMin)}</td>
+        <td style="padding:6px 8px;text-align:right;color:#f59e0b">${fT(m.queueMin)}</td>
+        <td style="padding:6px 8px;text-align:right;color:#38bdf8">${fT(m.impToEmpMin)}</td>
+      </tr>`;
+    }).join('')}
+  </table></div>
+</div>`;
+
             const calibBar = `<div style="background:#1e293b;border-radius:12px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
         <div>
           <div style="font-size:13px;font-weight:700;color:#f1f5f9">🤖 Auto-calibración de velocidades</div>
@@ -2069,6 +2169,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             return `<div style="padding:20px;max-width:1100px;margin:0 auto">
         <h2 style="font-size:20px;font-weight:800;margin-bottom:4px">⏱ Stats de Producción</h2>
         <div style="font-size:13px;color:#475569;margin-bottom:12px">Rendimiento real por estación — registrado con el escáner</div>
+        ${metricsBlock}
         ${calibBar}
         ${stationBlocks}
         ${waitBlocks.length ? `
@@ -2538,6 +2639,44 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">
       ${kpis.map(([ic, lb, vl, co]) => `<div class="kcard" style="border-top:3px solid ${co}"><div style="font-size:22px">${ic}</div><div style="font-size:26px;font-weight:800;color:${co};line-height:1.1;margin-top:2px">${vl}</div><div style="font-size:11px;color:#64748b;margin-top:3px">${lb}</div></div>`).join('')}
     </div>
+    ${(() => {
+      const km = calcOrderMetrics();
+      const kmDL = km.filter(m => m.onTime !== null);
+      const kmOT = kmDL.filter(m => m.onTime);
+      const kmLate = kmDL.filter(m => !m.onTime);
+      const kmPct = kmDL.length ? Math.round(kmOT.length / kmDL.length * 100) : null;
+      const kmAvgT = km.filter(m=>m.totalMin).length ? Math.round(km.filter(m=>m.totalMin).reduce((s,m)=>s+m.totalMin,0)/km.filter(m=>m.totalMin).length) : null;
+      const kmAvgIE = km.filter(m=>m.impToEmpMin).length ? Math.round(km.filter(m=>m.impToEmpMin).reduce((s,m)=>s+m.impToEmpMin,0)/km.filter(m=>m.impToEmpMin).length) : null;
+      const fTk = m => { if(!m)return'—'; const h=Math.floor(m/60),d=Math.floor(h/24),rh=h%24,rm=m%60; return d>0?`${d}d ${rh}h`:h>0?`${h}h ${rm}m`:`${m}m`; };
+      const pctCo = kmPct === null ? '#64748b' : kmPct >= 80 ? '#4ade80' : kmPct >= 60 ? '#f59e0b' : '#ef4444';
+      if (!km.length) return '';
+      return `<div class="kcard" style="margin-bottom:12px;border-top:3px solid #4ade80">
+      <div style="font-size:12px;color:#64748b;font-weight:700;margin-bottom:12px">📊 CUMPLIMIENTO DE ENTREGAS <span style="font-weight:400;color:#334155">(${km.length} órdenes completadas)</span></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="background:#0a2e1a;border:1px solid #166534;border-radius:10px;padding:10px 16px;flex:1;min-width:80px;text-align:center">
+          <div style="font-size:26px;font-weight:800;color:#4ade80">${kmOT.length}</div>
+          <div style="font-size:10px;color:#64748b;margin-top:2px">✅ A tiempo</div>
+        </div>
+        <div style="background:#2d0a0a;border:1px solid #7f1d1d;border-radius:10px;padding:10px 16px;flex:1;min-width:80px;text-align:center">
+          <div style="font-size:26px;font-weight:800;color:#ef4444">${kmLate.length}</div>
+          <div style="font-size:10px;color:#64748b;margin-top:2px">🔴 Retrasadas</div>
+        </div>
+        ${kmPct !== null ? `<div style="background:#0a1525;border:1px solid #1e3a5f;border-radius:10px;padding:10px 16px;flex:1;min-width:80px;text-align:center">
+          <div style="font-size:26px;font-weight:800;color:${pctCo}">${kmPct}%</div>
+          <div style="font-size:10px;color:#64748b;margin-top:2px">📈 Cumplimiento</div>
+        </div>` : ''}
+        ${kmAvgT ? `<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px 16px;flex:1;min-width:80px;text-align:center">
+          <div style="font-size:20px;font-weight:800;color:#c084fc">${fTk(kmAvgT)}</div>
+          <div style="font-size:10px;color:#64748b;margin-top:2px">⏱ T.prod prom</div>
+        </div>` : ''}
+        ${kmAvgIE ? `<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px 16px;flex:1;min-width:80px;text-align:center">
+          <div style="font-size:20px;font-weight:800;color:#38bdf8">${fTk(kmAvgIE)}</div>
+          <div style="font-size:10px;color:#64748b;margin-top:2px">🖨️→📦 Imp→Emp prom</div>
+        </div>` : ''}
+      </div>
+      ${kmLate.length ? `<div style="margin-top:12px;font-size:11px;color:#ef4444;font-weight:700">Retrasadas: ${kmLate.sort((a,b)=>b.diasDiff-a.diasDiff).slice(0,3).map(m=>`${e(m.titulo.substring(0,20))} (+${m.diasDiff}d)`).join(' · ')}</div>` : ''}
+    </div>`;
+    })()}
     <div class="g2" style="gap:12px;margin-bottom:12px">
       <div class="kcard"><div style="font-size:12px;color:#64748b;font-weight:700">📊 CARGA SEMANAL</div>
         <div style="font-size:34px;font-weight:800;color:${cc};margin-top:4px">${cp}%</div>
