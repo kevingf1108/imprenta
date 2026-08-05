@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.97';
+        const APP_VERSION = 'v8.98';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -978,6 +978,14 @@
             if (p.length !== 3) return '';
             return `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
         }
+        // MM/DD/YY o MM/DD/YYYY — para la hoja de Muestras
+        function parseMDYDate(s) {
+            if (!s) return '';
+            const p = s.split('/');
+            if (p.length !== 3) return '';
+            const yr = p[2].length === 2 ? '20' + p[2] : p[2];
+            return `${yr}-${p[0].padStart(2, '0')}-${p[1].padStart(2, '0')}`;
+        }
 
         // Detecta tipo de encuadernación desde descripción/actividades
         function detectEnc(desc, acab) {
@@ -1105,7 +1113,7 @@
                 tipoInteriores: colorBn.toLowerCase().includes('bn') ? 'byn' : 'color',
                 gramaje: 'normal',
                 tipoEncuadernacion: enc,
-                fechaLimite: parseDMDate(entrega),
+                fechaLimite: parseMDYDate(entrega),
                 etapa: etapaActual || 'impresion',
                 urgente: urg.toLowerCase().includes('urgente'),
                 notas: notas.substring(0, 120),
