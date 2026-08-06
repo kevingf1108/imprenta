@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.991';
+        const APP_VERSION = 'v8.992';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1036,7 +1036,7 @@
                 tabloidesSrc: tabs, ppt: 8, portaPpt: 2,
                 paginas: tabs * 8,
                 tipoInteriores: colorBn.toLowerCase().includes('bn') || colorBn.toLowerCase().includes('b/n') ? 'byn' : 'color',
-                gramaje: detectGramaje(papel),
+                gramaje: tipo === 'port_sub' ? 'grueso' : detectGramaje(papel),
                 tipoEncuadernacion: enc,
                 fechaLimite: parseDMDate(entrega),
                 etapa, urgente: urg.toLowerCase().includes('urgente'),
@@ -2029,6 +2029,45 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             return result.sort((a, b) => (b.completedTs || 0) - (a.completedTs || 0));
         }
 
+        function deleteStatRecord(ts, ordId) {
+            const i = statsHistory.findIndex(r => r.ts === Number(ts) && r.ordId === ordId);
+            if (i >= 0) { statsHistory.splice(i, 1); saveS(); setV('stats'); }
+        }
+
+        function limpiarOutliersStats() {
+            const ETAPA_UNIT = {
+                'impresion': r => r.hojas > 0 && r.mins > 0 ? r.hojas / r.mins : null,
+                'acab_pl':   r => r.hojas > 0 && r.mins > 0 ? r.hojas / r.mins : null,
+                'acab_ci':   r => r.hojas > 0 && r.mins > 0 ? r.hojas / r.mins : null,
+            };
+            const defMetric = r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null;
+            // Agrupar por etapa y calcular mediana por grupo
+            const groups = {};
+            statsHistory.filter(r => r.mins > 0).forEach(r => {
+                const key = r.etapa;
+                if (!groups[key]) groups[key] = [];
+                const metric = (ETAPA_UNIT[r.etapa] || defMetric)(r);
+                if (metric !== null) groups[key].push({ r, metric });
+            });
+            const outlierTs = new Set();
+            Object.values(groups).forEach(items => {
+                if (items.length < 3) return;
+                const sorted = [...items].sort((a, b) => a.metric - b.metric);
+                const med = sorted[Math.floor(sorted.length / 2)].metric;
+                items.forEach(({ r, metric }) => {
+                    // Borrar si es <15% o >500% de la mediana (outlier claro)
+                    if (metric < med * 0.15 || metric > med * 5) outlierTs.add(r.ts + '|' + r.ordId);
+                });
+            });
+            // Siempre borrar registros con menos de 3 min (escaneo accidental)
+            statsHistory.filter(r => r.mins > 0 && r.mins < 3).forEach(r => outlierTs.add(r.ts + '|' + r.ordId));
+            const before = statsHistory.length;
+            statsHistory = statsHistory.filter(r => !outlierTs.has(r.ts + '|' + r.ordId));
+            const n = before - statsHistory.length;
+            saveS(); setV('stats');
+            showToast(n > 0 ? `🧹 ${n} registros outlier eliminados` : '✅ Sin outliers detectados');
+        }
+
         function statsHTML() {
             const rows = statsHistory.filter(r => r.mins && r.mins > 0);
             if (!rows.length) return `<div style="padding:60px;text-align:center">
@@ -2069,12 +2108,16 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 const useHojas = ['impresion', 'acab_pl', 'acab_ci'].includes(etapa);
                 const tableRows = items.map(r => {
                     const spd = unitCfg.metric(r);
-                    return `<tr style="border-top:1px solid #0f172a">
-            <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(r.titulo.substring(0, 32))}</td>
+                    const isLow = spd !== null && speeds.length >= 3 && spd < (avg * 0.2);
+                    const isFast = r.mins > 0 && r.mins < 3;
+                    const rowStyle = (isLow || isFast) ? 'background:#2d1515' : '';
+                    return `<tr style="border-top:1px solid #0f172a;${rowStyle}">
+            <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(r.titulo.substring(0, 32))}${isFast ? ' <span style="color:#ef4444;font-size:10px">⚠️ &lt;3min</span>' : isLow ? ' <span style="color:#f59e0b;font-size:10px">↓ bajo</span>' : ''}</td>
             <td style="padding:6px 8px;text-align:right;color:#f1f5f9;font-weight:600">${useHojas ? (r.hojas || '—') : r.cantidad}</td>
             <td style="padding:6px 8px;text-align:right;color:#60a5fa">${r.mins} min</td>
             <td style="padding:6px 8px;text-align:right;color:#4ade80;font-weight:700">${spd !== null ? spd.toFixed(2) : '—'}</td>
             <td style="padding:6px 8px;text-align:right;color:#475569;font-size:11px">${new Date(r.ts).toLocaleDateString('es', { day: '2-digit', month: 'short' })}</td>
+            <td style="padding:4px 6px;text-align:center"><button onclick="deleteStatRecord(${r.ts},'${r.ordId}')" style="background:none;border:none;color:#475569;cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px" title="Borrar registro">✕</button></td>
           </tr>`;
                 }).join('');
                 return `<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:14px">
@@ -2092,6 +2135,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
               <td style="padding:4px 8px;text-align:right">Tiempo</td>
               <td style="padding:4px 8px;text-align:right">${unitCfg.unit}</td>
               <td style="padding:4px 8px;text-align:right">Fecha</td>
+              <td style="padding:4px 6px"></td>
             </tr>${tableRows}
           </table></div>
         </div>`;
@@ -2186,7 +2230,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           <div style="font-size:13px;font-weight:700;color:#f1f5f9">🤖 Auto-calibración de velocidades</div>
           <div style="font-size:11px;color:#64748b;margin-top:3px">${calibCount} estación(es) con ≥3 muestras · Rango: ${Math.round((cfg.calibRangeMin || 0.5) * 100)}%–${Math.round((cfg.calibRangeMax || 2.0) * 100)}% de la mediana · Factor entrega: ×${cfg.bufferFactor || 1.0}</div>
         </div>
-        <button onclick="autoCalibrate();showToast('⚡ Velocidades actualizadas');render()" style="padding:7px 16px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-weight:700;font-size:13px;cursor:pointer">⚡ Calibrar ahora</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button onclick="autoCalibrate();showToast('⚡ Velocidades actualizadas');render()" style="padding:7px 16px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-weight:700;font-size:13px;cursor:pointer">⚡ Calibrar ahora</button>
+          <button onclick="if(confirm('¿Borrar automáticamente registros outliers (< 3 min o fuera de rango)?')){limpiarOutliersStats();}" style="padding:7px 16px;border-radius:8px;border:1px solid #7f1d1d;background:#2d0a0a;color:#f87171;font-weight:700;font-size:13px;cursor:pointer">🧹 Limpiar outliers</button>
+        </div>
       </div>`;
             const histRows = [...historial].sort((a, b) => b.ts - a.ts);
             const histBlock = `<div style="background:#1e293b;border-radius:12px;padding:16px;margin-top:24px">
