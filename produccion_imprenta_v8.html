@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.993';
+        const APP_VERSION = 'v8.994';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -2094,7 +2094,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const byImpSec = {};
             impRows.forEach(r => {
                 const maq = getMaqInfo({ maquina: r.maquina, tipoInteriores: r.tipoInteriores });
-                const papel = r.gramaje === 'grueso' ? 'Grueso >200g' : 'Normal ≤150g';
+                const esPortada = (r.ordId || '').endsWith('-P') || (r.titulo || '').toUpperCase().startsWith('PORT');
+                const papel = (r.gramaje === 'grueso' || esPortada) ? 'Grueso >200g' : 'Normal ≤150g';
                 const tam = r.tamano || 'tabloide';
                 const key = `${String(maq.order).padStart(2, '0')}|${papel}|${tam}`;
                 if (!byImpSec[key]) byImpSec[key] = { maq, papel, tam, items: [] };
