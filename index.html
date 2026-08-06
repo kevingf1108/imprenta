@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.995';
+        const APP_VERSION = 'v8.996';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -611,7 +611,7 @@
         // ═══════════════════════════════════════════════════
         //  ESTADO
         // ═══════════════════════════════════════════════════
-        let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [], historial = [], etapaMap = {};
+        let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [], historial = [], etapaMap = {}, scanLog = [];
         let modalId = undefined, showCfg = false, showSync = false, tvTimer = null, tvSub = 'gantt', ganttZoom = 180;
         let searchQ = '';
         let autoSync = false, _autoSyncInt = null, _syncing = false, _fbReady = false;
@@ -640,6 +640,8 @@
                     cfg = data.cfg ? { ...JSON.parse(JSON.stringify(CFG0)), ...data.cfg } : JSON.parse(JSON.stringify(CFG0));
                     const rawSH = data.statsHistory;
                     statsHistory = rawSH ? (Array.isArray(rawSH) ? rawSH : Object.values(rawSH)).filter(Boolean) : [];
+                    const rawSL = data.scanLog;
+                    scanLog = rawSL ? (Array.isArray(rawSL) ? rawSL : Object.values(rawSL)).filter(Boolean) : [];
                     // Migrar portadas a grueso (ordId termina en -P o título empieza con PORT)
                     let _migrated = false;
                     statsHistory.forEach(r => {
@@ -671,7 +673,7 @@
         }
         function saveS() {
             const manualOrders = orders.filter(o => !o._fromSheets);
-            return _ref.set({ cfg, statsHistory, historial, etapaMap, manualOrders }).catch(e => {
+            return _ref.set({ cfg, statsHistory, historial, etapaMap, manualOrders, scanLog }).catch(e => {
                 try { localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); localStorage.setItem('imp_h', JSON.stringify(historial)); } catch { }
             });
         }
@@ -1865,7 +1867,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             if (V === 'tv') { root.innerHTML = tvHTML(); startTV(); return; }
             root.innerHTML = `
     <div style="background:#1e293b;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #334155;position:sticky;top:0;z-index:50">${hdrHTML()}</div>
-    <div id="mc">${V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : boardHTML()}</div>
+    <div id="mc">${V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'scan_log' ? scanLogHTML() : boardHTML()}</div>
     ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}`;
         }
 
@@ -1880,7 +1882,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             return `
     <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">${APP_VERSION}</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
-      ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV']].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
+      ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['tv', '📺 TV'], ['scan_log', `🔍 No encontrados${scanLog.length ? ' ('+scanLog.length+')' : ''}`]].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
     <div style="display:flex;align-items:center;gap:8px;background:#0f172a;border-radius:8px;padding:6px 12px;flex:1;min-width:170px;max-width:290px">
       <div style="flex:1"><div style="font-size:10px;color:#64748b;margin-bottom:3px">CAPACIDAD EN COLA</div>
@@ -2035,6 +2037,41 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 result.push({ id: h.id, titulo: h.titulo, cliente: h.cliente || '', cantidad: h.cantidad || 0, fechaLimite, completedTs, totalMin, impMin, impToEmpMin, queueMin, onTime, diasDiff });
             });
             return result.sort((a, b) => (b.completedTs || 0) - (a.completedTs || 0));
+        }
+
+        function scanLogHTML() {
+            if (!scanLog.length) return `<div style="padding:60px;text-align:center">
+        <div style="font-size:48px;margin-bottom:16px">🔍</div>
+        <div style="font-size:18px;font-weight:700;color:#64748b">Sin escaneos no encontrados</div>
+        <div style="font-size:13px;color:#475569;margin-top:8px">Cuando se escanee un código que no existe en el tablero, aparecerá aquí con la razón.</div>
+      </div>`;
+            return `<div style="padding:16px;max-width:900px;margin:0 auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:16px;font-weight:800;color:#f1f5f9">🔍 Escaneos no encontrados</div>
+            <div style="font-size:12px;color:#475569;margin-top:2px">${scanLog.length} registros — últimos 200</div>
+          </div>
+          <button onclick="if(confirm('¿Borrar todos los registros?')){scanLog=[];saveS();setV('scan_log');}" style="padding:6px 14px;border-radius:8px;border:1px solid #7f1d1d;background:#2d0a0a;color:#f87171;font-weight:700;font-size:12px;cursor:pointer">🗑 Limpiar log</button>
+        </div>
+        <div style="background:#1e293b;border-radius:12px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <tr style="color:#475569;font-size:11px;border-bottom:1px solid #334155;background:#0f172a">
+              <td style="padding:8px 10px">Hora</td>
+              <td style="padding:8px 10px">Código escaneado</td>
+              <td style="padding:8px 10px">Proceso</td>
+              <td style="padding:8px 10px">Razón</td>
+              <td style="padding:8px 6px"></td>
+            </tr>
+            ${scanLog.map(r => `<tr style="border-top:1px solid #0f172a">
+              <td style="padding:7px 10px;color:#64748b;white-space:nowrap">${new Date(r.ts).toLocaleString('es', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
+              <td style="padding:7px 10px;color:#fbbf24;font-weight:700;font-family:monospace">${e(r.raw||r.codigo)}</td>
+              <td style="padding:7px 10px;color:#60a5fa">${e(r.proceso||'—')}</td>
+              <td style="padding:7px 10px;color:#94a3b8;font-size:11px">${e(r.razon)}</td>
+              <td style="padding:7px 6px;text-align:center"><button onclick="scanLog=scanLog.filter(x=>x.ts!==${r.ts});saveS();setV('scan_log')" style="background:none;border:none;color:#475569;cursor:pointer;font-size:13px" title="Borrar">✕</button></td>
+            </tr>`).join('')}
+          </table>
+        </div>
+      </div>`;
         }
 
         function deleteStatRecord(ts, ordId) {
@@ -2397,19 +2434,22 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const badgeLabel = searchQ && all.length !== allTotal.length ? `${all.length}/${allTotal.length}` : `${allTotal.length}`;
             const emptyMsg = `<div style="color:#334155;font-size:12px;text-align:center;padding:20px 0;border:2px dashed #1e293b;border-radius:8px;margin:4px 0">${searchQ ? '🔍 Sin resultados' : (isAcab ? 'Arrastra aquí' : 'Sin órdenes')}</div>`;
             let body;
-            if (et.id === 'impresion' && all.length > 0) {
-                const secs = impSecciones(all);
+            const allSorted = [...all].sort(prioSort);
+            if (et.id === 'impresion' && allSorted.length > 0) {
+                const secs = impSecciones(allSorted);
+                let globalIdx = 0;
                 body = secs.map(sec => {
                     const tamLabel = sec.tam === 'carta' ? 'Carta' : sec.tam === 'oficio' ? 'Oficio' : 'Tabloide';
                     const isByn = sec.maq.key === 'byn' || sec.maq.key === 'oce6320' || sec.maq.key === 'titan';
+                    const secCards = [...sec.items].sort(prioSort).map(o => cardHTML(o, et, ei, false, etapas, ++globalIdx)).join('');
                     return `<div style="margin:6px 0 2px;padding:4px 8px;background:${sec.maq.color}18;border-radius:6px;border-left:3px solid ${sec.maq.color}">
         <div style="font-size:10px;font-weight:700;color:${sec.maq.color}">${isByn ? '⬛' : '🎨'} ${sec.maq.label}</div>
         <div style="font-size:10px;color:#64748b">${sec.papel} · ${tamLabel} <span style="color:${sec.maq.color};font-weight:700">${sec.items.length}</span></div>
       </div>
-      ${sec.items.map(o => cardHTML(o, et, ei, false, etapas)).join('')}`;
+      ${secCards}`;
                 }).join('');
             } else {
-                body = all.length === 0 ? emptyMsg : all.map(o => cardHTML(o, et, ei, false, etapas)).join('');
+                body = allSorted.length === 0 ? emptyMsg : allSorted.map((o, idx) => cardHTML(o, et, ei, false, etapas, idx + 1)).join('');
             }
             return `<div class="col${isAcab ? ' acab-col' : ''}" id="col_${et.id}" ondragover="onDragOver(event,'${et.id}')" ondragleave="onDragLeave(event)" ondrop="onDrop(event,'${et.id}')">
     <div class="col-hdr" style="border-color:${et.color}">
@@ -2425,7 +2465,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
   </div>`;
         }
 
-        function cardHTML(o, et, ei, compact = false, etapas) {
+        function cardHTML(o, et, ei, compact = false, etapas, prio) {
             const t = calcT(o, cfg);
             const enc = encOf(o.tipoEncuadernacion);
             const od = isOD(o.fechaLimite), sn = isSoon(o.fechaLimite);
@@ -2453,7 +2493,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         ${(etapas ? etapas.length - 1 : 99) > ei ? `<button class="bico" onclick="event.stopPropagation();mvOrd('${e(o.id)}',1)" style="color:${et.color}" title="Siguiente paso">▶</button>` : ''}
       </div>`: ''}
     </div>
-    <div style="font-weight:700;font-size:13px;color:#f1f5f9" class="ell">${e(o.titulo)}</div>
+    <div style="font-weight:700;font-size:13px;color:#f1f5f9" class="ell">${prio ? `<span style="background:#1e3a5f;color:#60a5fa;font-size:10px;padding:1px 5px;border-radius:8px;font-weight:800;margin-right:4px">#${prio}</span>` : ''}${e(o.titulo)}</div>
     <div style="font-size:11px;color:#94a3b8" class="ell">${e(o.cliente)}</div>
     <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:5px">
       <span class="badge" style="background:#1e293b;color:#94a3b8">📦 ${e(o.cantidad)}</span>
@@ -3271,12 +3311,14 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
 
 
             if (!matches.length) {
-                // Debug: busca cualquier orden que tenga ese número (sin filtros de etapa/_merged)
                 const anyMatch = orders.filter(x => x.id.replace(/\D/g, '') === digits6 || x.grupoId?.toString().replace(/\D/g, '') === digits6);
-                const debugInfo = anyMatch.length
-                    ? 'Existe en orders pero filtrada: ' + anyMatch.map(x => x.id + '|etapa=' + x.etapa + (x._merged ? '|MERGED' : '') + (x._isMuestra ? '|MUESTRA' : '')).join(', ')
-                    : 'No existe en orders con digits=' + digits6 + ' (total orders=' + orders.length + ')';
-                showToast('❌ No encontrada: ' + ordId + (proc ? ' [' + proc.label + ']' : '') + ' — ' + debugInfo, 6000);
+                const razon = anyMatch.length
+                    ? 'Existe pero filtrada: ' + anyMatch.map(x => x.id + ' etapa=' + x.etapa + (x._merged ? ' MERGED' : '') + (x._isMuestra ? ' MUESTRA' : '')).join(', ')
+                    : 'No existe en el tablero (digits=' + digits6 + ')';
+                scanLog.unshift({ ts: Date.now(), raw, codigo: ordId, proceso: proc ? proc.label : '—', razon });
+                if (scanLog.length > 200) scanLog = scanLog.slice(0, 200);
+                saveS();
+                showToast('❌ No encontrada: ' + ordId + (proc ? ' [' + proc.label + ']' : '') + ' — ' + razon, 6000);
                 return;
             }
 
