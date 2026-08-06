@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.99';
+        const APP_VERSION = 'v8.991';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -559,6 +559,7 @@
             { id: 'titan', label: 'Titan 6180', steps: ['iib'], grupo: '🖨️ Impresión B&N' },
             { id: 'c1352', label: 'Color 1352', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
             { id: 'c1351', label: 'Color 1351', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
+            { id: 'c1353', label: 'Color 1353', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
             { id: 'c10010', label: 'Color 10010', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
             { id: 'plast', label: 'Plastificadora', steps: ['pl'], grupo: '✂️ Acabados' },
             { id: 'ci1', label: 'Cortadora Ini.1', steps: ['ci', 'cp'], grupo: '✂️ Acabados' },
@@ -2311,9 +2312,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             if (maq === 'titan') return { key: 'titan', label: 'Titan 6180', color: '#64748b', order: 2 };
             if (maq === 'c1352') return { key: 'c1352', label: 'Color 1352', color: '#fb923c', order: 3 };
             if (maq === 'c1351') return { key: 'c1351', label: 'Color 1351', color: '#f97316', order: 4 };
-            if (maq === 'c10010') return { key: 'c10010', label: 'Color 10010', color: '#ea580c', order: 5 };
+            if (maq === 'c1353') return { key: 'c1353', label: 'Color 1353', color: '#fbbf24', order: 5 };
+            if (maq === 'c10010') return { key: 'c10010', label: 'Color 10010', color: '#ea580c', order: 6 };
             if (o.tipoInteriores === 'byn') return { key: 'byn', label: 'OCE / Titan', color: '#94a3b8', order: 0 };
-            return { key: 'color', label: '1352 / 1351 / 10010', color: '#fb923c', order: 6 };
+            return { key: 'color', label: '1352 / 1351 / 1353 / 10010', color: '#fb923c', order: 7 };
         }
         function impSecciones(list) {
             const map = {};
@@ -2489,7 +2491,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         ${segBtns('gram', [['normal', '≤ 150g', '#60a5fa'], ['grueso', '> 200g', '#f97316']], ord.gramaje || 'normal')}</div>
       <span class="lbl">Máquina de impresión</span>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><input type="hidden" id="f_maq" value="${e(ord.maquina || 'auto')}">
-        ${segBtns('maq', [['auto', '⚙️ Auto', '#334155'], ['oce6320', 'OCE 6320', '#94a3b8'], ['titan', 'Titan 6180', '#64748b'], ['c1352', 'Color 1352', '#fb923c'], ['c1351', 'Color 1351', '#f97316'], ['c10010', 'Color 10010', '#ea580c']], ord.maquina || 'auto')}</div>
+        ${segBtns('maq', [['auto', '⚙️ Auto', '#334155'], ['oce6320', 'OCE 6320', '#94a3b8'], ['titan', 'Titan 6180', '#64748b'], ['c1352', 'Color 1352', '#fb923c'], ['c1351', 'Color 1351', '#f97316'], ['c1353', 'Color 1353', '#fbbf24'], ['c10010', 'Color 10010', '#ea580c']], ord.maquina || 'auto')}</div>
       <span class="lbl">Tamaño de papel</span>
       <div style="display:flex;gap:6px;margin-top:6px"><input type="hidden" id="f_tam" value="${e(ord.tamano || 'tabloide')}">
         ${segBtns('tam', [['tabloide', 'Tabloide', '#3b82f6'], ['carta', 'Carta', '#22c55e'], ['oficio', 'Oficio', '#a855f7']], ord.tamano || 'tabloide')}</div>
@@ -2973,7 +2975,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function cfgHTML() {
             const inp = (lbl, path, step) => { const ks = path.split('.'), val = ks.reduce((o, k) => o?.[k], cfg) ?? 0; return `<div><div style="font-size:12px;color:#64748b;margin-top:10px">${lbl}</div><input class="inp" type="number" step="${step || 1}" min="0" data-cfg="${path}" value="${val}" oninput="updCfg(this)" style="margin-top:3px"></div>`; };
             const secs = [
-                { title: '🖨️ IMPRESIÓN (ppm 330×475)', color: '#fb923c', items: [['OCE 6320 B&N', 'maq.byn_fast'], ['Titan 6180 B&N', 'maq.byn_slow'], ['1352/1351 Color ≤150g', 'maq.color_normal'], ['1352/1351 Color >200g', 'maq.color_grueso'], ['10010 ≤150g', 'maq.color_slow_n'], ['10010 >200g', 'maq.color_slow_g']] },
+                { title: '🖨️ IMPRESIÓN (ppm 330×475)', color: '#fb923c', items: [['OCE 6320 B&N', 'maq.byn_fast'], ['Titan 6180 B&N', 'maq.byn_slow'], ['1352/1351/1353 Color ≤150g', 'maq.color_normal'], ['1352/1351/1353 Color >200g', 'maq.color_grueso'], ['10010 ≤150g', 'maq.color_slow_n'], ['10010 >200g', 'maq.color_slow_g']] },
                 { title: '📐 IMPOSICIÓN', color: '#60a5fa', items: [['Páginas por tabloide (default)', 'pptDefault'], ['Portadas por tabloide (default)', 'portaPptDefault']] },
                 { title: '⚙️ SETUP (min)', color: '#94a3b8', items: [['B&N', 'setup.byn'], ['Color', 'setup.color'], ['Plastificado', 'setup.plastificado'], ['Pegado', 'setup.pegado'], ['Corte final', 'setup.corteFinal']] },
                 { title: '✂️ ACABADOS', color: '#c084fc', items: [['Corte inicial (pág/min)', 'maq.corteInicial'], ['Plastificado (m/min)', 'maq.plast_vel', '0.1'], ['Hoja plast. (m)', 'maq.plast_hoja', '0.01'], ['Pegado 150p', 'maq.pegado_150', '0.1'], ['Pegado 500p', 'maq.pegado_500', '0.1'], ['Corte final 150p', 'maq.cf_150', '0.1'], ['Corte final 500p', 'maq.cf_500', '0.1'], ['Ponchadora (h/min)', 'maq.ponchadora'], ['Engrapadora', 'maq.engrapadora', '0.1'], ['Corte cartón', 'maq.corte_carton', '0.1'], ['Armado PD (port/min)', 'maq.armado_pd', '0.01'], ['Mesa trabajo', 'maq.mesa_trabajo', '0.1'], ['Espiralado', 'maq.espiralado', '0.1']] },
