@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.992';
+        const APP_VERSION = 'v8.993';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -2112,12 +2112,12 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     const isFast = r.mins > 0 && r.mins < 3;
                     const rowStyle = (isLow || isFast) ? 'background:#2d1515' : '';
                     return `<tr style="border-top:1px solid #0f172a;${rowStyle}">
-            <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(r.titulo.substring(0, 32))}${isFast ? ' <span style="color:#ef4444;font-size:10px">⚠️ &lt;3min</span>' : isLow ? ' <span style="color:#f59e0b;font-size:10px">↓ bajo</span>' : ''}</td>
+            <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e((r.titulo||r.ordId||'').substring(0, 32))}${isFast ? ' <span style="color:#ef4444;font-size:10px">⚠️ &lt;3min</span>' : isLow ? ' <span style="color:#f59e0b;font-size:10px">↓ bajo</span>' : ''}</td>
             <td style="padding:6px 8px;text-align:right;color:#f1f5f9;font-weight:600">${useHojas ? (r.hojas || '—') : r.cantidad}</td>
             <td style="padding:6px 8px;text-align:right;color:#60a5fa">${r.mins} min</td>
             <td style="padding:6px 8px;text-align:right;color:#4ade80;font-weight:700">${spd !== null ? spd.toFixed(2) : '—'}</td>
             <td style="padding:6px 8px;text-align:right;color:#475569;font-size:11px">${new Date(r.ts).toLocaleDateString('es', { day: '2-digit', month: 'short' })}</td>
-            <td style="padding:4px 6px;text-align:center"><button onclick="deleteStatRecord(${r.ts},'${r.ordId}')" style="background:none;border:none;color:#475569;cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px" title="Borrar registro">✕</button></td>
+            <td style="padding:4px 6px;text-align:center"><button onclick="deleteStatRecord(${r.ts},'${(r.ordId||'').replace(/'/g,'')}')" style="background:none;border:none;color:#475569;cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px" title="Borrar registro">✕</button></td>
           </tr>`;
                 }).join('');
                 return `<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:14px">
