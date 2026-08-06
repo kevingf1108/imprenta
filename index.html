@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.98';
+        const APP_VERSION = 'v8.993';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -559,6 +559,7 @@
             { id: 'titan', label: 'Titan 6180', steps: ['iib'], grupo: '🖨️ Impresión B&N' },
             { id: 'c1352', label: 'Color 1352', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
             { id: 'c1351', label: 'Color 1351', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
+            { id: 'c1353', label: 'Color 1353', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
             { id: 'c10010', label: 'Color 10010', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
             { id: 'plast', label: 'Plastificadora', steps: ['pl'], grupo: '✂️ Acabados' },
             { id: 'ci1', label: 'Cortadora Ini.1', steps: ['ci', 'cp'], grupo: '✂️ Acabados' },
@@ -1035,7 +1036,7 @@
                 tabloidesSrc: tabs, ppt: 8, portaPpt: 2,
                 paginas: tabs * 8,
                 tipoInteriores: colorBn.toLowerCase().includes('bn') || colorBn.toLowerCase().includes('b/n') ? 'byn' : 'color',
-                gramaje: detectGramaje(papel),
+                gramaje: tipo === 'port_sub' ? 'grueso' : detectGramaje(papel),
                 tipoEncuadernacion: enc,
                 fechaLimite: parseDMDate(entrega),
                 etapa, urgente: urg.toLowerCase().includes('urgente'),
@@ -1208,6 +1209,10 @@
           if (!cfg.scriptUrl) { showToast('⚠️ Configura URL del script primero'); return; }
           if (!confirm('¿Borrar permanentemente todas las filas con listo=TRUE de Impresion org y Acabado org? Esto no se puede deshacer.')) return;
           runAccionSheets('borrarlistos', 'Borrando filas listo=TRUE de Impresion org y Acabado org');
+        }
+        function runLimpiezaCompleta() {
+          if (!cfg.scriptUrl) { showToast('⚠️ Configura URL del script primero'); return; }
+          runAccionSheets('limpiezacompleta', 'Ejecutando limpieza completa (Imp→Acab, Acab→Emp, Muestras→Emp)');
         }
 
         async function testScriptUrl() {
@@ -1660,10 +1665,102 @@ function migrarMuestras(ss){
   return'OK:'+n+' muestras migradas';
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────
+function findCol(h,...n){return h.findIndex(x=>n.map(v=>v.toLowerCase()).includes(x.toLowerCase().trim()));}
+function fmtDate(d){if(!d)return'';try{return Utilities.formatDate(new Date(d),Session.getScriptTimeZone(),'dd/MM/yyyy HH:mm:ss');}catch(e){return'';}}
+function calcTiempo(d1,d2){try{const ms=new Date(d2)-new Date(d1);if(ms<0||!d1)return'';return Math.floor(ms/3600000)+'h '+Math.floor((ms%3600000)/60000)+'m';}catch(e){return'';}}
+
+// ── Impresion org listo=TRUE → Acabado org + log ──────────────────────
+function limpiezaImpresion(ss){
+  const src=ss.getSheets().find(s=>s.getName().trim()==='Impresion org');
+  const dst=ss.getSheets().find(s=>s.getName().trim()==='Acabado org');
+  const log=ss.getSheets().find(s=>s.getName().trim()==='Log eliminados - Impresion org');
+  if(!src||!dst)return 0;
+  const data=src.getDataRange().getValues();if(data.length<=1)return 0;
+  const h=data[0].map(x=>x.toString().toLowerCase().trim());
+  const ciL=findCol(h,'listo','done','ready');if(ciL<0)return 0;
+  const ciI=findCol(h,'# item','#item','item');
+  const ciN=findCol(h,'nombre','name','titulo');
+  const ciH=findCol(h,'hoy','fecha subida','fecha entrada','fecha');
+  const now=new Date();let n=0;
+  for(let i=data.length-1;i>=1;i--){
+    if(data[i][ciL]?.toString().toLowerCase()!=='true')continue;
+    const item=ciI>=0?data[i][ciI]?.toString().trim():'';
+    const nombre=ciN>=0?data[i][ciN]?.toString().trim():'';
+    const sub=ciH>=0?data[i][ciH]:null;
+    if(log)log.appendRow([item,nombre,sub?fmtDate(sub):'',fmtDate(now),calcTiempo(sub,now)]);
+    dst.appendRow(data[i]);src.deleteRow(i+1);n++;
+  }
+  return n;
+}
+
+// ── Acabado org listo=TRUE → Empacado + log ───────────────────────────
+function limpiezaAcabados(ss){
+  const src=ss.getSheets().find(s=>s.getName().trim()==='Acabado org');
+  const dst=ss.getSheets().find(s=>s.getName().trim()==='Empacado');
+  const log=ss.getSheets().find(s=>s.getName().trim()==='Log eliminados - Acabado org');
+  if(!src)return 0;
+  const data=src.getDataRange().getValues();if(data.length<=1)return 0;
+  const h=data[0].map(x=>x.toString().toLowerCase().trim());
+  const ciL=findCol(h,'listo','done','ready');if(ciL<0)return 0;
+  const ciI=findCol(h,'# item','#item','item');
+  const ciN=findCol(h,'nombre','name','titulo');
+  const ciH=findCol(h,'hoy','fecha subida','fecha entrada','fecha');
+  const now=new Date();let n=0;
+  for(let i=data.length-1;i>=1;i--){
+    if(data[i][ciL]?.toString().toLowerCase()!=='true')continue;
+    const item=ciI>=0?data[i][ciI]?.toString().trim():'';
+    const nombre=ciN>=0?data[i][ciN]?.toString().trim():'';
+    const sub=ciH>=0?data[i][ciH]:null;
+    if(log)log.appendRow([item,nombre,sub?fmtDate(sub):'',fmtDate(now),calcTiempo(sub,now)]);
+    if(dst)dst.appendRow(data[i]);src.deleteRow(i+1);n++;
+  }
+  return n;
+}
+
+// ── M imp Eliminar=TRUE → Empacado + log ─────────────────────────────
+function limpiezaMuestras(ss){
+  const src=ss.getSheets().find(s=>s.getName().trim()==='M imp');
+  const dst=ss.getSheets().find(s=>s.getName().trim()==='Empacado');
+  const log=ss.getSheets().find(s=>s.getName().trim()==='Log eliminados - M Imp');
+  if(!src)return 0;
+  const data=src.getDataRange().getValues();if(data.length<=1)return 0;
+  const h=data[0].map(x=>x.toString().toLowerCase().trim());
+  const ciE=findCol(h,'eliminar','procesado','terminado','done');if(ciE<0)return 0;
+  const now=new Date();
+  const LC=['fecha ingreso','entrega','# item','# order','group name','description','type','status','terminado','email','id dm','acabados','papel','hojas','up (pz tab)','procesado','eliminar','urgencia','p_o','color_bn','maquina'];
+  let n=0;
+  for(let i=data.length-1;i>=1;i--){
+    if(data[i][ciE]?.toString().toLowerCase()!=='true')continue;
+    if(log)log.appendRow([...LC.map(c=>{const ci=findCol(h,c);return ci>=0?data[i][ci]:'';}),fmtDate(now)]);
+    if(dst)dst.appendRow(data[i]);
+    src.deleteRow(i+1);n++;
+  }
+  return n;
+}
+
+// ── limpiezaCompleta — para el trigger automático cada 20 min ─────────
+function limpiezaCompleta(){
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(10000)){Logger.log('En uso por otra instancia');return;}
+  try{
+    const ss=SpreadsheetApp.getActiveSpreadsheet();
+    Logger.log('Limpieza: imp='+limpiezaImpresion(ss)+' acab='+limpiezaAcabados(ss)+' muestras='+limpiezaMuestras(ss));
+  }catch(e){Logger.log('Error: '+e.message);}finally{lock.releaseLock();}
+}
+
+// ── Ejecutar UNA VEZ desde el editor de Apps Script para activar el trigger ──
+function configurarTrigger(){
+  ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==='limpiezaCompleta').forEach(t=>ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('limpiezaCompleta').timeBased().everyMinutes(20).create();
+  Logger.log('✅ Trigger activo: limpiezaCompleta cada 20 minutos');
+}
+
 function doGet_acciones(ss,action){
   if(action==='moverlistos')return r(moverListos(ss));
   if(action==='migrarmuestras')return r(migrarMuestras(ss));
   if(action==='borrarlistos')return r(borrarListos(ss));
+  if(action==='limpiezacompleta'){return r('OK:imp='+limpiezaImpresion(ss)+',acab='+limpiezaAcabados(ss)+',muestras='+limpiezaMuestras(ss));}
   return null;
 }
 
@@ -1676,9 +1773,13 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           <button onclick="runMoverListos()" style="padding:7px 14px;border-radius:8px;border:1px solid #166534;background:#052e16;color:#4ade80;font-weight:700;font-size:13px;cursor:pointer">✅ Mover todos los listo=TRUE → Acabados</button>
           <button onclick="runMigrarMuestras()" style="padding:7px 14px;border-radius:8px;border:1px solid #5b21b6;background:#1a0040;color:#c084fc;font-weight:700;font-size:13px;cursor:pointer">🔬 Rescatar muestras de M Acab → M imp</button>
           <button onclick="runBorrarListos()" style="padding:7px 14px;border-radius:8px;border:1px solid #7f1d1d;background:#2d0a0a;color:#f87171;font-weight:700;font-size:13px;cursor:pointer">🗑️ Borrar listo=TRUE + limpiar Acabados</button>
-          <button onclick="if(!cfg.scriptUrl){showToast('⚠️ Configura URL del script');return;}fetch(cfg.scriptUrl+'?action=limpiar',{mode:'no-cors'}).catch(()=>{});showToast('🧹 Limpiando Acabado org...')" style="padding:7px 14px;border-radius:8px;border:1px solid #1d4ed8;background:#0a1f3f;color:#60a5fa;font-weight:700;font-size:13px;cursor:pointer">🧹 Limpiar Acabados</button>
+          <button onclick="runLimpiezaCompleta()" style="padding:7px 14px;border-radius:8px;border:1px solid #d97706;background:#1c0f00;color:#fbbf24;font-weight:700;font-size:13px;cursor:pointer">🔁 Limpieza completa (Imp→Acab, Acab→Emp, Muestras→Emp)</button>
         </div>
         <div id="accion-log" style="min-height:18px;font-size:12px;color:#94a3b8;margin-top:8px"></div>
+        <div style="margin-top:10px;padding:8px 10px;background:#0d1f0d;border:1px solid #1a3a1a;border-radius:8px;font-size:11px;color:#86efac;line-height:1.6">
+          <strong>⏱ Trigger automático:</strong> Para que la limpieza corra sola cada 20 min, abre el editor de Apps Script → ejecuta la función <code style="background:#0a2e0a;padding:1px 5px;border-radius:4px">configurarTrigger()</code> una sola vez.<br>
+          Flujo: <strong>Impresion org</strong> (listo=TRUE) → <em>log</em> + <strong>Acabado org</strong> &nbsp;|&nbsp; <strong>Acabado org</strong> (listo=TRUE) → <em>log</em> + <strong>Empacado</strong> &nbsp;|&nbsp; <strong>M imp</strong> (Eliminar=TRUE) → <em>log</em> + <strong>Empacado</strong>
+        </div>
       </div>
       <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap">
         <div style="display:flex;gap:6px">
@@ -1928,6 +2029,45 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             return result.sort((a, b) => (b.completedTs || 0) - (a.completedTs || 0));
         }
 
+        function deleteStatRecord(ts, ordId) {
+            const i = statsHistory.findIndex(r => r.ts === Number(ts) && r.ordId === ordId);
+            if (i >= 0) { statsHistory.splice(i, 1); saveS(); setV('stats'); }
+        }
+
+        function limpiarOutliersStats() {
+            const ETAPA_UNIT = {
+                'impresion': r => r.hojas > 0 && r.mins > 0 ? r.hojas / r.mins : null,
+                'acab_pl':   r => r.hojas > 0 && r.mins > 0 ? r.hojas / r.mins : null,
+                'acab_ci':   r => r.hojas > 0 && r.mins > 0 ? r.hojas / r.mins : null,
+            };
+            const defMetric = r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null;
+            // Agrupar por etapa y calcular mediana por grupo
+            const groups = {};
+            statsHistory.filter(r => r.mins > 0).forEach(r => {
+                const key = r.etapa;
+                if (!groups[key]) groups[key] = [];
+                const metric = (ETAPA_UNIT[r.etapa] || defMetric)(r);
+                if (metric !== null) groups[key].push({ r, metric });
+            });
+            const outlierTs = new Set();
+            Object.values(groups).forEach(items => {
+                if (items.length < 3) return;
+                const sorted = [...items].sort((a, b) => a.metric - b.metric);
+                const med = sorted[Math.floor(sorted.length / 2)].metric;
+                items.forEach(({ r, metric }) => {
+                    // Borrar si es <15% o >500% de la mediana (outlier claro)
+                    if (metric < med * 0.15 || metric > med * 5) outlierTs.add(r.ts + '|' + r.ordId);
+                });
+            });
+            // Siempre borrar registros con menos de 3 min (escaneo accidental)
+            statsHistory.filter(r => r.mins > 0 && r.mins < 3).forEach(r => outlierTs.add(r.ts + '|' + r.ordId));
+            const before = statsHistory.length;
+            statsHistory = statsHistory.filter(r => !outlierTs.has(r.ts + '|' + r.ordId));
+            const n = before - statsHistory.length;
+            saveS(); setV('stats');
+            showToast(n > 0 ? `🧹 ${n} registros outlier eliminados` : '✅ Sin outliers detectados');
+        }
+
         function statsHTML() {
             const rows = statsHistory.filter(r => r.mins && r.mins > 0);
             if (!rows.length) return `<div style="padding:60px;text-align:center">
@@ -1968,12 +2108,16 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 const useHojas = ['impresion', 'acab_pl', 'acab_ci'].includes(etapa);
                 const tableRows = items.map(r => {
                     const spd = unitCfg.metric(r);
-                    return `<tr style="border-top:1px solid #0f172a">
-            <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(r.titulo.substring(0, 32))}</td>
+                    const isLow = spd !== null && speeds.length >= 3 && spd < (avg * 0.2);
+                    const isFast = r.mins > 0 && r.mins < 3;
+                    const rowStyle = (isLow || isFast) ? 'background:#2d1515' : '';
+                    return `<tr style="border-top:1px solid #0f172a;${rowStyle}">
+            <td style="padding:6px 8px;color:#94a3b8;font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e((r.titulo||r.ordId||'').substring(0, 32))}${isFast ? ' <span style="color:#ef4444;font-size:10px">⚠️ &lt;3min</span>' : isLow ? ' <span style="color:#f59e0b;font-size:10px">↓ bajo</span>' : ''}</td>
             <td style="padding:6px 8px;text-align:right;color:#f1f5f9;font-weight:600">${useHojas ? (r.hojas || '—') : r.cantidad}</td>
             <td style="padding:6px 8px;text-align:right;color:#60a5fa">${r.mins} min</td>
             <td style="padding:6px 8px;text-align:right;color:#4ade80;font-weight:700">${spd !== null ? spd.toFixed(2) : '—'}</td>
             <td style="padding:6px 8px;text-align:right;color:#475569;font-size:11px">${new Date(r.ts).toLocaleDateString('es', { day: '2-digit', month: 'short' })}</td>
+            <td style="padding:4px 6px;text-align:center"><button onclick="deleteStatRecord(${r.ts},'${(r.ordId||'').replace(/'/g,'')}')" style="background:none;border:none;color:#475569;cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px" title="Borrar registro">✕</button></td>
           </tr>`;
                 }).join('');
                 return `<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:14px">
@@ -1991,6 +2135,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
               <td style="padding:4px 8px;text-align:right">Tiempo</td>
               <td style="padding:4px 8px;text-align:right">${unitCfg.unit}</td>
               <td style="padding:4px 8px;text-align:right">Fecha</td>
+              <td style="padding:4px 6px"></td>
             </tr>${tableRows}
           </table></div>
         </div>`;
@@ -2085,7 +2230,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           <div style="font-size:13px;font-weight:700;color:#f1f5f9">🤖 Auto-calibración de velocidades</div>
           <div style="font-size:11px;color:#64748b;margin-top:3px">${calibCount} estación(es) con ≥3 muestras · Rango: ${Math.round((cfg.calibRangeMin || 0.5) * 100)}%–${Math.round((cfg.calibRangeMax || 2.0) * 100)}% de la mediana · Factor entrega: ×${cfg.bufferFactor || 1.0}</div>
         </div>
-        <button onclick="autoCalibrate();showToast('⚡ Velocidades actualizadas');render()" style="padding:7px 16px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-weight:700;font-size:13px;cursor:pointer">⚡ Calibrar ahora</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button onclick="autoCalibrate();showToast('⚡ Velocidades actualizadas');render()" style="padding:7px 16px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-weight:700;font-size:13px;cursor:pointer">⚡ Calibrar ahora</button>
+          <button onclick="if(confirm('¿Borrar automáticamente registros outliers (< 3 min o fuera de rango)?')){limpiarOutliersStats();}" style="padding:7px 16px;border-radius:8px;border:1px solid #7f1d1d;background:#2d0a0a;color:#f87171;font-weight:700;font-size:13px;cursor:pointer">🧹 Limpiar outliers</button>
+        </div>
       </div>`;
             const histRows = [...historial].sort((a, b) => b.ts - a.ts);
             const histBlock = `<div style="background:#1e293b;border-radius:12px;padding:16px;margin-top:24px">
@@ -2211,9 +2359,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             if (maq === 'titan') return { key: 'titan', label: 'Titan 6180', color: '#64748b', order: 2 };
             if (maq === 'c1352') return { key: 'c1352', label: 'Color 1352', color: '#fb923c', order: 3 };
             if (maq === 'c1351') return { key: 'c1351', label: 'Color 1351', color: '#f97316', order: 4 };
-            if (maq === 'c10010') return { key: 'c10010', label: 'Color 10010', color: '#ea580c', order: 5 };
+            if (maq === 'c1353') return { key: 'c1353', label: 'Color 1353', color: '#fbbf24', order: 5 };
+            if (maq === 'c10010') return { key: 'c10010', label: 'Color 10010', color: '#ea580c', order: 6 };
             if (o.tipoInteriores === 'byn') return { key: 'byn', label: 'OCE / Titan', color: '#94a3b8', order: 0 };
-            return { key: 'color', label: '1352 / 1351 / 10010', color: '#fb923c', order: 6 };
+            return { key: 'color', label: '1352 / 1351 / 1353 / 10010', color: '#fb923c', order: 7 };
         }
         function impSecciones(list) {
             const map = {};
@@ -2389,7 +2538,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         ${segBtns('gram', [['normal', '≤ 150g', '#60a5fa'], ['grueso', '> 200g', '#f97316']], ord.gramaje || 'normal')}</div>
       <span class="lbl">Máquina de impresión</span>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><input type="hidden" id="f_maq" value="${e(ord.maquina || 'auto')}">
-        ${segBtns('maq', [['auto', '⚙️ Auto', '#334155'], ['oce6320', 'OCE 6320', '#94a3b8'], ['titan', 'Titan 6180', '#64748b'], ['c1352', 'Color 1352', '#fb923c'], ['c1351', 'Color 1351', '#f97316'], ['c10010', 'Color 10010', '#ea580c']], ord.maquina || 'auto')}</div>
+        ${segBtns('maq', [['auto', '⚙️ Auto', '#334155'], ['oce6320', 'OCE 6320', '#94a3b8'], ['titan', 'Titan 6180', '#64748b'], ['c1352', 'Color 1352', '#fb923c'], ['c1351', 'Color 1351', '#f97316'], ['c1353', 'Color 1353', '#fbbf24'], ['c10010', 'Color 10010', '#ea580c']], ord.maquina || 'auto')}</div>
       <span class="lbl">Tamaño de papel</span>
       <div style="display:flex;gap:6px;margin-top:6px"><input type="hidden" id="f_tam" value="${e(ord.tamano || 'tabloide')}">
         ${segBtns('tam', [['tabloide', 'Tabloide', '#3b82f6'], ['carta', 'Carta', '#22c55e'], ['oficio', 'Oficio', '#a855f7']], ord.tamano || 'tabloide')}</div>
@@ -2873,7 +3022,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function cfgHTML() {
             const inp = (lbl, path, step) => { const ks = path.split('.'), val = ks.reduce((o, k) => o?.[k], cfg) ?? 0; return `<div><div style="font-size:12px;color:#64748b;margin-top:10px">${lbl}</div><input class="inp" type="number" step="${step || 1}" min="0" data-cfg="${path}" value="${val}" oninput="updCfg(this)" style="margin-top:3px"></div>`; };
             const secs = [
-                { title: '🖨️ IMPRESIÓN (ppm 330×475)', color: '#fb923c', items: [['OCE 6320 B&N', 'maq.byn_fast'], ['Titan 6180 B&N', 'maq.byn_slow'], ['1352/1351 Color ≤150g', 'maq.color_normal'], ['1352/1351 Color >200g', 'maq.color_grueso'], ['10010 ≤150g', 'maq.color_slow_n'], ['10010 >200g', 'maq.color_slow_g']] },
+                { title: '🖨️ IMPRESIÓN (ppm 330×475)', color: '#fb923c', items: [['OCE 6320 B&N', 'maq.byn_fast'], ['Titan 6180 B&N', 'maq.byn_slow'], ['1352/1351/1353 Color ≤150g', 'maq.color_normal'], ['1352/1351/1353 Color >200g', 'maq.color_grueso'], ['10010 ≤150g', 'maq.color_slow_n'], ['10010 >200g', 'maq.color_slow_g']] },
                 { title: '📐 IMPOSICIÓN', color: '#60a5fa', items: [['Páginas por tabloide (default)', 'pptDefault'], ['Portadas por tabloide (default)', 'portaPptDefault']] },
                 { title: '⚙️ SETUP (min)', color: '#94a3b8', items: [['B&N', 'setup.byn'], ['Color', 'setup.color'], ['Plastificado', 'setup.plastificado'], ['Pegado', 'setup.pegado'], ['Corte final', 'setup.corteFinal']] },
                 { title: '✂️ ACABADOS', color: '#c084fc', items: [['Corte inicial (pág/min)', 'maq.corteInicial'], ['Plastificado (m/min)', 'maq.plast_vel', '0.1'], ['Hoja plast. (m)', 'maq.plast_hoja', '0.01'], ['Pegado 150p', 'maq.pegado_150', '0.1'], ['Pegado 500p', 'maq.pegado_500', '0.1'], ['Corte final 150p', 'maq.cf_150', '0.1'], ['Corte final 500p', 'maq.cf_500', '0.1'], ['Ponchadora (h/min)', 'maq.ponchadora'], ['Engrapadora', 'maq.engrapadora', '0.1'], ['Corte cartón', 'maq.corte_carton', '0.1'], ['Armado PD (port/min)', 'maq.armado_pd', '0.01'], ['Mesa trabajo', 'maq.mesa_trabajo', '0.1'], ['Espiralado', 'maq.espiralado', '0.1']] },
