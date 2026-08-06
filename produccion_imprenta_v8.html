@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.98';
+        const APP_VERSION = 'v8.99';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -1209,6 +1209,10 @@
           if (!confirm('¿Borrar permanentemente todas las filas con listo=TRUE de Impresion org y Acabado org? Esto no se puede deshacer.')) return;
           runAccionSheets('borrarlistos', 'Borrando filas listo=TRUE de Impresion org y Acabado org');
         }
+        function runLimpiezaCompleta() {
+          if (!cfg.scriptUrl) { showToast('⚠️ Configura URL del script primero'); return; }
+          runAccionSheets('limpiezacompleta', 'Ejecutando limpieza completa (Imp→Acab, Acab→Emp, Muestras→Emp)');
+        }
 
         async function testScriptUrl() {
             if (!cfg.scriptUrl) { showToast('⚠️ Ingresa la URL del Script primero'); return; }
@@ -1660,10 +1664,102 @@ function migrarMuestras(ss){
   return'OK:'+n+' muestras migradas';
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────
+function findCol(h,...n){return h.findIndex(x=>n.map(v=>v.toLowerCase()).includes(x.toLowerCase().trim()));}
+function fmtDate(d){if(!d)return'';try{return Utilities.formatDate(new Date(d),Session.getScriptTimeZone(),'dd/MM/yyyy HH:mm:ss');}catch(e){return'';}}
+function calcTiempo(d1,d2){try{const ms=new Date(d2)-new Date(d1);if(ms<0||!d1)return'';return Math.floor(ms/3600000)+'h '+Math.floor((ms%3600000)/60000)+'m';}catch(e){return'';}}
+
+// ── Impresion org listo=TRUE → Acabado org + log ──────────────────────
+function limpiezaImpresion(ss){
+  const src=ss.getSheets().find(s=>s.getName().trim()==='Impresion org');
+  const dst=ss.getSheets().find(s=>s.getName().trim()==='Acabado org');
+  const log=ss.getSheets().find(s=>s.getName().trim()==='Log eliminados - Impresion org');
+  if(!src||!dst)return 0;
+  const data=src.getDataRange().getValues();if(data.length<=1)return 0;
+  const h=data[0].map(x=>x.toString().toLowerCase().trim());
+  const ciL=findCol(h,'listo','done','ready');if(ciL<0)return 0;
+  const ciI=findCol(h,'# item','#item','item');
+  const ciN=findCol(h,'nombre','name','titulo');
+  const ciH=findCol(h,'hoy','fecha subida','fecha entrada','fecha');
+  const now=new Date();let n=0;
+  for(let i=data.length-1;i>=1;i--){
+    if(data[i][ciL]?.toString().toLowerCase()!=='true')continue;
+    const item=ciI>=0?data[i][ciI]?.toString().trim():'';
+    const nombre=ciN>=0?data[i][ciN]?.toString().trim():'';
+    const sub=ciH>=0?data[i][ciH]:null;
+    if(log)log.appendRow([item,nombre,sub?fmtDate(sub):'',fmtDate(now),calcTiempo(sub,now)]);
+    dst.appendRow(data[i]);src.deleteRow(i+1);n++;
+  }
+  return n;
+}
+
+// ── Acabado org listo=TRUE → Empacado + log ───────────────────────────
+function limpiezaAcabados(ss){
+  const src=ss.getSheets().find(s=>s.getName().trim()==='Acabado org');
+  const dst=ss.getSheets().find(s=>s.getName().trim()==='Empacado');
+  const log=ss.getSheets().find(s=>s.getName().trim()==='Log eliminados - Acabado org');
+  if(!src)return 0;
+  const data=src.getDataRange().getValues();if(data.length<=1)return 0;
+  const h=data[0].map(x=>x.toString().toLowerCase().trim());
+  const ciL=findCol(h,'listo','done','ready');if(ciL<0)return 0;
+  const ciI=findCol(h,'# item','#item','item');
+  const ciN=findCol(h,'nombre','name','titulo');
+  const ciH=findCol(h,'hoy','fecha subida','fecha entrada','fecha');
+  const now=new Date();let n=0;
+  for(let i=data.length-1;i>=1;i--){
+    if(data[i][ciL]?.toString().toLowerCase()!=='true')continue;
+    const item=ciI>=0?data[i][ciI]?.toString().trim():'';
+    const nombre=ciN>=0?data[i][ciN]?.toString().trim():'';
+    const sub=ciH>=0?data[i][ciH]:null;
+    if(log)log.appendRow([item,nombre,sub?fmtDate(sub):'',fmtDate(now),calcTiempo(sub,now)]);
+    if(dst)dst.appendRow(data[i]);src.deleteRow(i+1);n++;
+  }
+  return n;
+}
+
+// ── M imp Eliminar=TRUE → Empacado + log ─────────────────────────────
+function limpiezaMuestras(ss){
+  const src=ss.getSheets().find(s=>s.getName().trim()==='M imp');
+  const dst=ss.getSheets().find(s=>s.getName().trim()==='Empacado');
+  const log=ss.getSheets().find(s=>s.getName().trim()==='Log eliminados - M Imp');
+  if(!src)return 0;
+  const data=src.getDataRange().getValues();if(data.length<=1)return 0;
+  const h=data[0].map(x=>x.toString().toLowerCase().trim());
+  const ciE=findCol(h,'eliminar','procesado','terminado','done');if(ciE<0)return 0;
+  const now=new Date();
+  const LC=['fecha ingreso','entrega','# item','# order','group name','description','type','status','terminado','email','id dm','acabados','papel','hojas','up (pz tab)','procesado','eliminar','urgencia','p_o','color_bn','maquina'];
+  let n=0;
+  for(let i=data.length-1;i>=1;i--){
+    if(data[i][ciE]?.toString().toLowerCase()!=='true')continue;
+    if(log)log.appendRow([...LC.map(c=>{const ci=findCol(h,c);return ci>=0?data[i][ci]:'';}),fmtDate(now)]);
+    if(dst)dst.appendRow(data[i]);
+    src.deleteRow(i+1);n++;
+  }
+  return n;
+}
+
+// ── limpiezaCompleta — para el trigger automático cada 20 min ─────────
+function limpiezaCompleta(){
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(10000)){Logger.log('En uso por otra instancia');return;}
+  try{
+    const ss=SpreadsheetApp.getActiveSpreadsheet();
+    Logger.log('Limpieza: imp='+limpiezaImpresion(ss)+' acab='+limpiezaAcabados(ss)+' muestras='+limpiezaMuestras(ss));
+  }catch(e){Logger.log('Error: '+e.message);}finally{lock.releaseLock();}
+}
+
+// ── Ejecutar UNA VEZ desde el editor de Apps Script para activar el trigger ──
+function configurarTrigger(){
+  ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==='limpiezaCompleta').forEach(t=>ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('limpiezaCompleta').timeBased().everyMinutes(20).create();
+  Logger.log('✅ Trigger activo: limpiezaCompleta cada 20 minutos');
+}
+
 function doGet_acciones(ss,action){
   if(action==='moverlistos')return r(moverListos(ss));
   if(action==='migrarmuestras')return r(migrarMuestras(ss));
   if(action==='borrarlistos')return r(borrarListos(ss));
+  if(action==='limpiezacompleta'){return r('OK:imp='+limpiezaImpresion(ss)+',acab='+limpiezaAcabados(ss)+',muestras='+limpiezaMuestras(ss));}
   return null;
 }
 
@@ -1676,9 +1772,13 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           <button onclick="runMoverListos()" style="padding:7px 14px;border-radius:8px;border:1px solid #166534;background:#052e16;color:#4ade80;font-weight:700;font-size:13px;cursor:pointer">✅ Mover todos los listo=TRUE → Acabados</button>
           <button onclick="runMigrarMuestras()" style="padding:7px 14px;border-radius:8px;border:1px solid #5b21b6;background:#1a0040;color:#c084fc;font-weight:700;font-size:13px;cursor:pointer">🔬 Rescatar muestras de M Acab → M imp</button>
           <button onclick="runBorrarListos()" style="padding:7px 14px;border-radius:8px;border:1px solid #7f1d1d;background:#2d0a0a;color:#f87171;font-weight:700;font-size:13px;cursor:pointer">🗑️ Borrar listo=TRUE + limpiar Acabados</button>
-          <button onclick="if(!cfg.scriptUrl){showToast('⚠️ Configura URL del script');return;}fetch(cfg.scriptUrl+'?action=limpiar',{mode:'no-cors'}).catch(()=>{});showToast('🧹 Limpiando Acabado org...')" style="padding:7px 14px;border-radius:8px;border:1px solid #1d4ed8;background:#0a1f3f;color:#60a5fa;font-weight:700;font-size:13px;cursor:pointer">🧹 Limpiar Acabados</button>
+          <button onclick="runLimpiezaCompleta()" style="padding:7px 14px;border-radius:8px;border:1px solid #d97706;background:#1c0f00;color:#fbbf24;font-weight:700;font-size:13px;cursor:pointer">🔁 Limpieza completa (Imp→Acab, Acab→Emp, Muestras→Emp)</button>
         </div>
         <div id="accion-log" style="min-height:18px;font-size:12px;color:#94a3b8;margin-top:8px"></div>
+        <div style="margin-top:10px;padding:8px 10px;background:#0d1f0d;border:1px solid #1a3a1a;border-radius:8px;font-size:11px;color:#86efac;line-height:1.6">
+          <strong>⏱ Trigger automático:</strong> Para que la limpieza corra sola cada 20 min, abre el editor de Apps Script → ejecuta la función <code style="background:#0a2e0a;padding:1px 5px;border-radius:4px">configurarTrigger()</code> una sola vez.<br>
+          Flujo: <strong>Impresion org</strong> (listo=TRUE) → <em>log</em> + <strong>Acabado org</strong> &nbsp;|&nbsp; <strong>Acabado org</strong> (listo=TRUE) → <em>log</em> + <strong>Empacado</strong> &nbsp;|&nbsp; <strong>M imp</strong> (Eliminar=TRUE) → <em>log</em> + <strong>Empacado</strong>
+        </div>
       </div>
       <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap">
         <div style="display:flex;gap:6px">
