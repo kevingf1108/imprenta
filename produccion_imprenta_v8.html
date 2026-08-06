@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.994';
+        const APP_VERSION = 'v8.995';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -640,6 +640,14 @@
                     cfg = data.cfg ? { ...JSON.parse(JSON.stringify(CFG0)), ...data.cfg } : JSON.parse(JSON.stringify(CFG0));
                     const rawSH = data.statsHistory;
                     statsHistory = rawSH ? (Array.isArray(rawSH) ? rawSH : Object.values(rawSH)).filter(Boolean) : [];
+                    // Migrar portadas a grueso (ordId termina en -P o título empieza con PORT)
+                    let _migrated = false;
+                    statsHistory.forEach(r => {
+                        if (r.gramaje !== 'grueso' && ((r.ordId||'').endsWith('-P') || (r.titulo||'').toUpperCase().startsWith('PORT'))) {
+                            r.gramaje = 'grueso'; _migrated = true;
+                        }
+                    });
+                    if (_migrated) saveS();
                     const rawH = data.historial;
                     historial = rawH ? (Array.isArray(rawH) ? rawH : Object.values(rawH)).filter(Boolean) : [];
                     etapaMap = data.etapaMap || {};
