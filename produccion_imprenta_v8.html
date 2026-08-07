@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.998';
+        const APP_VERSION = 'v8.999';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -3411,8 +3411,20 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const url = cfg.scanLogUrl || cfg.scriptUrl;
             if (!url) { showToast('⚠️ Configura URL del script en ⚙️ Configuración'); return; }
             const clean = scanStr.replace(/%W/g, '|');
-            fetch(`${url}?scan=${encodeURIComponent(clean)}`, { mode: 'no-cors' }).catch(() => { });
-            showToast('📊 Enviado: ' + clean);
+            showToast('⏳ Registrando en hoja...', 3500);
+            const ctrl = new AbortController();
+            const tid = setTimeout(() => ctrl.abort(), 12000);
+            fetch(`${url}?scan=${encodeURIComponent(clean)}`, { signal: ctrl.signal })
+                .then(r => { clearTimeout(tid); return r.text(); })
+                .then(txt => {
+                    const ok = txt && !txt.toUpperCase().includes('ERROR');
+                    showToast(ok ? '✅ Registrado: ' + clean : '❌ Error al registrar: ' + txt.substring(0, 80), ok ? 3000 : 7000);
+                })
+                .catch(err => {
+                    clearTimeout(tid);
+                    const msg = err.name === 'AbortError' ? 'Sin respuesta (>12s)' : err.message;
+                    showToast('❌ No se registró en Sheets: ' + msg, 7000);
+                });
         }
 
         function sendMaqScanToSheets(scanStr) {
