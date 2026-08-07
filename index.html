@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.997';
+        const APP_VERSION = 'v8.998';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -688,14 +688,14 @@
         function e(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
         function mStr(m) { m = Math.round(m); if (m < 60) return m + ' min'; const h = Math.floor(m / 60), r = m % 60; return r ? `${h}h ${r}m` : `${h}h`; }
         function fDate(s) { if (!s) return '—'; return new Date(s + 'T12:00:00').toLocaleDateString('es', { day: '2-digit', month: 'short' }); }
-        function isOD(s) { return s && new Date(s + 'T23:59:59') < new Date(); }
-        function isSoon(s) { if (!s || isOD(s)) return false; const l = new Date(); l.setDate(l.getDate() + 2); return new Date(s + 'T23:59:59') <= l; }
+        function isOD(s) { return s && new Date(s + 'T14:30:00') < new Date(); }
+        function isSoon(s) { if (!s || isOD(s)) return false; const l = new Date(); l.setDate(l.getDate() + 2); return new Date(s + 'T14:30:00') <= l; }
         function nextId() { const ns = orders.map(o => parseInt(o.id.replace(/\D/g, ''), 10)).filter(n => !isNaN(n)); return `ORD-${String((ns.length ? Math.max(...ns) : 0) + 1).padStart(3, '0')}`; }
         function nextGrpId() { const ns = orders.filter(o => o.grupoId).map(o => parseInt(o.grupoId.replace('GRP-', ''), 10)).filter(n => !isNaN(n)); return `GRP-${String((ns.length ? Math.max(...ns) : 0) + 1).padStart(2, '0')}`; }
         function encOf(id) { return TIPOS_ENC.find(t => t.id === id) || TIPOS_ENC[0]; }
         function etOf(id) { return ETAPAS.find(et => et.id === id) || ACAB_STEPS.find(s => s.id === id) || ETAPAS[0]; }
         function addDias(base, totMin, hpd) { const mpd = hpd * 60, d = Math.ceil(totMin / mpd); const dt = new Date(base); let n = 0; while (n < d) { dt.setDate(dt.getDate() + 1); if (dt.getDay() && dt.getDay() < 6) n++; } return dt; }
-        function prioSort(a, b) { if (a.urgente && !b.urgente) return -1; if (!a.urgente && b.urgente) return 1; const od = x => isOD(x.fechaLimite) ? 0 : isSoon(x.fechaLimite) ? 1 : 2; if (od(a) !== od(b)) return od(a) - od(b); if (a.fechaLimite && b.fechaLimite) return a.fechaLimite.localeCompare(b.fechaLimite); return 0; }
+        function prioSort(a, b) { const fa = a.fechaLimite || 'z', fb = b.fechaLimite || 'z'; if (fa !== fb) return fa < fb ? -1 : 1; if (a.urgente !== b.urgente) return a.urgente ? -1 : 1; return 0; }
 
         // ═══════════════════════════════════════════════════
         //  CÁLCULO DE TIEMPOS — consciente del tipo de orden
