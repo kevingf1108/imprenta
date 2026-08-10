@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.9992';
+        const APP_VERSION = 'v8.9993';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -582,6 +582,7 @@
             nombreImprenta: 'Mi Imprenta', horasDia: 10, startHour: 8, pptDefault: 8, portaPptDefault: 2,
             bufferFactor: 1.3, calibRangeMin: 0.5, calibRangeMax: 2.0,
             scriptUrl: '', // URL del Google Apps Script Web App para marcar Listo en Sheets
+            scriptToken: '', // Clave secreta — debe coincidir con la constante TOKEN dentro del Apps Script
             maq: {
                 byn_fast: 150, byn_slow: 80, color_normal: 50, color_grueso: 25, color_slow_n: 40, color_slow_g: 20,
                 corteInicial: 200, plast_vel: 5, plast_hoja: 0.475,
@@ -1161,11 +1162,16 @@
         }
 
         // Actualiza Status + "Fecha queue" en el spreadsheet de tracking externo
+        function scriptURLBase(base, qsNoQ) {
+            return base + '?' + qsNoQ + (cfg.scriptToken ? '&token=' + encodeURIComponent(cfg.scriptToken) : '');
+        }
+        function scriptURL(qsNoQ) { return scriptURLBase(cfg.scriptUrl, qsNoQ); }
+
         function callTracking(order, toEtapa) {
             if (!cfg.scriptUrl) return;
             const item = encodeURIComponent(String(order.grupoId || order.id).replace(/-[MAPm]$/, '').trim());
             const etapaTracking = order._isMuestra ? 'M ' + toEtapa : toEtapa;
-            fetch(cfg.scriptUrl + '?action=updateTracking&item=' + item + '&etapa=' + encodeURIComponent(etapaTracking) + '&trackingId=' + encodeURIComponent(TRACKING_SHEET_ID), { mode: 'no-cors' }).catch(() => { });
+            fetch(scriptURL('action=updateTracking&item=' + item + '&etapa=' + encodeURIComponent(etapaTracking) + '&trackingId=' + encodeURIComponent(TRACKING_SHEET_ID)), { mode: 'no-cors' }).catch(() => { });
         }
 
         // Marca Listo=TRUE en Google Sheets cuando se avanza una orden
@@ -1177,9 +1183,9 @@
             if (order._isMuestra && order.grupoId) {
                 const it = encodeURIComponent(String(order.grupoId).replace(/-M$/, '').trim());
                 if (toEtapa === 'listo') {
-                    fetch(cfg.scriptUrl + '?action=marcarProcesado&item=' + it, { mode: 'no-cors' }).catch(() => { });
+                    fetch(scriptURL('action=marcarProcesado&item=' + it), { mode: 'no-cors' }).catch(() => { });
                 } else {
-                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa) + '&hoja=muestras', { mode: 'no-cors' }).catch(() => { });
+                    fetch(scriptURL('action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa) + '&hoja=muestras'), { mode: 'no-cors' }).catch(() => { });
                 }
                 return;
             }
@@ -1187,11 +1193,11 @@
             if (order.tipo === 'union_result' && order.grupoId) {
                 const it = encodeURIComponent(String(order.grupoId).trim());
                 if (toEtapa === 'empaque') {
-                    fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + it, { mode: 'no-cors' }).catch(() => { });
+                    fetch(scriptURL('action=moverAempacado&item=' + it), { mode: 'no-cors' }).catch(() => { });
                 } else if (toEtapa === 'listo') {
-                    fetch(cfg.scriptUrl + '?action=marcarListo&item=' + it + '&hoja=acabados', { mode: 'no-cors' }).catch(() => { });
+                    fetch(scriptURL('action=marcarListo&item=' + it + '&hoja=acabados'), { mode: 'no-cors' }).catch(() => { });
                 } else if (isAcabEtapa(toEtapa)) {
-                    fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa), { mode: 'no-cors' }).catch(() => { });
+                    fetch(scriptURL('action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa)), { mode: 'no-cors' }).catch(() => { });
                 }
                 return;
             }
@@ -1205,24 +1211,24 @@
 
             // Sale de Impresión hacia Acabados → mover fila de Impresion org a Acabado org
             if (fromEtapa === 'impresion' && isAcabEtapa(toEtapa)) {
-                fetch(cfg.scriptUrl + '?action=moverAacabados&item=' + encodeURIComponent(item) + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => { });
+                fetch(scriptURL('action=moverAacabados&item=' + encodeURIComponent(item) + (po ? '&po=' + po : '')), { mode: 'no-cors' }).catch(() => { });
                 // Pre-registrar posición para la orden union_result que aparecerá en el próximo sync
                 etapaMap[item + '-A'] = toEtapa;
                 return;
             }
             // Llega a Empaque → mover fila de Acabado org a Empacado
             if (toEtapa === 'empaque') {
-                fetch(cfg.scriptUrl + '?action=moverAempacado&item=' + encodeURIComponent(item), { mode: 'no-cors' }).catch(() => { });
+                fetch(scriptURL('action=moverAempacado&item=' + encodeURIComponent(item)), { mode: 'no-cors' }).catch(() => { });
                 return;
             }
             // Llega a Listo → eliminar de Acabado org / Empacado
             if (toEtapa === 'listo') {
-                fetch(cfg.scriptUrl + '?action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=' + hoja + (po ? '&po=' + po : ''), { mode: 'no-cors' }).catch(() => { });
+                fetch(scriptURL('action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=' + hoja + (po ? '&po=' + po : '')), { mode: 'no-cors' }).catch(() => { });
                 return;
             }
             // Movimiento dentro de Acabados → actualizar etapa_actual en Acabado org
             if (isAcabEtapa(toEtapa)) {
-                fetch(cfg.scriptUrl + '?action=updateEtapa&item=' + encodeURIComponent(item) + '&etapa=' + encodeURIComponent(toEtapa), { mode: 'no-cors' }).catch(() => { });
+                fetch(scriptURL('action=updateEtapa&item=' + encodeURIComponent(item) + '&etapa=' + encodeURIComponent(toEtapa)), { mode: 'no-cors' }).catch(() => { });
             }
         }
         function markListoInSheets(order, fromEtapa) { callScript(order, 'listo', fromEtapa); }
@@ -1232,7 +1238,7 @@
             const log = document.getElementById('accion-log');
             if (log) log.textContent = '⏳ ' + label + '...';
             try {
-                await fetch(cfg.scriptUrl + '?action=' + action, { mode: 'no-cors' });
+                await fetch(scriptURL('action=' + action), { mode: 'no-cors' });
                 if (log) log.innerHTML = '<span style="color:#4ade80">✅ ' + label + ' — listo. Sincroniza para ver los cambios.</span>';
                 showToast('✅ ' + label);
             } catch {
@@ -1255,7 +1261,7 @@
             if (!cfg.scriptUrl) { showToast('⚠️ Ingresa la URL del Script primero'); return; }
             showToast('🔄 Probando URL del script...');
             try {
-                const r = await fetch(cfg.scriptUrl + '?test=1');
+                const r = await fetch(scriptURL('test=1'));
                 const txt = await r.text();
                 showToast('✅ Script responde: ' + txt.substring(0, 60));
             } catch {
@@ -1456,12 +1462,20 @@
         <div style="font-size:11px;color:#64748b;line-height:1.7">
           1. Abre tu Google Sheet → <b style="color:#94a3b8">Extensiones → Apps Script</b><br>
           2. Borra todo el código y pega el script que está abajo<br>
-          3. <b style="color:#94a3b8">Implementar → Nueva implementación → App web</b><br>
-          4. "Ejecutar como": <b style="color:#94a3b8">Yo</b> · "Quién tiene acceso": <b style="color:#94a3b8">Cualquier usuario</b><br>
-          5. Copia la URL y pégala en <b style="color:#94a3b8">⚙️ Configuración → URL Apps Script</b>
+          3. <b style="color:#ef4444">Cambia la constante TOKEN</b> (primera línea de doGet) por una clave larga y única, solo tuya<br>
+          4. <b style="color:#94a3b8">Implementar → Nueva implementación → App web</b><br>
+          5. "Ejecutar como": <b style="color:#94a3b8">Yo</b> · "Quién tiene acceso": <b style="color:#94a3b8">Cualquier usuario</b><br>
+          6. Copia la URL y pégala en <b style="color:#94a3b8">⚙️ Configuración → URL Apps Script</b><br>
+          7. Pega esa <b style="color:#ef4444">misma clave</b> en <b style="color:#94a3b8">⚙️ Configuración → 🔒 Token secreto del script</b><br>
+          <span style="color:#f87171">⚠️ Si ya tenías un script publicado sin token, todas las acciones fallarán con "token invalido" hasta que actualices ambos lados.</span>
         </div>
         <div style="margin-top:10px;background:#020617;border-radius:6px;padding:10px;font-size:11px;color:#4ade80;font-family:monospace;white-space:pre-wrap;max-height:220px;overflow-y:auto">function doGet(e){
   try{
+    // Cambia esto por una clave larga y única, y pega la MISMA clave en
+    // ⚙️ Configuración → 🔒 Token secreto del script. Sin esto, cualquiera
+    // con esta URL podría borrar o modificar tus hojas.
+    const TOKEN='CAMBIA_ESTO_POR_TU_CLAVE_SECRETA';
+    if((e.parameter.token||'')!==TOKEN)return r('ERROR:token invalido');
     const ss=SpreadsheetApp.getActiveSpreadsheet();
     const action=(e.parameter.action||'marcarListo').toLowerCase();
     const item=(e.parameter.item||'').toString().trim();
@@ -3121,6 +3135,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           <button onclick="testScriptUrl()" style="padding:7px 12px;border-radius:8px;border:1px solid #166534;background:#0a2e1a;color:#4ade80;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap">🔌 Probar</button>
         </div>
         <div style="font-size:11px;color:#475569;margin-top:6px">Cuando avances una orden con ▶, automáticamente marcará <b style="color:#4ade80">Listo = TRUE</b> en tu hoja de Google Sheets y enviará a Acabado org.</div>
+        <span class="lbl" style="margin-top:12px;color:#ef4444">🔒 Token secreto del script</span>
+        <input class="inp" placeholder="Clave larga, cualquier texto único" value="${e(cfg.scriptToken || '')}" oninput="cfg.scriptToken=this.value;saveS()">
+        <div style="font-size:11px;color:#475569;margin-top:6px">Debe ser <b style="color:#ef4444">exactamente igual</b> a la constante <b>TOKEN</b> dentro del Apps Script (ver botón 🔄 Sheets). Sin esto, cualquiera con la URL del script podría borrar o modificar tus hojas.</div>
         <span class="lbl" style="margin-top:12px;color:#f59e0b">URL Script — Log HE / DI / KE / IS / AD / T (Empacado)</span>
         <input class="inp" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.scanLogUrl || '')}" oninput="cfg.scanLogUrl=this.value;saveS()">
         <div style="font-size:11px;color:#475569;margin-top:6px">Al escanear <b style="color:#f59e0b">HE</b>, <b style="color:#f59e0b">DI</b>, <b style="color:#f59e0b">KE</b>, <b style="color:#f59e0b">IS</b>, <b style="color:#f59e0b">AD</b> o <b style="color:#f59e0b">T</b>, manda el scan a este script. No mueve ninguna orden.</div>
@@ -3444,7 +3461,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             showToast('⏳ Registrando en hoja...', 3500);
             const ctrl = new AbortController();
             const tid = setTimeout(() => ctrl.abort(), 12000);
-            fetch(`${url}?scan=${encodeURIComponent(clean)}`, { signal: ctrl.signal })
+            fetch(scriptURLBase(url, 'scan=' + encodeURIComponent(clean)), { signal: ctrl.signal })
                 .then(r => { clearTimeout(tid); return r.text(); })
                 .then(txt => {
                     const ok = txt && !txt.toUpperCase().includes('ERROR');
@@ -3461,7 +3478,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const url = cfg.maqScanUrl || cfg.scanLogUrl || cfg.scriptUrl;
             if (!url) { showToast('⚠️ Configura URL Script Máquinas en ⚙️ Configuración'); return; }
             const clean = scanStr.replace(/%W/g, '|');
-            fetch(`${url}?action=maqscan&scan=${encodeURIComponent(clean)}`, { mode: 'no-cors' }).catch(() => { });
+            fetch(scriptURLBase(url, 'action=maqscan&scan=' + encodeURIComponent(clean)), { mode: 'no-cors' }).catch(() => { });
             showToast('🖨️ Máquina registrada: ' + clean);
         }
 
