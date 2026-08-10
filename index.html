@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.9993';
+        const APP_VERSION = 'v8.9994';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -617,10 +617,6 @@
         let searchQ = '';
         let autoSync = false, _autoSyncInt = null, _syncing = false, _fbReady = false;
 
-        // URLs pre-configuradas de Google Sheets
-        const SHEET_IMP = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIlfUFRnj_VYEvovfEKY4Gj44uRgb1VOr9VVc3F1tlS2aHwHA4pJ-vib1SbHhJq0pR_PbHSs853ImS/pub?gid=438428152&single=true&output=csv';
-        const SHEET_ACAB = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIlfUFRnj_VYEvovfEKY4Gj44uRgb1VOr9VVc3F1tlS2aHwHA4pJ-vib1SbHhJq0pR_PbHSs853ImS/pub?gid=1109183930&single=true&output=csv';
-        const SHEET_MUESTRAS = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIlfUFRnj_VYEvovfEKY4Gj44uRgb1VOr9VVc3F1tlS2aHwHA4pJ-vib1SbHhJq0pR_PbHSs853ImS/pub?gid=237903557&single=true&output=csv';
         const TRACKING_SHEET_ID = '1eETCQFaBl3Ae4iPhW1uejUsEm6JO8tvMg2Qy3H5UjAc';
 
         function loadS() {
@@ -1288,27 +1284,25 @@
             if (log) log.textContent = '⏳ Conectando con Google Sheets...';
 
             try {
-                // Intenta varios proxies CORS en orden hasta que uno funcione
-                // Añade timestamp para evitar que el proxy devuelva datos cacheados
-                async function fetchCSV(url) {
-                    const bust = url + (url.includes('?') ? '&' : '?') + '_cb=' + Date.now();
-                    const proxies = [
-                        u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-                        u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-                        u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-                    ];
-                    for (const mk of proxies) {
-                        try {
-                            const r = await fetch(mk(bust), { cache: 'no-cache' });
-                            if (r && r.ok) return r;
-                        } catch { }
-                    }
+                if (!cfg.scriptUrl) {
+                    if (log) log.innerHTML = '<span style="color:#ef4444">❌ Configura la URL del Apps Script primero (⚙️ Configuración).</span>';
+                    if (btn) btn.disabled = false;
+                    _syncing = false;
+                    return;
+                }
+                // Lee cada hoja directo desde tu propio Apps Script (acción "exportsheet") —
+                // ya no depende de que las hojas estén publicadas al público ni de proxies CORS externos.
+                async function fetchCSV(hoja) {
+                    try {
+                        const r = await fetch(scriptURL('action=exportsheet&hoja=' + hoja), { cache: 'no-cache' });
+                        if (r && r.ok) return r;
+                    } catch { }
                     return null;
                 }
                 const [respImp, respAcab, respMuestras] = await Promise.all([
-                    fetchCSV(SHEET_IMP),
-                    fetchCSV(SHEET_ACAB),
-                    fetchCSV(SHEET_MUESTRAS),
+                    fetchCSV('impresion'),
+                    fetchCSV('acabados'),
+                    fetchCSV('muestras'),
                 ]);
 
                 let newOrders = [];
@@ -1443,11 +1437,11 @@
         <button class="bico" onclick="closeSync()" style="font-size:20px;color:#94a3b8">✕</button>
       </div>
       <div style="background:#0f172a;border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px">
-        <div style="color:#60a5fa;font-weight:700;margin-bottom:8px">📋 Hojas configuradas:</div>
-        <div style="color:#94a3b8;margin-bottom:4px">🖨️ <b style="color:#fb923c">Impresión</b> — gid=438428152</div>
-        <div style="color:#94a3b8;margin-bottom:4px">✂️ <b style="color:#c084fc">Acabados</b> — gid=1109183930</div>
-        <div style="color:#94a3b8">🔬 <b style="color:#86efac">Muestras</b> — gid=237903557</div>
-        <div style="color:#475569;font-size:11px;margin-top:8px">Las URLs están guardadas en el sistema. Para cambiarlas edita las constantes SHEET_IMP / SHEET_ACAB / SHEET_MUESTRAS en ⚙️ Configuración.</div>
+        <div style="color:#60a5fa;font-weight:700;margin-bottom:8px">📋 Hojas leídas (vía tu Apps Script, con token):</div>
+        <div style="color:#94a3b8;margin-bottom:4px">🖨️ <b style="color:#fb923c">Impresión</b> — hoja "Impresion org"</div>
+        <div style="color:#94a3b8;margin-bottom:4px">✂️ <b style="color:#c084fc">Acabados</b> — hoja "Acabado org"</div>
+        <div style="color:#94a3b8">🔬 <b style="color:#86efac">Muestras</b> — hoja "M Imp"</div>
+        <div style="color:#475569;font-size:11px;margin-top:8px">Ya no dependen de que las hojas estén "publicadas al público" — se leen directo con tu Apps Script (acción "exportsheet"), protegidas por tu token.</div>
       </div>
       <div style="background:#0a1f0a;border-radius:10px;padding:12px;margin-bottom:16px;font-size:12px;color:#64748b">
         <b style="color:#4ade80">Cómo funciona:</b><br>
