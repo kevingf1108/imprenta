@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.999';
+        const APP_VERSION = 'v8.9991';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -3283,8 +3283,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             // grupo:true  → 5 dígitos, mueve todo el grupo (pegado y después)
             // grupo:false → 6 dígitos exactos, mueve SOLO esa orden (impresión, CI, plastificado…)
             const esGrupo = proc ? !!proc.grupo : false;
-            // Tomar solo el primer grupo continuo de dígitos (ignora %W y otros caracteres del escáner)
-            const digits6 = (ordId.match(/\d+/) || [''])[0] || ordId.replace(/\D/g, '');
+            // Tomar solo los primeros 6 dígitos (ignora %W, sufijos del escáner como 0013, etc.)
+            const digits6 = ((ordId.match(/\d+/) || [''])[0] || ordId.replace(/\D/g, '')).slice(0, 6);
             const prefix5 = digits6.slice(0, 5);
 
             let matches;
