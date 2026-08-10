@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.9991';
+        const APP_VERSION = 'v8.9992';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -843,6 +843,32 @@
 
         // Revisa si algún grupo tiene ambas (INT + PORT) en Acabados y las une automáticamente
         function autoMergeCheck() { return false; } // Desactivado — INT y PORT se mueven por separado
+
+        // Cuando una orden llega a empaque o listo, mueve automáticamente todas las
+        // órdenes que comparten los mismos primeros 5 dígitos de ID al mismo destino.
+        function autoGroupFinish(triggerId, newEtapa) {
+            if (newEtapa !== 'empaque' && newEtapa !== 'listo') return;
+            const p5 = triggerId.replace(/\D/g, '').slice(0, 5);
+            if (p5.length < 5) return;
+            const hermanas = orders.filter(o =>
+                o.id !== triggerId && !o._merged && o.etapa !== 'listo' &&
+                o.id.replace(/\D/g, '').slice(0, 5) === p5
+            );
+            if (!hermanas.length) return;
+            hermanas.forEach(o => {
+                const i = orders.findIndex(x => x.id === o.id);
+                if (i < 0) return;
+                orders[i] = { ...orders[i], etapa: newEtapa };
+                etapaMap[o.id] = newEtapa;
+                if (newEtapa === 'listo') {
+                    delete etapaMap[o.id];
+                    clearOrderTimers(o.id);
+                    pushHistorial(orders[i]);
+                }
+            });
+            const dest = newEtapa === 'listo' ? 'Listo ✓' : 'Empaque';
+            showToast('📦 Grupo completo: ' + hermanas.map(o => o.titulo.substring(0, 14)).join(', ') + ' → ' + dest, 4000);
+        }
 
         // ═══════════════════════════════════════════════════
         //  SCHEDULER PARA GANTT
@@ -1856,6 +1882,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             orders[idx] = { ...orders[idx], etapa: colId };
             etapaMap[_dragId] = colId;
             if (colId === 'listo') { delete etapaMap[_dragId]; clearOrderTimers(_dragId); pushHistorial(orders[idx]); }
+            autoGroupFinish(_dragId, colId);
             callScript(orders[idx], colId, fromEtapa);
             autoMergeCheck(); saveS(); render();
             _dragId = null;
@@ -3164,6 +3191,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 orders[idx] = { ...orders[idx], etapa: target.id };
                 etapaMap[id] = target.id;
                 if (target.id === 'listo') { delete etapaMap[id]; clearOrderTimers(id); pushHistorial(orders[idx]); }
+                autoGroupFinish(id, target.id);
                 callScript(orders[idx], target.id, fromEtapa);
                 autoMergeCheck(); saveS(); render(); return;
             }
@@ -3172,6 +3200,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             orders[idx] = { ...orders[idx], etapa: flow[ni].id };
             etapaMap[id] = flow[ni].id;
             if (flow[ni].id === 'listo') { delete etapaMap[id]; clearOrderTimers(id); pushHistorial(orders[idx]); }
+            autoGroupFinish(id, flow[ni].id);
             callScript(orders[idx], flow[ni].id, fromEtapa);
             autoMergeCheck();
             saveS(); render();
@@ -3393,6 +3422,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 orders[idx] = { ...orders[idx], etapa: nextStep.id };
                 etapaMap[o.id] = nextStep.id;
                 if (nextStep.id === 'listo') { delete etapaMap[o.id]; pushHistorial(orders[idx]); }
+                autoGroupFinish(o.id, nextStep.id);
                 callScript(orders[idx], nextStep.id, fromEtapa);
                 if (proc && proc.logScan) fetchLastSalidaRow(proc.label);
                 movedLabels.push(nextStep.label);
