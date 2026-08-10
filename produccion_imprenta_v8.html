@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.9994';
+        const APP_VERSION = 'v8.9995';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -981,7 +981,14 @@
                     });
                 });
             });
-            return { blocks, colorMap };
+            // finishMin: minutos desde ahora hasta que cada orden termina TODO lo que le falta —
+            // ya respeta máquinas en paralelo, orden de prioridad real y grupos hermanos.
+            const finishMin = {};
+            sorted.forEach(o => {
+                const st = ordState[o.id];
+                finishMin[o.id] = Math.max(st.intEnd, st.portEnd, st.mainEnd);
+            });
+            return { blocks, colorMap, finishMin };
         }
 
         // ═══════════════════════════════════════════════════
@@ -1976,36 +1983,15 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             return impMin + acabMin + empMin;
         }
 
-        // ETA de una orden: cola de su misma fase + tiempo total restante propio
-        function calcETA(o) {
+        // ETA de una orden — usa el mismo scheduler del Gantt (scheduleMachines), así que respeta
+        // máquinas en paralelo (varias impresoras a la vez) y el orden real de prioridad (prioSort),
+        // en vez de sumar la cola completa como si todo fuera una sola fila.
+        // finishMin: mapa precalculado por scheduleMachines(orders, cfg) — pásalo cuando ya lo tengas
+        // calculado (ej. una vez por render de tablero) para no recalcular el scheduler por cada tarjeta.
+        function calcETA(o, finishMin) {
             const bf = cfg.bufferFactor || 1.0;
-            let qMin;
-            if (isAcabEtapa(o.etapa)) {
-                // Acabados: contar órdenes que comparten la misma máquina física, usando minutos reales restantes
-                const myStepId = o.etapa.replace('acab_', '');
-                const machsForStep = MAQUINAS.filter(m => m.steps.includes(myStepId));
-                const machCount = Math.max(machsForStep.length, 1);
-                const sharedStepIds = new Set(machsForStep.flatMap(m => m.steps));
-                qMin = orders
-                    .filter(x => x.id !== o.id && !x._merged && isAcabEtapa(x.etapa) && sharedStepIds.has(x.etapa.replace('acab_', '')))
-                    .reduce((s, x) => {
-                        const xt = calcT(x, cfg);
-                        const xFlow = getAcabFlow(x);
-                        const xCi = xFlow.indexOf(x.etapa);
-                        const xRemIds = new Set((xCi >= 0 ? xFlow.slice(xCi) : xFlow).map(sid => sid.replace('acab_', '')));
-                        return s + xt.pasos.filter(p => p.fase === 'acab' && xRemIds.has(p.id) && sharedStepIds.has(p.id)).reduce((a, p) => a + p.min, 0);
-                    }, 0) / machCount;
-            } else {
-                const myPhase = o.etapa === 'empaque' ? 'emp' : 'imp';
-                qMin = orders
-                    .filter(x => x.id !== o.id && !x._merged && x.etapa !== 'listo')
-                    .filter(x => {
-                        const xp = isAcabEtapa(x.etapa) ? 'acab' : x.etapa === 'empaque' ? 'emp' : 'imp';
-                        return xp === myPhase;
-                    })
-                    .reduce((s, x) => s + calcRemainingMin(x), 0);
-            }
-            return addDias(new Date(), (qMin + calcTotalRemaining(o)) * bf, cfg.horasDia);
+            const mins = (finishMin && finishMin[o.id] != null) ? finishMin[o.id] : scheduleMachines(orders, cfg).finishMin[o.id];
+            return addDias(new Date(), (mins ?? calcTotalRemaining(o)) * bf, cfg.horasDia);
         }
 
         // ═══════════════════════════════════════════════════
@@ -2460,9 +2446,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function boardHTML() {
             // Build visible columns: impresion + acab steps that have orders + empaque + listo
             const etapas = allEtapas(orders);
-            return `<div class="board">${etapas.map((et, ei) => colHTML(et, ei, etapas)).join('')}</div>`;
+            // Calcular el scheduler UNA sola vez por render (no por tarjeta) y pasarlo a cada columna/tarjeta
+            const finishMin = scheduleMachines(orders, cfg).finishMin;
+            return `<div class="board">${etapas.map((et, ei) => colHTML(et, ei, etapas, finishMin)).join('')}</div>`;
         }
-        function colHTML(et, ei, etapas) {
+        function colHTML(et, ei, etapas, finishMin) {
             const allTotal = orders.filter(o => o.etapa === et.id && !o._merged);
             const all = allTotal.filter(o => matchSearch(o));
             const isAcab = isAcabEtapa(et.id);
@@ -2476,7 +2464,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 body = secs.map(sec => {
                     const tamLabel = sec.tam === 'carta' ? 'Carta' : sec.tam === 'oficio' ? 'Oficio' : 'Tabloide';
                     const isByn = sec.maq.key === 'byn' || sec.maq.key === 'oce6320' || sec.maq.key === 'titan';
-                    const secCards = [...sec.items].sort(prioSort).map(o => cardHTML(o, et, ei, false, etapas, ++globalIdx)).join('');
+                    const secCards = [...sec.items].sort(prioSort).map(o => cardHTML(o, et, ei, false, etapas, ++globalIdx, finishMin)).join('');
                     return `<div style="margin:6px 0 2px;padding:4px 8px;background:${sec.maq.color}18;border-radius:6px;border-left:3px solid ${sec.maq.color}">
         <div style="font-size:10px;font-weight:700;color:${sec.maq.color}">${isByn ? '⬛' : '🎨'} ${sec.maq.label}</div>
         <div style="font-size:10px;color:#64748b">${sec.papel} · ${tamLabel} <span style="color:${sec.maq.color};font-weight:700">${sec.items.length}</span></div>
@@ -2484,7 +2472,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       ${secCards}`;
                 }).join('');
             } else {
-                body = allSorted.length === 0 ? emptyMsg : allSorted.map((o, idx) => cardHTML(o, et, ei, false, etapas, idx + 1)).join('');
+                body = allSorted.length === 0 ? emptyMsg : allSorted.map((o, idx) => cardHTML(o, et, ei, false, etapas, idx + 1, finishMin)).join('');
             }
             return `<div class="col${isAcab ? ' acab-col' : ''}" id="col_${et.id}" ondragover="onDragOver(event,'${et.id}')" ondragleave="onDragLeave(event)" ondrop="onDrop(event,'${et.id}')">
     <div class="col-hdr" style="border-color:${et.color}">
@@ -2500,7 +2488,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
   </div>`;
         }
 
-        function cardHTML(o, et, ei, compact = false, etapas, prio) {
+        function cardHTML(o, et, ei, compact = false, etapas, prio, finishMin) {
             const t = calcT(o, cfg);
             const enc = encOf(o.tipoEncuadernacion);
             const od = isOD(o.fechaLimite), sn = isSoon(o.fechaLimite);
@@ -2537,19 +2525,18 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     </div>
     ${isAcabEtapa(o.etapa) ? `<div style="margin-top:6px">${(() => { const flow = getAcabFlow(o); const ci = flow.indexOf(o.etapa); return flow.map((s, i) => { const st = ACAB_STEPS.find(x => x.id === s); return `<span title="${st ? st.label : s}" style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:2px;background:${i < ci ? '#4ade80' : i === ci ? (st ? st.color : '#f59e0b') : '#334155'}"></span>`; }).join(''); })()}</div>` : ''}
     ${(() => {
-                    const eta = calcETA(o);
+                    const eta = calcETA(o, finishMin);
                     const etaStr = fDate(eta.toISOString().split('T')[0]);
                     const late = o.fechaLimite && eta > new Date(o.fechaLimite + 'T23:59:59');
                     const etaColor = late ? '#ef4444' : '#4ade80';
                     const dlColor = od ? '#ef4444' : sn ? '#f59e0b' : '#94a3b8';
                     const dlIcon = o.urgente ? '⚡' : od ? '🔴' : sn ? '🟡' : '📅';
-                    // Desglose para tooltip
+                    // Desglose para tooltip — cola = lo que ya calculó el scheduler menos el trabajo propio de esta orden
                     const t2 = calcT(o, cfg);
                     const bf = cfg.bufferFactor || 1.0;
-                    const _ms2 = o.etapa.replace('acab_', ''), _mf2 = MAQUINAS.filter(m => m.steps.includes(_ms2)), _mc2 = Math.max(_mf2.length, 1), _ss2 = new Set(_mf2.flatMap(m => m.steps));
-                    const qMin = isAcabEtapa(o.etapa)
-                        ? orders.filter(x => x.id !== o.id && !x._merged && isAcabEtapa(x.etapa) && _ss2.has(x.etapa.replace('acab_', ''))).reduce((s, x) => { const xt = calcT(x, cfg); const xf = getAcabFlow(x); const xCi = xf.indexOf(x.etapa); const xRi = new Set((xCi >= 0 ? xf.slice(xCi) : xf).map(sid => sid.replace('acab_', ''))); return s + xt.pasos.filter(p => p.fase === 'acab' && xRi.has(p.id) && _ss2.has(p.id)).reduce((a, p) => a + p.min, 0); }, 0) / _mc2
-                        : orders.filter(x => x.id !== o.id && !x._merged && x.etapa !== 'listo').filter(x => { const xp = isAcabEtapa(x.etapa) ? 'acab' : x.etapa === 'empaque' ? 'emp' : 'imp'; return xp === (o.etapa === 'empaque' ? 'emp' : 'imp'); }).reduce((s, x) => s + calcRemainingMin(x), 0);
+                    const ownM = calcTotalRemaining(o);
+                    const totalM = (finishMin && finishMin[o.id] != null) ? finishMin[o.id] : ownM;
+                    const qMin = Math.max(0, totalM - ownM);
                     const impM = t2.pasos.filter(p => p.fase === 'imp').reduce((s, p) => s + p.min, 0);
                     const acabM = t2.pasos.filter(p => p.fase === 'acab').reduce((s, p) => s + p.min, 0);
                     const empM = t2.pasos.filter(p => p.fase === 'emp').reduce((s, p) => s + p.min, 0);
@@ -2685,30 +2672,15 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const isSplit = document.getElementById('f_split')?.checked;
             const active = orders.filter(x => x.etapa !== 'listo' && !x._merged && x.id !== modalId);
             const bf = cfg.bufferFactor || 1.0;
-            // Cola: acabados corren en paralelo por máquina, solo contar el mismo sub-paso
             const orderEtapa = existing.etapa || 'impresion';
-            let qMin;
-            if (isAcabEtapa(orderEtapa)) {
-                const _ueStep = orderEtapa.replace('acab_', '');
-                const _ueMachs = MAQUINAS.filter(m => m.steps.includes(_ueStep));
-                const _ueMc = Math.max(_ueMachs.length, 1);
-                const _ueSs = new Set(_ueMachs.flatMap(m => m.steps));
-                qMin = active.filter(x => isAcabEtapa(x.etapa) && _ueSs.has(x.etapa.replace('acab_', ''))).reduce((s, x) => {
-                    const xt = calcT(x, cfg);
-                    const xf = getAcabFlow(x);
-                    const xCi = xf.indexOf(x.etapa);
-                    const xRi = new Set((xCi >= 0 ? xf.slice(xCi) : xf).map(sid => sid.replace('acab_', '')));
-                    return s + xt.pasos.filter(p => p.fase === 'acab' && xRi.has(p.id) && _ueSs.has(p.id)).reduce((a, p) => a + p.min, 0);
-                }, 0) / _ueMc;
-            } else {
-                const myPhase = orderEtapa === 'empaque' ? 'emp' : 'imp';
-                qMin = active.filter(x => {
-                    const xp = isAcabEtapa(x.etapa) ? 'acab' : x.etapa === 'empaque' ? 'emp' : 'imp';
-                    return xp === myPhase;
-                }).reduce((s, x) => s + calcRemainingMin(x), 0);
-            }
+            // Simula esta orden dentro del scheduler real (mismas máquinas y prioridad que usa el Gantt)
+            // en vez de sumar la cola de su fase como si todo fuera una sola fila.
+            const previewOrder = { ...merged, tipo: existing.tipo || 'normal', id: existing.id || '__preview__', etapa: orderEtapa };
+            const totalM = scheduleMachines([...active, previewOrder], cfg).finishMin[previewOrder.id] ?? 0;
+            const ownM = calcTotalRemaining({ ...merged, etapa: orderEtapa });
+            const qMin = Math.max(0, totalM - ownM);
             const qDias = Math.round(qMin * bf / (cfg.horasDia * 60) * 10) / 10;
-            const fecha = addDias(new Date(), (qMin + calcTotalRemaining({ ...merged, etapa: orderEtapa })) * bf, cfg.horasDia);
+            const fecha = addDias(new Date(), totalM * bf, cfg.horasDia);
             const fmtF = fecha.toLocaleDateString('es', { weekday: 'long', day: '2-digit', month: 'long' });
             const fases = [{ id: 'imp', label: '🖨️ Impresión', color: '#fb923c' }, { id: 'acab', label: '✂️ Acabados', color: '#c084fc' }, { id: 'emp', label: '📦 Empaque', color: '#2dd4bf' }];
             const impBox = `<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:9px 10px;margin-bottom:10px;font-size:12px">
