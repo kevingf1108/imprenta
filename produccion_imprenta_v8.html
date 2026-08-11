@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.9995';
+        const APP_VERSION = 'v8.9996';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -841,31 +841,9 @@
         // Revisa si algún grupo tiene ambas (INT + PORT) en Acabados y las une automáticamente
         function autoMergeCheck() { return false; } // Desactivado — INT y PORT se mueven por separado
 
-        // Cuando una orden llega a empaque o listo, mueve automáticamente todas las
-        // órdenes que comparten los mismos primeros 5 dígitos de ID al mismo destino.
-        function autoGroupFinish(triggerId, newEtapa) {
-            if (newEtapa !== 'empaque' && newEtapa !== 'listo') return;
-            const p5 = triggerId.replace(/\D/g, '').slice(0, 5);
-            if (p5.length < 5) return;
-            const hermanas = orders.filter(o =>
-                o.id !== triggerId && !o._merged && o.etapa !== 'listo' &&
-                o.id.replace(/\D/g, '').slice(0, 5) === p5
-            );
-            if (!hermanas.length) return;
-            hermanas.forEach(o => {
-                const i = orders.findIndex(x => x.id === o.id);
-                if (i < 0) return;
-                orders[i] = { ...orders[i], etapa: newEtapa };
-                etapaMap[o.id] = newEtapa;
-                if (newEtapa === 'listo') {
-                    delete etapaMap[o.id];
-                    clearOrderTimers(o.id);
-                    pushHistorial(orders[i]);
-                }
-            });
-            const dest = newEtapa === 'listo' ? 'Listo ✓' : 'Empaque';
-            showToast('📦 Grupo completo: ' + hermanas.map(o => o.titulo.substring(0, 14)).join(', ') + ' → ' + dest, 4000);
-        }
+        // Antes movía automáticamente a las órdenes hermanas (mismos 5 dígitos) al mismo destino
+        // cuando una llegaba a empaque/listo. Desactivado a pedido del usuario.
+        function autoGroupFinish(triggerId, newEtapa) { return; }
 
         // ═══════════════════════════════════════════════════
         //  SCHEDULER PARA GANTT
