@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.9996';
+        const APP_VERSION = 'v8.9997';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -973,33 +973,51 @@
         //  SINCRONIZACIÓN CON GOOGLE SHEETS
         // ═══════════════════════════════════════════════════
 
-        // Parser CSV robusto (maneja comas dentro de comillas)
+        // Parser CSV robusto (comas y saltos de línea dentro de comillas, comillas escapadas "")
+        // Recorre carácter por carácter en vez de cortar por '\n' primero — un salto de línea
+        // DENTRO de un campo con comillas (ej. una descripción de varias líneas) no debe partir la fila.
         function parseCSV(text) {
-            const lines = text.split('\n').filter(l => l.trim());
-            if (!lines.length) return [];
-            const parseRow = row => { const r = []; let cur = '', inQ = false; for (const c of row) { if (c === '"') { inQ = !inQ; } else if (c === ',' && !inQ) { r.push(cur.trim()); cur = ''; } else cur += c; } r.push(cur.trim()); return r; };
-            const headers = parseRow(lines[0]);
-            return lines.slice(1).map(line => {
-                const vals = parseRow(line);
+            const rows = [];
+            let row = [], cur = '', inQ = false;
+            for (let i = 0; i < text.length; i++) {
+                const c = text[i];
+                if (inQ) {
+                    if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+                    else cur += c;
+                } else if (c === '"') inQ = true;
+                else if (c === ',') { row.push(cur.trim()); cur = ''; }
+                else if (c === '\r') { /* ignorar, \n cierra la fila */ }
+                else if (c === '\n') { row.push(cur.trim()); rows.push(row); row = []; cur = ''; }
+                else cur += c;
+            }
+            if (cur !== '' || row.length) { row.push(cur.trim()); rows.push(row); }
+            const nonEmpty = rows.filter(r => r.some(v => v));
+            if (!nonEmpty.length) return [];
+            const headers = nonEmpty[0];
+            return nonEmpty.slice(1).map(vals => {
                 const obj = {};
                 headers.forEach((h, i) => obj[h.toLowerCase().trim()] = (vals[i] || '').trim());
                 return obj;
-            }).filter(r => Object.values(r).some(v => v));
+            });
         }
 
         // Busca un valor de columna por múltiples nombres posibles
         function col(row, ...names) { for (const n of names) { const v = row[n.toLowerCase()]; if (v !== undefined && v !== '') return v; } return ''; }
 
+        // Ya viene en yyyy-MM-dd (ISO) desde el Apps Script — sin ambigüedad de día/mes
+        const _ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
         // Convierte fecha "16/4/2026" o "16/04/2026" a "2026-04-16"
         function parseDMDate(s) {
             if (!s) return '';
+            if (_ISO_DATE.test(s)) return s;
             const p = s.split('/');
             if (p.length !== 3) return '';
             return `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
         }
-        // MM/DD/YY o MM/DD/YYYY — para la hoja de Muestras
+        // MM/DD/YY o MM/DD/YYYY — para fechas escritas a mano en la hoja de Muestras
         function parseMDYDate(s) {
             if (!s) return '';
+            if (_ISO_DATE.test(s)) return s;
             const p = s.split('/');
             if (p.length !== 3) return '';
             const yr = p[2].length === 2 ? '20' + p[2] : p[2];
@@ -1885,10 +1903,16 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             if (tvTimer) { clearInterval(tvTimer); tvTimer = null; }
             const root = document.getElementById('root');
             if (V === 'tv') { root.innerHTML = tvHTML(); startTV(); return; }
+            // root.innerHTML destruye y recrea el .board (scroll horizontal) — sin esto,
+            // cada movimiento de orden regresaba la vista al extremo del tablero.
+            const _oldBoard = document.querySelector('.board');
+            const _scrollLeft = _oldBoard ? _oldBoard.scrollLeft : 0;
             root.innerHTML = `
     <div style="background:#1e293b;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #334155;position:sticky;top:0;z-index:50">${hdrHTML()}</div>
     <div id="mc">${V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'scan_log' ? scanLogHTML() : boardHTML()}</div>
     ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}`;
+            const _newBoard = document.querySelector('.board');
+            if (_newBoard) _newBoard.scrollLeft = _scrollLeft;
         }
 
         function hdrHTML() {
@@ -2388,7 +2412,12 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // ═══════════════════════════════════════════════════
         function renderBoard() {
             const mc = document.getElementById('mc');
-            if (mc && V === 'kanban') mc.innerHTML = boardHTML();
+            if (!mc || V !== 'kanban') return;
+            const oldBoard = mc.querySelector('.board');
+            const scrollLeft = oldBoard ? oldBoard.scrollLeft : 0;
+            mc.innerHTML = boardHTML();
+            const newBoard = mc.querySelector('.board');
+            if (newBoard) newBoard.scrollLeft = scrollLeft;
         }
         function matchSearch(o) {
             if (!searchQ) return true;
