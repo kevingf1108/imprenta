@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.9999';
+        const APP_VERSION = 'v8.99991';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -2097,7 +2097,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             <div style="font-size:16px;font-weight:800;color:#f1f5f9">🔍 Escaneos no encontrados</div>
             <div style="font-size:12px;color:#475569;margin-top:2px">${scanLog.length} registros — últimos 200</div>
           </div>
-          <button onclick="if(confirm('¿Borrar todos los registros?')){scanLog=[];saveS();setV('scan_log');}" style="padding:6px 14px;border-radius:8px;border:1px solid #7f1d1d;background:#2d0a0a;color:#f87171;font-weight:700;font-size:12px;cursor:pointer">🗑 Limpiar log</button>
+          <div style="display:flex;gap:8px">
+            <button onclick="retryAllScanLog()" title="Vuelve a buscar cada código contra las órdenes que ya están en el tablero ahora" style="padding:6px 14px;border-radius:8px;border:1px solid #166534;background:#0a2e1a;color:#4ade80;font-weight:700;font-size:12px;cursor:pointer">🔁 Reintentar todos</button>
+            <button onclick="if(confirm('¿Borrar todos los registros?')){scanLog=[];saveS();setV('scan_log');}" style="padding:6px 14px;border-radius:8px;border:1px solid #7f1d1d;background:#2d0a0a;color:#f87171;font-weight:700;font-size:12px;cursor:pointer">🗑 Limpiar log</button>
+          </div>
         </div>
         <div style="background:#1e293b;border-radius:12px;overflow:hidden">
           <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -2113,11 +2116,37 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
               <td style="padding:7px 10px;color:#fbbf24;font-weight:700;font-family:monospace">${e(r.raw||r.codigo)}</td>
               <td style="padding:7px 10px;color:#60a5fa">${e(r.proceso||'—')}</td>
               <td style="padding:7px 10px;color:#94a3b8;font-size:11px">${e(r.razon)}</td>
-              <td style="padding:7px 6px;text-align:center"><button onclick="scanLog=scanLog.filter(x=>x.ts!==${r.ts});saveS();setV('scan_log')" style="background:none;border:none;color:#475569;cursor:pointer;font-size:13px" title="Borrar">✕</button></td>
+              <td style="padding:7px 6px;text-align:center;white-space:nowrap">
+                <button onclick="retryScanLogEntry(${r.ts})" style="background:none;border:none;color:#4ade80;cursor:pointer;font-size:13px" title="Reintentar contra el tablero actual">🔁</button>
+                <button onclick="scanLog=scanLog.filter(x=>x.ts!==${r.ts});saveS();setV('scan_log')" style="background:none;border:none;color:#475569;cursor:pointer;font-size:13px" title="Borrar">✕</button>
+              </td>
             </tr>`).join('')}
           </table>
         </div>
       </div>`;
+        }
+
+        // Reintenta un escaneo que antes no encontró la orden (ej. porque el sync
+        // todavía no la había traído) contra el estado ACTUAL del tablero.
+        function retryScanLogEntry(ts) {
+            const entry = scanLog.find(x => x.ts === Number(ts));
+            if (!entry) return;
+            scanLog = scanLog.filter(x => x.ts !== Number(ts));
+            const ok = handleScan(entry.raw);
+            if (ok) showToast('✅ Reintento OK: ' + (entry.codigo || entry.raw));
+            saveS(); setV('scan_log');
+        }
+        // Reintenta TODOS los escaneos no encontrados de una — silencioso por cada uno,
+        // con un solo resumen al final en vez de un toast por cada intento.
+        function retryAllScanLog() {
+            if (!scanLog.length) return;
+            const entries = [...scanLog];
+            scanLog = [];
+            let okCount = 0;
+            entries.forEach(entry => { if (handleScan(entry.raw, true)) okCount++; });
+            saveS();
+            showToast(`🔁 Reintentados ${entries.length}: ${okCount} resueltos, ${entries.length - okCount} siguen sin encontrarse`, 6000);
+            setV('scan_log');
         }
 
         function deleteStatRecord(ts, ordId) {
@@ -3311,14 +3340,16 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             saveTimers();
         }
 
-        function handleScan(raw) {
+        // silent=true: para reintentos masivos — no muestra toast/flash por cada uno.
+        // Devuelve true si encontró y movió la orden, false si no la encontró.
+        function handleScan(raw, silent) {
             const raw2 = raw.trim().toUpperCase();
             // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
             const logPre = SCAN_LOG_PRE.find(p => raw2.startsWith(p));
-            if (logPre) { sendScanToSheets(raw2); return; }
+            if (logPre) { sendScanToSheets(raw2); return true; }
             // ── 0b. Prefijos de máquina: F%W, P%W, O%W, IM%W → log maquinas ──
             const maqPre = MAQ_SCAN_PRE.find(p => raw2.startsWith(p));
-            if (maqPre) { sendMaqScanToSheets(raw2); return; }
+            if (maqPre) { sendMaqScanToSheets(raw2); return true; }
             // ── 1. Parsear sufijo i/p ────────────────────────────────────
             // i = Inicia (llega a este paso, arranca timer)
             // p = Pasa   (terminó este paso, avanza al siguiente)
@@ -3386,8 +3417,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     scanLog.unshift({ ts: Date.now(), raw, codigo: ordId, proceso: proc ? proc.label : '—', razon });
                     if (scanLog.length > 200) scanLog = scanLog.slice(0, 200);
                     saveS();
-                    showToast('❌ No encontrada: ' + ordId + (proc ? ' [' + proc.label + ']' : '') + ' — ' + razon, 6000);
-                    return;
+                    if (!silent) showToast('❌ No encontrada: ' + ordId + (proc ? ' [' + proc.label + ']' : '') + ' — ' + razon, 6000);
+                    return false;
                 }
                 // Orden encontrada en otra etapa/categoría — moverla al paso escaneado
                 matches = (!esGrupo && recoverable.length > 1) ? [recoverable[0]] : recoverable;
@@ -3422,9 +3453,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     }
                 });
                 saveTimers(); saveS(); render();
-                showToast(actionLabel + ' ' + procLabel + ': ' + matches.map(o => o.titulo.substring(0, 15)).join(', '));
-                showScanFlash(matches[0].titulo, actionLabel + (matches.length > 1 ? ' ×' + matches.length : ''), actionColor);
-                return;
+                if (!silent) {
+                    showToast(actionLabel + ' ' + procLabel + ': ' + matches.map(o => o.titulo.substring(0, 15)).join(', '));
+                    showScanFlash(matches[0].titulo, actionLabel + (matches.length > 1 ? ' ×' + matches.length : ''), actionColor);
+                }
+                return true;
             }
 
             // ── 5. PASA: avanza todas las órdenes del grupo ──────────────
@@ -3471,8 +3504,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const nextLbl = movedLabels[0] || '';
             const isSub = matches[0]?.tipo === 'int_sub' || matches[0]?.tipo === 'port_sub';
             const subNote = isSub && nextLbl === 'Empaque' ? ' (sub-orden → espera armado)' : '';
-            showToast('✅ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl + subNote);
-            showScanFlash(matches[0].titulo, nextLbl + (matches.length > 1 ? ' ×' + matches.length : ''), '#f59e0b');
+            if (!silent) {
+                showToast('✅ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl + subNote);
+                showScanFlash(matches[0].titulo, nextLbl + (matches.length > 1 ? ' ×' + matches.length : ''), '#f59e0b');
+            }
+            return true;
         }
 
 
