@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.99991';
+        const APP_VERSION = 'v8.99992';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -1332,6 +1332,10 @@
 
                 let newOrders = [];
                 let countImp = 0, countAcab = 0, countMuestras = 0;
+                // Si una categoría falla, se conserva lo que ya había de ESA categoría en vez de
+                // vaciarla — antes, un fallo pasajero en una sola de las 3 peticiones hacía que
+                // esa categoría entera "desapareciera" del tablero hasta el siguiente sync.
+                const warnings = [];
 
                 // Impresion org — fuente principal
                 let _debugImp = [];
@@ -1343,6 +1347,11 @@
                         if (o) { newOrders.push(o); _debugImp.push({ id: o.id, tabs: o.tabloidesSrc }); }
                     });
                     countImp = newOrders.length;
+                } else {
+                    const preserved = _snap.filter(o => o._fromSheets && (o.tipo === 'int_sub' || o.tipo === 'port_sub'));
+                    newOrders.push(...preserved);
+                    countImp = preserved.length;
+                    if (preserved.length) warnings.push(`⚠️ No se pudo leer Impresión — se conservaron ${preserved.length} órdenes de la última sincronización exitosa`);
                 }
 
                 // Acabado org — solo agrega órdenes cuyo grupoId NO está ya en Impresion org ni en Firebase
@@ -1353,14 +1362,22 @@
                     const gruposCubiertos = new Set([
                         ...newOrders.map(o => o.grupoId).filter(Boolean),
                     ]);
+                    let acabAdded = 0;
                     rows.forEach(row => {
                         const o = mapAcabRow(row);
                         if (o && !gruposCubiertos.has(o.grupoId)) {
                             newOrders.push(o);
                             gruposCubiertos.add(o.grupoId);
+                            acabAdded++;
                         }
                     });
-                    countAcab = newOrders.length - countImp;
+                    countAcab = acabAdded;
+                } else {
+                    const gruposCubiertos = new Set(newOrders.map(o => o.grupoId).filter(Boolean));
+                    const preserved = _snap.filter(o => o._fromSheets && o.tipo === 'union_result' && !gruposCubiertos.has(o.grupoId));
+                    newOrders.push(...preserved);
+                    countAcab = preserved.length;
+                    if (preserved.length) warnings.push(`⚠️ No se pudo leer Acabados — se conservaron ${preserved.length} órdenes de la última sincronización exitosa`);
                 }
 
                 // Muestras — se añaden siempre como entradas independientes (id sufijo -M)
@@ -1379,8 +1396,12 @@
                     });
                     countMuestras = newOrders.length - prevLen;
                     _debugMuestras.cargadas = countMuestras;
-                } else if (respMuestras) {
-                    _debugMuestras.status = 'error HTTP ' + respMuestras.status;
+                } else {
+                    if (respMuestras) _debugMuestras.status = 'error HTTP ' + respMuestras.status;
+                    const preserved = _snap.filter(o => o._fromSheets && o._isMuestra);
+                    newOrders.push(...preserved);
+                    countMuestras = preserved.length;
+                    if (preserved.length) warnings.push(`⚠️ No se pudo leer Muestras — se conservaron ${preserved.length} de la última sincronización exitosa`);
                 }
 
                 // Deduplicar por id exacto (INT y PORT del mismo trabajo tienen distinto id)
@@ -1427,6 +1448,7 @@
                 const ahora = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
                 if (log) log.innerHTML = `
           <span style="color:#4ade80;font-weight:700">✅ Sincronizado a las ${ahora}</span><br>
+          ${warnings.length ? `<div style="margin-top:8px;background:#2d1a0a;border:1px solid #92400e;border-radius:8px;padding:8px 10px;font-size:12px;color:#fbbf24">${warnings.map(w => e(w)).join('<br>')}</div>` : ''}
           <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;font-size:12px">
             <span style="background:#0a2e1a;border:1px solid #166534;padding:4px 10px;border-radius:6px;color:#4ade80">🆕 ${countNuevas} nuevas</span>
             <span style="background:#0a1f3a;border:1px solid #1d4ed8;padding:4px 10px;border-radius:6px;color:#60a5fa">🔄 ${countActualizadas} actualizadas</span>
