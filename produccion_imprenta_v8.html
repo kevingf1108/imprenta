@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.99992';
+        const APP_VERSION = 'v8.99993';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -1320,7 +1320,12 @@
                 async function fetchCSV(hoja) {
                     try {
                         const r = await fetch(scriptURL('action=exportsheet&hoja=' + hoja), { cache: 'no-cache' });
-                        if (r && r.ok) return r;
+                        if (!r || !r.ok) return null;
+                        const text = await r.text();
+                        // El script devuelve JSON (no CSV) cuando está ocupado con la limpieza
+                        // automática (candado compartido) — tratarlo como fallo de esta categoría.
+                        if (text.trim().startsWith('{')) return null;
+                        return { ok: true, text: () => Promise.resolve(text) };
                     } catch { }
                     return null;
                 }
