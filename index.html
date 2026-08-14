@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.9997';
+        const APP_VERSION = 'v8.9998';
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
@@ -612,7 +612,7 @@
         // ═══════════════════════════════════════════════════
         //  ESTADO
         // ═══════════════════════════════════════════════════
-        let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [], historial = [], etapaMap = {}, scanLog = [];
+        let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [], historial = [], etapaMap = {}, scanLog = [], moveLog = [];
         let modalId = undefined, showCfg = false, showSync = false, tvTimer = null, tvSub = 'gantt', ganttZoom = 180;
         let searchQ = '';
         let autoSync = false, _autoSyncInt = null, _syncing = false, _fbReady = false;
@@ -639,6 +639,8 @@
                     statsHistory = rawSH ? (Array.isArray(rawSH) ? rawSH : Object.values(rawSH)).filter(Boolean) : [];
                     const rawSL = data.scanLog;
                     scanLog = rawSL ? (Array.isArray(rawSL) ? rawSL : Object.values(rawSL)).filter(Boolean) : [];
+                    const rawML = data.moveLog;
+                    moveLog = rawML ? (Array.isArray(rawML) ? rawML : Object.values(rawML)).filter(Boolean) : [];
                     // Migrar portadas a grueso (ordId termina en -P o título empieza con PORT)
                     let _migrated = false;
                     statsHistory.forEach(r => {
@@ -670,13 +672,21 @@
         }
         function saveS() {
             const manualOrders = orders.filter(o => !o._fromSheets);
-            return _ref.set({ cfg, statsHistory, historial, etapaMap, manualOrders, scanLog }).catch(e => {
+            return _ref.set({ cfg, statsHistory, historial, etapaMap, manualOrders, scanLog, moveLog }).catch(e => {
                 try { localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); localStorage.setItem('imp_h', JSON.stringify(historial)); } catch { }
             });
         }
         function pushHistorial(o) {
             if (historial.find(h => h.id === o.id && h.ts && Date.now() - h.ts < 5000)) return;
             historial.push({ id: o.id, titulo: o.titulo || o.baseTitulo || o.id, cliente: o.cliente || '', cantidad: o.cantidad || 0, tipoEncuadernacion: o.tipoEncuadernacion || '', fechaLimite: o.fechaLimite || '', fechaCreacion: o.fechaCreacion || '', ts: Date.now() });
+        }
+
+        // Historial de movimientos por orden — de dónde a dónde, cómo y cuándo.
+        // Sin "quién" a propósito (evita pedirle nombre a cada persona en cada escaneo).
+        function logMove(o, from, to, mecanismo) {
+            if (!from || !to || from === to) return;
+            moveLog.unshift({ ordId: o.id, titulo: o.titulo || o.baseTitulo || o.id, from, to, mecanismo, ts: Date.now() });
+            if (moveLog.length > 3000) moveLog = moveLog.slice(0, 3000);
         }
 
         // ═══════════════════════════════════════════════════
@@ -1892,6 +1902,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const idx = orders.findIndex(x => x.id === _dragId);
             orders[idx] = { ...orders[idx], etapa: colId };
             etapaMap[_dragId] = colId;
+            logMove(orders[idx], fromEtapa, colId, 'arrastre');
             if (colId === 'listo') { delete etapaMap[_dragId]; clearOrderTimers(_dragId); pushHistorial(orders[idx]); }
             autoGroupFinish(_dragId, colId);
             callScript(orders[idx], colId, fromEtapa);
@@ -2654,6 +2665,27 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           </tr>`).join('')}
         </table>
       </div>` : ''}
+      ${!isNew ? (() => {
+          const moves = moveLog.filter(m => m.ordId === ord.id);
+          if (!moves.length) return '';
+          const etLabel = id => (etOf(id) || {}).label || id;
+          const mecIcon = { arrastre: '🖱️', boton: '▶️', escaneo: '📷', 'escaneo-inicio': '⏱️' };
+          return `<div style="margin-top:16px;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px">
+        <div style="font-size:12px;color:#60a5fa;font-weight:700;margin-bottom:8px">📜 Historial de movimientos (${moves.length})</div>
+        <div style="max-height:220px;overflow-y:auto"><table style="width:100%;font-size:12px;border-collapse:collapse">
+          <tr style="color:#475569;border-bottom:1px solid #1e293b">
+            <td style="padding:3px 6px">De → A</td>
+            <td style="padding:3px 6px">Cómo</td>
+            <td style="padding:3px 6px;text-align:right">Cuándo</td>
+          </tr>
+          ${moves.map(m => `<tr style="border-top:1px solid #0f172a">
+            <td style="padding:4px 6px;color:#94a3b8">${e(etLabel(m.from))} → <b style="color:#f1f5f9">${e(etLabel(m.to))}</b></td>
+            <td style="padding:4px 6px;color:#64748b">${mecIcon[m.mecanismo] || ''} ${e(m.mecanismo)}</td>
+            <td style="padding:4px 6px;text-align:right;color:#475569;white-space:nowrap">${new Date(m.ts).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+          </tr>`).join('')}
+        </table></div>
+      </div>`;
+      })() : ''}
       <div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end;flex-wrap:wrap">
         ${modalId !== null ? `<button class="btn btn-d btn-sm" onclick="delOrd()">🗑 Eliminar</button>` : ''}
         <button class="btn btn-g" onclick="closeModal()">Cancelar</button>
@@ -3180,6 +3212,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 if (!target) return;
                 orders[idx] = { ...orders[idx], etapa: target.id };
                 etapaMap[id] = target.id;
+                logMove(orders[idx], fromEtapa, target.id, 'boton');
                 if (target.id === 'listo') { delete etapaMap[id]; clearOrderTimers(id); pushHistorial(orders[idx]); }
                 autoGroupFinish(id, target.id);
                 callScript(orders[idx], target.id, fromEtapa);
@@ -3189,6 +3222,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             if (ni < 0 || ni >= flow.length) return;
             orders[idx] = { ...orders[idx], etapa: flow[ni].id };
             etapaMap[id] = flow[ni].id;
+            logMove(orders[idx], fromEtapa, flow[ni].id, 'boton');
             if (flow[ni].id === 'listo') { delete etapaMap[id]; clearOrderTimers(id); pushHistorial(orders[idx]); }
             autoGroupFinish(id, flow[ni].id);
             callScript(orders[idx], flow[ni].id, fromEtapa);
@@ -3362,6 +3396,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                             const idx = orders.findIndex(x => x.id === o.id);
                             orders[idx] = { ...orders[idx], etapa: proc.etapa };
                             etapaMap[o.id] = proc.etapa;
+                            logMove(o, o.etapa, proc.etapa, 'escaneo-inicio');
                         }
                         actionLabel = '⏱ Iniciando'; actionColor = '#60a5fa';
                     } else if (!ex.paused) {
@@ -3388,6 +3423,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 if (proc && proc.etapa && o.etapa !== proc.etapa) {
                     orders[idx] = { ...orders[idx], etapa: proc.etapa };
                     etapaMap[o.id] = proc.etapa;
+                    logMove(o, o.etapa, proc.etapa, 'escaneo');
                 }
                 const oActual = orders[idx];
                 const flow = [ETAPAS[0], ...getAcabFlow(oActual).map(sid => ACAB_STEPS.find(s => s.id === sid)).filter(Boolean), ETAPAS[1], ETAPAS[2]];
@@ -3411,6 +3447,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 }
                 orders[idx] = { ...orders[idx], etapa: nextStep.id };
                 etapaMap[o.id] = nextStep.id;
+                logMove(orders[idx], fromEtapa, nextStep.id, 'escaneo');
                 if (nextStep.id === 'listo') { delete etapaMap[o.id]; pushHistorial(orders[idx]); }
                 autoGroupFinish(o.id, nextStep.id);
                 callScript(orders[idx], nextStep.id, fromEtapa);
