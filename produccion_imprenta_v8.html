@@ -425,19 +425,31 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.9998';
+        const APP_VERSION = 'v8.9999';
+        let _pendingReload = false;
+        // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
+        // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
+        function tryReload() {
+            if (!_pendingReload) return;
+            const activeTag = document.activeElement && document.activeElement.tagName;
+            const busy = (typeof modalId !== 'undefined' && modalId !== undefined) || showCfg || showSync || _dragId ||
+                activeTag === 'INPUT' || activeTag === 'TEXTAREA';
+            if (busy) return;
+            showToast('🔄 Hay una versión nueva — actualizando...', 3000);
+            setTimeout(() => location.reload(true), 2500);
+        }
         async function checkForUpdate() {
             try {
                 const r = await fetch('./version.txt?_=' + Date.now(), { cache: 'no-cache' });
                 if (!r.ok) return;
                 const v = (await r.text()).trim();
-                if (v && v !== APP_VERSION) {
-                    location.reload(true);
-                }
+                if (v && v !== APP_VERSION) _pendingReload = true;
             } catch { }
+            tryReload();
         }
         setTimeout(checkForUpdate, 4000);
         setInterval(checkForUpdate, 5 * 60 * 1000);
+        setInterval(tryReload, 30 * 1000);
         // ── Firebase ────────────────────────────────────────
         firebase.initializeApp({
             apiKey: "AIzaSyB40xYmdLxTlIFyPbP3sqnru35WMNpHs_0",
