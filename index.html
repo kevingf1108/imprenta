@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.99996';
+        const APP_VERSION = 'v8.99997';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -699,7 +699,7 @@
         }
         function pushHistorial(o) {
             if (historial.find(h => h.id === o.id && h.ts && Date.now() - h.ts < 5000)) return;
-            historial.push({ id: o.id, titulo: o.titulo || o.baseTitulo || o.id, cliente: o.cliente || '', cantidad: o.cantidad || 0, tipoEncuadernacion: o.tipoEncuadernacion || '', fechaLimite: o.fechaLimite || '', fechaCreacion: o.fechaCreacion || '', ts: Date.now() });
+            historial.push({ id: o.id, titulo: o.titulo || o.baseTitulo || o.id, cliente: o.cliente || '', cantidad: o.cantidad || 0, tipoEncuadernacion: o.tipoEncuadernacion || '', fechaLimite: o.fechaLimite || '', fechaCreacion: o.fechaCreacion || '', etaPredicha: o.etaPredicha || '', ts: Date.now() });
         }
 
         // Historial de movimientos por orden — de dónde a dónde, cómo y cuándo.
@@ -1449,22 +1449,38 @@
 
                 // Aplicar posiciones guardadas en Firebase (etapaMap) sobre lo que dicen los sheets
                 orders = [...manual, ...newOrders.map(o => {
-                    if (_legacyUnions.has(o.grupoId) && (o.tipo === 'int_sub' || o.tipo === 'port_sub')) {
-                        return { ...o, _merged: true, etapa: 'listo' };
-                    }
-                    if (o.etapa === 'listo' && etapaMap[o.id]) { delete etapaMap[o.id]; return o; }
-                    // No sobreescribir si Sheets ya marcó la orden como listo (avanzó de fase)
-                    if (etapaMap[o.id] && o.etapa !== 'listo' && !o._listoInSheets) return { ...o, etapa: etapaMap[o.id] };
-                    // No regresar una orden que localmente ya iba más avanzada (ej. recién marcada
-                    // Listo) solo porque Sheets todavía no se puso al día — la limpieza automática
-                    // de filas corre cada 15 min y el sync cada 5, así que hay una ventana donde
-                    // Sheets "atrasado" podía deshacer el avance que ya se hizo en la app.
                     const local = _snap.find(x => x.id === o.id);
-                    if (local && etapaRank(local) > etapaRank(o)) {
-                        return { ...o, etapa: local.etapa, _merged: local._merged || o._merged };
+                    let result = o;
+                    if (_legacyUnions.has(o.grupoId) && (o.tipo === 'int_sub' || o.tipo === 'port_sub')) {
+                        result = { ...o, _merged: true, etapa: 'listo' };
+                    } else if (o.etapa === 'listo' && etapaMap[o.id]) {
+                        delete etapaMap[o.id]; result = o;
+                    } else if (etapaMap[o.id] && o.etapa !== 'listo' && !o._listoInSheets) {
+                        // No sobreescribir si Sheets ya marcó la orden como listo (avanzó de fase)
+                        result = { ...o, etapa: etapaMap[o.id] };
+                    } else if (local && etapaRank(local) > etapaRank(o)) {
+                        // No regresar una orden que localmente ya iba más avanzada (ej. recién marcada
+                        // Listo) solo porque Sheets todavía no se puso al día — la limpieza automática
+                        // de filas corre cada 15 min y el sync cada 5, así que hay una ventana donde
+                        // Sheets "atrasado" podía deshacer el avance que ya se hizo en la app.
+                        result = { ...o, etapa: local.etapa, _merged: local._merged || o._merged };
                     }
-                    return o;
+                    // etaPredicha es una foto fija tomada la primera vez que vimos la orden —
+                    // una vez que existe, se conserva tal cual en cada sync futuro.
+                    if (local && local.etaPredicha) result = { ...result, etaPredicha: local.etaPredicha };
+                    return result;
                 })];
+                // Congelar la primera predicción del motor para cada orden nueva/activa que
+                // todavía no tenga una — sirve después para medir qué tan preciso fue el motor
+                // comparando esta fecha contra cuándo se entregó de verdad (ver Stats).
+                const _sinPrediccion = orders.filter(o => !o.etaPredicha && o.etapa !== 'listo' && !o._merged);
+                if (_sinPrediccion.length) {
+                    const _fm = scheduleMachines(orders, cfg).finishMin;
+                    orders = orders.map(o => {
+                        if (o.etaPredicha || o.etapa === 'listo' || o._merged || _fm[o.id] == null) return o;
+                        return { ...o, etaPredicha: calcETA(o, _fm).toISOString().split('T')[0] };
+                    });
+                }
                 await saveS();
 
                 const ahora = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
@@ -2139,7 +2155,16 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     diasDiff = Math.round((completedTs - new Date(fechaLimite + 'T23:59:59').getTime()) / 86400000);
                     onTime = diasDiff <= 0;
                 }
-                result.push({ id: h.id, titulo: h.titulo, cliente: h.cliente || '', cantidad: h.cantidad || 0, fechaLimite, completedTs, totalMin, impMin, impToEmpMin, queueMin, onTime, diasDiff });
+                // Qué tan acertado fue el motor: compara cuándo dijo que iba a estar lista
+                // (etaPredicha, congelada la primera vez que la app la calculó) contra cuándo
+                // se entregó de verdad. Positivo = se tardó más de lo predicho.
+                const etaPredicha = h.etaPredicha || null;
+                let motorErrorDias = null, motorOnTime = null;
+                if (etaPredicha && completedTs) {
+                    motorErrorDias = Math.round((completedTs - new Date(etaPredicha + 'T23:59:59').getTime()) / 86400000);
+                    motorOnTime = motorErrorDias <= 0;
+                }
+                result.push({ id: h.id, titulo: h.titulo, cliente: h.cliente || '', cantidad: h.cantidad || 0, fechaLimite, completedTs, totalMin, impMin, impToEmpMin, queueMin, onTime, diasDiff, etaPredicha, motorErrorDias, motorOnTime });
             });
             return result.sort((a, b) => (b.completedTs || 0) - (a.completedTs || 0));
         }
@@ -2435,6 +2460,59 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
   </table></div>
 </div>`;
 
+            // ── Precisión del motor de ETA — predicho vs. entregado de verdad ──────
+            const withPred = metrics.filter(m => m.motorErrorDias !== null);
+            const motorOnTimeM = withPred.filter(m => m.motorOnTime);
+            const pctMotorOT = withPred.length ? Math.round(motorOnTimeM.length / withPred.length * 100) : null;
+            const avgAbsError = withPred.length ? Math.round(withPred.reduce((s, m) => s + Math.abs(m.motorErrorDias), 0) / withPred.length * 10) / 10 : null;
+            const avgBiasError = withPred.length ? Math.round(withPred.reduce((s, m) => s + m.motorErrorDias, 0) / withPred.length * 10) / 10 : null;
+            const motorBlock = !withPred.length ? `
+<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:14px">
+  <div style="font-size:15px;font-weight:800;color:#f1f5f9;margin-bottom:4px">🎯 Precisión del motor de ETA</div>
+  <div style="font-size:12px;color:#475569">Todavía no hay órdenes completadas con una predicción guardada — se va llenando según se completen órdenes creadas después de esta actualización.</div>
+</div>` : `
+<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:14px">
+  <div style="font-size:15px;font-weight:800;color:#f1f5f9;margin-bottom:4px">🎯 Precisión del motor de ETA</div>
+  <div style="font-size:12px;color:#475569;margin-bottom:14px">La fecha "Listo ~" que el motor calculó al ver la orden por primera vez, comparada contra cuándo se entregó de verdad</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+    <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px 16px;flex:1;min-width:90px;text-align:center">
+      <div style="font-size:28px;font-weight:800;color:#60a5fa">${withPred.length}</div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">📦 Con predicción</div>
+    </div>
+    ${pctMotorOT !== null ? `<div style="background:#0a2e1a;border:1px solid #166534;border-radius:10px;padding:12px 16px;flex:1;min-width:90px;text-align:center">
+      <div style="font-size:28px;font-weight:800;color:#4ade80">${pctMotorOT}%</div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">✅ Acertó o se adelantó</div>
+    </div>` : ''}
+    ${avgAbsError !== null ? `<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px 16px;flex:1;min-width:90px;text-align:center">
+      <div style="font-size:20px;font-weight:800;color:#c084fc">±${avgAbsError}d</div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">📏 Error promedio</div>
+    </div>` : ''}
+    ${avgBiasError !== null ? `<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px 16px;flex:1;min-width:90px;text-align:center">
+      <div style="font-size:20px;font-weight:800;color:${avgBiasError > 0 ? '#ef4444' : '#4ade80'}">${avgBiasError > 0 ? '+' : ''}${avgBiasError}d</div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">${avgBiasError > 0 ? '⚠️ Tiende a prometer de más' : '👍 Tiende a sobrar tiempo'}</div>
+    </div>` : ''}
+  </div>
+  <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr style="color:#475569;font-size:11px;border-bottom:1px solid #334155">
+      <td style="padding:5px 8px">Orden</td>
+      <td style="padding:5px 8px;text-align:right;white-space:nowrap">Predicho</td>
+      <td style="padding:5px 8px;text-align:right;white-space:nowrap">Entregado</td>
+      <td style="padding:5px 8px;text-align:right;white-space:nowrap">Diferencia</td>
+    </tr>
+    ${withPred.map(m => {
+      const oc = m.motorOnTime ? '#4ade80' : '#ef4444';
+      const ol = m.motorOnTime ? (m.motorErrorDias < 0 ? `✅ ${Math.abs(m.motorErrorDias)}d antes` : '✅ En fecha') : `🔴 ${m.motorErrorDias}d tarde`;
+      const ed = m.completedTs ? new Date(m.completedTs).toLocaleDateString('es', { day: '2-digit', month: 'short' }) : '—';
+      return `<tr style="border-top:1px solid #0f172a">
+        <td style="padding:6px 8px;color:#f1f5f9;font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e(m.titulo)}">${e(m.titulo.substring(0, 30))}</td>
+        <td style="padding:6px 8px;text-align:right;color:#64748b;white-space:nowrap">${fDate(m.etaPredicha)}</td>
+        <td style="padding:6px 8px;text-align:right;color:#94a3b8;white-space:nowrap">${ed}</td>
+        <td style="padding:6px 8px;text-align:right;white-space:nowrap"><span style="color:${oc};font-weight:700;font-size:11px">${ol}</span></td>
+      </tr>`;
+    }).join('')}
+  </table></div>
+</div>`;
+
             const calibBar = `<div style="background:#1e293b;border-radius:12px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
         <div>
           <div style="font-size:13px;font-weight:700;color:#f1f5f9">🤖 Auto-calibración de velocidades</div>
@@ -2536,6 +2614,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         <h2 style="font-size:20px;font-weight:800;margin-bottom:4px">⏱ Stats de Producción</h2>
         <div style="font-size:13px;color:#475569;margin-bottom:12px">Rendimiento real por estación — registrado con el escáner</div>
         ${metricsBlock}
+        ${motorBlock}
         ${calibBar}
         ${stationBlocks}
         ${waitBlocks.length ? `
