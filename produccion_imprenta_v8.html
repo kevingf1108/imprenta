@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.99993';
+        const APP_VERSION = 'v8.99994';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -2145,6 +2145,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
               <td style="padding:7px 10px;color:#94a3b8;font-size:11px">${e(r.razon)}</td>
               <td style="padding:7px 6px;text-align:center;white-space:nowrap">
                 <button onclick="retryScanLogEntry(${r.ts})" style="background:none;border:none;color:#4ade80;cursor:pointer;font-size:13px" title="Reintentar contra el tablero actual">🔁</button>
+                <button onclick="buscarEnSheets('${e(r.codigo || r.raw || '')}')" style="background:none;border:none;color:#60a5fa;cursor:pointer;font-size:13px" title="Buscar directo en Google Sheets (todas las hojas)">🔎</button>
                 <button onclick="scanLog=scanLog.filter(x=>x.ts!==${r.ts});saveS();setV('scan_log')" style="background:none;border:none;color:#475569;cursor:pointer;font-size:13px" title="Borrar">✕</button>
               </td>
             </tr>`).join('')}
@@ -2174,6 +2175,31 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             saveS();
             showToast(`🔁 Reintentados ${entries.length}: ${okCount} resueltos, ${entries.length - okCount} siguen sin encontrarse`, 6000);
             setV('scan_log');
+        }
+
+        // Busca un # item directo en TODAS las hojas de Google Sheets (no solo las 3 que
+        // se sincronizan al tablero) — para saber si un escaneo "no encontrado" es porque
+        // el sync todavía no lo trajo, o porque de verdad no existe en ningún lado.
+        async function buscarEnSheets(codigo) {
+            if (!cfg.scriptUrl) { showToast('⚠️ Configura la URL del script primero'); return; }
+            const digits = String(codigo || '').replace(/\D/g, '').slice(0, 6);
+            if (!digits) { showToast('⚠️ No hay número de item para buscar'); return; }
+            showToast('🔎 Buscando ' + digits + ' en Google Sheets...', 3000);
+            try {
+                const r = await fetch(scriptURL('action=buscaritem&item=' + encodeURIComponent(digits)));
+                const data = await r.json();
+                if (!data.ok) { showToast('❌ ' + (data.error || 'Error al buscar'), 6000); return; }
+                if (!data.found || !data.found.length) {
+                    showToast('🔎 ' + digits + ': no se encontró en NINGUNA hoja de Sheets', 7000);
+                    return;
+                }
+                const resumen = data.found.map(f =>
+                    `${f.hoja} (fila ${f.fila}${f.etapa ? ', etapa=' + f.etapa : ''}${f.listo ? ', listo=' + f.listo : ''})`
+                ).join(' · ');
+                showToast('🔎 ' + digits + ' — SÍ existe en: ' + resumen, 10000);
+            } catch (err) {
+                showToast('❌ Error al buscar: ' + err.message, 6000);
+            }
         }
 
         function deleteStatRecord(ts, ordId) {
