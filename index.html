@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.99995';
+        const APP_VERSION = 'v8.99996';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -2066,8 +2066,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // ═══════════════════════════════════════════════════
         //  AUTO-CALIBRACIÓN
         // ═══════════════════════════════════════════════════
-        // Mapa: etapa → qué campo de cfg.maq actualizar y cómo calcular la velocidad real
-        // Solo estaciones con fórmula simple (sin setup ni interpolación)
+        // Mapa: etapa (+ filter opcional) → qué campo de cfg.maq actualizar y cómo calcular
+        // la velocidad real. "filter" separa muestras que comparten etapa pero necesitan su
+        // propia constante (ej. impresión B&N vs color, o pegado cerca de 150 vs 500 páginas).
+        const PAGINAS_CORTE = 325; // punto medio entre 150 y 500 — decide a qué cubeta va cada muestra
         const CALIB_MAP = [
             { etapa: 'acab_ci', key: 'corteInicial', speed: r => r.hojas > 0 && r.mins > 0 ? (r.hojas / r.mins) * 4 : null },
             { etapa: 'acab_es', key: 'espiralado', speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
@@ -2075,14 +2077,27 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             { etapa: 'acab_ms', key: 'mesa_trabajo', speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
             { etapa: 'acab_cc', key: 'corte_carton', speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
             { etapa: 'acab_pp', key: 'ponchadora', speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
+            // Impresión — B&N y color no comparten velocidad, y color además cambia con el papel
+            { etapa: 'impresion', key: 'byn_fast', filter: r => r.tipoInteriores === 'byn', speed: r => r.hojas > 0 && r.mins > 0 ? r.hojas / r.mins : null },
+            { etapa: 'impresion', key: 'color_normal', filter: r => r.tipoInteriores === 'color' && r.gramaje !== 'grueso', speed: r => r.hojas > 0 && r.mins > 0 ? r.hojas / r.mins : null },
+            { etapa: 'impresion', key: 'color_grueso', filter: r => r.tipoInteriores === 'color' && r.gramaje === 'grueso', speed: r => r.hojas > 0 && r.mins > 0 ? r.hojas / r.mins : null },
+            // Plastificado — se descuenta el setup fijo para quedarse con la velocidad real de la máquina
+            { etapa: 'acab_pl', key: 'plast_vel', speed: r => { const m = r.mins - (cfg.setup.plastificado || 0); return (r.hojas > 0 && m > 0) ? (r.hojas * (cfg.maq.plast_hoja || 0.475)) / m : null; } },
+            // Pegado y Corte Final — se interpolan entre 150 y 500 páginas; cada muestra califica
+            // a la constante más cercana según cuántas páginas tenía el libro.
+            { etapa: 'acab_pg', key: 'pegado_150', filter: r => r.paginas > 0 && r.paginas <= PAGINAS_CORTE, speed: r => { const m = r.mins - (cfg.setup.pegado || 0); return (r.cantidad > 0 && m > 0) ? r.cantidad / m : null; } },
+            { etapa: 'acab_pg', key: 'pegado_500', filter: r => r.paginas > PAGINAS_CORTE, speed: r => { const m = r.mins - (cfg.setup.pegado || 0); return (r.cantidad > 0 && m > 0) ? r.cantidad / m : null; } },
+            { etapa: 'acab_cf', key: 'cf_150', filter: r => r.paginas > 0 && r.paginas <= PAGINAS_CORTE, speed: r => { const m = r.mins - (cfg.setup.corteFinal || 0); return (r.cantidad > 0 && m > 0) ? r.cantidad / m : null; } },
+            { etapa: 'acab_cf', key: 'cf_500', filter: r => r.paginas > PAGINAS_CORTE, speed: r => { const m = r.mins - (cfg.setup.corteFinal || 0); return (r.cantidad > 0 && m > 0) ? r.cantidad / m : null; } },
         ];
 
         function autoCalibrate() {
             const minF = cfg.calibRangeMin != null ? cfg.calibRangeMin : 0.5;
             const maxF = cfg.calibRangeMax != null ? cfg.calibRangeMax : 2.0;
             let changed = false;
-            CALIB_MAP.forEach(({ etapa, key, speed }) => {
-                const samples = statsHistory.filter(r => r.etapa === etapa);
+            CALIB_MAP.forEach(({ etapa, key, filter, speed }) => {
+                let samples = statsHistory.filter(r => r.etapa === etapa);
+                if (filter) samples = samples.filter(filter);
                 const speeds = samples.map(speed).filter(v => v !== null && v > 0);
                 if (speeds.length < 3) return;
                 speeds.sort((a, b) => a - b);
@@ -2345,7 +2360,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 makeBlock(label, items, items[0]?.etapa || '')
             ).join('');
 
-            const calibCount = CALIB_MAP.filter(({ etapa }) => statsHistory.filter(r => r.etapa === etapa).length >= 3).length;
+            const calibCount = CALIB_MAP.filter(({ etapa, filter }) => {
+                let s = statsHistory.filter(r => r.etapa === etapa);
+                if (filter) s = s.filter(filter);
+                return s.length >= 3;
+            }).length;
             // ── Métricas de cumplimiento ──────────────────────────────────
             const metrics = calcOrderMetrics();
             const fT = m => { if (m === null || m === undefined) return '—'; const hh = Math.floor(m/60), dd = Math.floor(hh/24), rh = hh%24, rm = m%60; return dd > 0 ? `${dd}d ${rh}h` : hh > 0 ? `${hh}h ${rm}m` : `${m}m`; };
@@ -3555,7 +3574,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     const tiempos = [...(oActual.tiemposReales || [])];
                     tiempos.push({ etapa: fromEtapa, label: procLabel, mins, ts });
                     orders[idx] = { ...orders[idx], tiemposReales: tiempos };
-                    statsHistory.push({ ordId: oActual.id, titulo: oActual.titulo || oActual.baseTitulo || oActual.id, etapa: fromEtapa, label: procLabel, mins, cantidad: oActual.cantidad || 0, hojas: oActual.tabloidesSrc || 0, gramaje: oActual.gramaje || '', tamano: oActual.tamano || '', maquina: oActual.maquina || '', ts });
+                    statsHistory.push({ ordId: oActual.id, titulo: oActual.titulo || oActual.baseTitulo || oActual.id, etapa: fromEtapa, label: procLabel, mins, cantidad: oActual.cantidad || 0, hojas: oActual.tabloidesSrc || 0, paginas: oActual.paginas || 0, gramaje: oActual.gramaje || '', tipoInteriores: oActual.tipoInteriores || '', tamano: oActual.tamano || '', maquina: oActual.maquina || '', ts });
                     autoCalibrate();
                     delete _scanTimers[timerKey];
                     saveTimers();
