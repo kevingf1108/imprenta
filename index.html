@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.99994';
+        const APP_VERSION = 'v8.99995';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -545,6 +545,15 @@
         // Etapa actual de acabados: primera que corresponde al stepActual de la orden
         // Si etapa es 'acab_*' lo gestionamos aparte
         function isAcabEtapa(id) { return id && id.startsWith('acab_'); }
+        // Posición de una etapa dentro del flujo natural de ESTA orden — 'listo' siempre es
+        // la más alta. Sirve para no dejar que un sync con datos viejos regrese una orden que
+        // localmente ya iba más avanzada (ej. Sheets todavía no limpió la fila de "listo").
+        function etapaRank(o) {
+            if (o.etapa === 'listo') return 999;
+            const flow = [ETAPAS[0], ...getAcabFlow(o).map(sid => ACAB_STEPS.find(s => s.id === sid)).filter(Boolean), ETAPAS[1], ETAPAS[2]];
+            const idx = flow.findIndex(s => s && s.id === o.etapa);
+            return idx >= 0 ? idx : -1;
+        }
         function allEtapas(ordList) {
             // Muestra TODAS las columnas de acabados por las que cualquier orden activa pasará,
             // incluyendo pasos futuros y anteriores, para que no desaparezcan al mover tarjetas
@@ -1446,6 +1455,14 @@
                     if (o.etapa === 'listo' && etapaMap[o.id]) { delete etapaMap[o.id]; return o; }
                     // No sobreescribir si Sheets ya marcó la orden como listo (avanzó de fase)
                     if (etapaMap[o.id] && o.etapa !== 'listo' && !o._listoInSheets) return { ...o, etapa: etapaMap[o.id] };
+                    // No regresar una orden que localmente ya iba más avanzada (ej. recién marcada
+                    // Listo) solo porque Sheets todavía no se puso al día — la limpieza automática
+                    // de filas corre cada 15 min y el sync cada 5, así que hay una ventana donde
+                    // Sheets "atrasado" podía deshacer el avance que ya se hizo en la app.
+                    const local = _snap.find(x => x.id === o.id);
+                    if (local && etapaRank(local) > etapaRank(o)) {
+                        return { ...o, etapa: local.etapa, _merged: local._merged || o._merged };
+                    }
                     return o;
                 })];
                 await saveS();
