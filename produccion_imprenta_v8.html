@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.999991';
+        const APP_VERSION = 'v8.999992';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -617,6 +617,8 @@
             scriptUrl: '', // URL del Google Apps Script Web App para marcar Listo en Sheets
             scriptToken: '', // Clave secreta — debe coincidir con la constante TOKEN dentro del Apps Script
             feriados: [], // Fechas 'YYYY-MM-DD' que no cuentan como día hábil al calcular entregas
+            retencionStatsMeses: 6, // statsHistory (datos de calibración) — 0 = sin límite
+            retencionHistorialMeses: 18, // historial (órdenes completadas) — 0 = sin límite
             maq: {
                 byn_fast: 150, byn_slow: 80, color_normal: 50, color_grueso: 25, color_slow_n: 40, color_slow_g: 20,
                 corteInicial: 200, plast_vel: 5, plast_hoja: 0.475,
@@ -724,6 +726,7 @@
         function pushHistorial(o) {
             if (historial.find(h => h.id === o.id && h.ts && Date.now() - h.ts < 5000)) return;
             historial.push({ id: o.id, titulo: o.titulo || o.baseTitulo || o.id, cliente: o.cliente || '', cantidad: o.cantidad || 0, tipoEncuadernacion: o.tipoEncuadernacion || '', fechaLimite: o.fechaLimite || '', fechaCreacion: o.fechaCreacion || '', etaPredicha: o.etaPredicha || '', ts: Date.now() });
+            historial = trimByAge(historial, cfg.retencionHistorialMeses);
         }
 
         // Historial de movimientos por orden — de dónde a dónde, cómo y cuándo.
@@ -749,6 +752,14 @@
         // YYYY-MM-DD en hora LOCAL (no usar toISOString: convierte a UTC y puede correr
         // la fecha un día según la zona horaria y la hora del día).
         function ymdLocal(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+        // Recorta un arreglo tipo log a los últimos N meses — evita que statsHistory/historial
+        // crezcan para siempre y hagan cada vez más pesado cada guardado completo (saveS()).
+        // months <= 0 desactiva el recorte (sin límite).
+        function trimByAge(arr, months) {
+            if (!months || months <= 0) return arr;
+            const cutoff = Date.now() - months * 30 * 86400000;
+            return arr.filter(r => !r.ts || r.ts >= cutoff);
+        }
         function addDias(base, totMin, hpd) {
             const mpd = hpd * 60, d = Math.ceil(totMin / mpd);
             const dt = new Date(base);
@@ -3420,6 +3431,14 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           ${(cfg.feriados || []).length ? [...cfg.feriados].sort().map(f => `<span style="display:flex;align-items:center;gap:5px;background:#1e293b;border:1px solid #334155;border-radius:999px;padding:3px 6px 3px 10px;font-size:12px;color:#94a3b8">${fDate(f)}<button onclick="quitarFeriado('${f}')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:13px;line-height:1;padding:2px" title="Quitar">✕</button></span>`).join('') : '<span style="font-size:11px;color:#475569">Sin festivos agregados</span>'}
         </div>
       </div>
+      <div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px">
+        <div style="font-size:12px;color:#4ade80;font-weight:700;letter-spacing:.5px;margin-bottom:4px">🧹 RETENCIÓN DE HISTORIAL</div>
+        <div style="font-size:11px;color:#475569;margin-bottom:8px">Cuánto tiempo se conservan los registros antes de quitarlos automáticamente — evita que cada guardado se ponga más pesado con los años. 0 = sin límite.</div>
+        <div class="g2">
+          <div><div style="font-size:12px;color:#64748b">Datos de calibración (meses)</div><input class="inp" type="number" min="0" step="1" value="${cfg.retencionStatsMeses ?? 6}" oninput="cfg.retencionStatsMeses=+this.value;saveBoard()" style="margin-top:3px"></div>
+          <div><div style="font-size:12px;color:#64748b">Órdenes completadas (meses)</div><input class="inp" type="number" min="0" step="1" value="${cfg.retencionHistorialMeses ?? 18}" oninput="cfg.retencionHistorialMeses=+this.value;saveBoard()" style="margin-top:3px"></div>
+        </div>
+      </div>
       ${secs.map(sec => `<div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px"><div style="font-size:12px;color:${sec.color};font-weight:700;letter-spacing:.5px;margin-bottom:4px">${sec.title}</div><div class="g2">${sec.items.map(([l, p, s]) => inp(l, p, s)).join('')}</div></div>`).join('')}
       <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn btn-g" onclick="closeCfg()">Cerrar</button></div>
     </div>
@@ -3722,6 +3741,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     tiempos.push({ etapa: fromEtapa, label: procLabel, mins, ts });
                     orders[idx] = { ...orders[idx], tiemposReales: tiempos };
                     statsHistory.push({ ordId: oActual.id, titulo: oActual.titulo || oActual.baseTitulo || oActual.id, etapa: fromEtapa, label: procLabel, mins, cantidad: oActual.cantidad || 0, hojas: oActual.tabloidesSrc || 0, paginas: oActual.paginas || 0, gramaje: oActual.gramaje || '', tipoInteriores: oActual.tipoInteriores || '', tamano: oActual.tamano || '', maquina: oActual.maquina || '', ts });
+                    statsHistory = trimByAge(statsHistory, cfg.retencionStatsMeses);
                     autoCalibrate();
                     delete _scanTimers[timerKey];
                     saveTimers();
