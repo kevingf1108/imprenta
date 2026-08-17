@@ -425,7 +425,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.99997';
+        const APP_VERSION = 'v8.99998';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -693,8 +693,19 @@
         }
         function saveS() {
             const manualOrders = orders.filter(o => !o._fromSheets);
-            return _ref.set({ cfg, statsHistory, historial, etapaMap, manualOrders, scanLog, moveLog }).catch(e => {
+            // update() en vez de set(): mismo resultado para estas claves, pero dejamos la
+            // puerta abierta a saveBoard() para escribir solo una parte sin tocar el resto.
+            return _ref.update({ cfg, statsHistory, historial, etapaMap, manualOrders, scanLog, moveLog }).catch(e => {
                 try { localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); localStorage.setItem('imp_h', JSON.stringify(historial)); } catch { }
+            });
+        }
+        // Para acciones que NO tocan statsHistory/historial/scanLog (la mayoría de los
+        // movimientos del día a día) — evita reenviar esos registros, que solo crecen con
+        // el tiempo, en cada arrastre/escaneo/cambio de configuración.
+        function saveBoard() {
+            const manualOrders = orders.filter(o => !o._fromSheets);
+            return _ref.update({ cfg, etapaMap, manualOrders, moveLog }).catch(e => {
+                try { localStorage.setItem('imp_c', JSON.stringify(cfg)); } catch { }
             });
         }
         function pushHistorial(o) {
@@ -842,7 +853,7 @@
             const idI = nextId();
             orders.push({ ...base, id: idI, tipo: 'int_sub', titulo: `INT — ${f.baseTitulo || f.titulo}` });
             orders.push({ ...base, id: nextId(), tipo: 'port_sub', titulo: `PORT — ${f.baseTitulo || f.titulo}`, tipoInteriores: 'color' });
-            saveS(); modalId = undefined; render();
+            saveBoard(); modalId = undefined; render();
         }
 
         // Paso donde empieza un union_result después de unir INT+PORT
@@ -1481,7 +1492,7 @@
                         return { ...o, etaPredicha: calcETA(o, _fm).toISOString().split('T')[0] };
                     });
                 }
-                await saveS();
+                await saveBoard();
 
                 const ahora = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
                 if (log) log.innerHTML = `
@@ -1912,7 +1923,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       </div>
       <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap">
         <div style="display:flex;gap:6px">
-          <button onclick="if(confirm('¿Borrar TODAS las órdenes? Esto no se puede deshacer.')){orders=[];etapaMap={};saveS();render();closeSync();showToast('🗑 Órdenes borradas');}" style="padding:7px 14px;border-radius:8px;border:1px solid #7f1d1d;background:#1a0000;color:#f87171;font-weight:700;font-size:13px;cursor:pointer">🗑 Borrar todo</button>
+          <button onclick="if(confirm('¿Borrar TODAS las órdenes? Esto no se puede deshacer.')){orders=[];etapaMap={};saveBoard();render();closeSync();showToast('🗑 Órdenes borradas');}" style="padding:7px 14px;border-radius:8px;border:1px solid #7f1d1d;background:#1a0000;color:#f87171;font-weight:700;font-size:13px;cursor:pointer">🗑 Borrar todo</button>
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-g" onclick="closeSync()">Cancelar</button>
@@ -1978,7 +1989,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             if (colId === 'listo') { delete etapaMap[_dragId]; clearOrderTimers(_dragId); pushHistorial(orders[idx]); }
             autoGroupFinish(_dragId, colId);
             callScript(orders[idx], colId, fromEtapa);
-            autoMergeCheck(); saveS(); render();
+            autoMergeCheck();
+            (colId === 'listo' ? saveS() : saveBoard());
+            render();
             _dragId = null;
         }
 
@@ -2124,7 +2137,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 const rounded = Math.round(avg * 10) / 10;
                 if (Math.abs(rounded - cfg.maq[key]) > 0.05) { cfg.maq[key] = rounded; changed = true; }
             });
-            if (changed) saveS();
+            if (changed) saveBoard();
         }
 
         // ═══════════════════════════════════════════════════
@@ -3336,37 +3349,37 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     <div class="modal" style="max-width:620px" onclick="event.stopPropagation()">
       <div style="display:flex;justify-content:space-between;margin-bottom:16px"><h2 style="font-size:17px;font-weight:700">⚙️ Configuración de Máquinas</h2><button class="bico" onclick="closeCfg()" style="font-size:20px;color:#94a3b8">✕</button></div>
       <span class="lbl" style="margin-top:0">Nombre de la imprenta</span>
-      <input class="inp" value="${e(cfg.nombreImprenta)}" oninput="cfg.nombreImprenta=this.value;saveS()">
+      <input class="inp" value="${e(cfg.nombreImprenta)}" oninput="cfg.nombreImprenta=this.value;saveBoard()">
       <div class="g2">
-        <div><span class="lbl">Hora inicio jornada</span><input class="inp" type="number" min="0" max="23" value="${cfg.startHour || 8}" oninput="cfg.startHour=+this.value;saveS()"><div style="font-size:10px;color:#475569;margin-top:2px">Ej: 8 = 8:00 am</div></div>
-        <div><span class="lbl">Horas de trabajo por día</span><input class="inp" type="number" min="1" max="24" value="${cfg.horasDia}" oninput="cfg.horasDia=+this.value;saveS()"><div style="font-size:10px;color:#475569;margin-top:2px">Ej: 10 = termina a las 18:00</div></div>
+        <div><span class="lbl">Hora inicio jornada</span><input class="inp" type="number" min="0" max="23" value="${cfg.startHour || 8}" oninput="cfg.startHour=+this.value;saveBoard()"><div style="font-size:10px;color:#475569;margin-top:2px">Ej: 8 = 8:00 am</div></div>
+        <div><span class="lbl">Horas de trabajo por día</span><input class="inp" type="number" min="1" max="24" value="${cfg.horasDia}" oninput="cfg.horasDia=+this.value;saveBoard()"><div style="font-size:10px;color:#475569;margin-top:2px">Ej: 10 = termina a las 18:00</div></div>
       </div>
       <div style="background:#0a1200;border:1px solid #166534;border-radius:10px;padding:14px;margin-top:16px">
         <div style="font-size:12px;color:#4ade80;font-weight:700;margin-bottom:8px">🔗 CONEXIÓN CON GOOGLE SHEETS</div>
         <span class="lbl" style="margin-top:0;color:#64748b">URL del Google Apps Script Web App</span>
         <div style="display:flex;gap:8px;align-items:center">
-          <input class="inp" style="flex:1;margin-bottom:0" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.scriptUrl || '')}" oninput="cfg.scriptUrl=this.value;saveS()">
+          <input class="inp" style="flex:1;margin-bottom:0" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.scriptUrl || '')}" oninput="cfg.scriptUrl=this.value;saveBoard()">
           <button onclick="testScriptUrl()" style="padding:7px 12px;border-radius:8px;border:1px solid #166534;background:#0a2e1a;color:#4ade80;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap">🔌 Probar</button>
         </div>
         <div style="font-size:11px;color:#475569;margin-top:6px">Cuando avances una orden con ▶, automáticamente marcará <b style="color:#4ade80">Listo = TRUE</b> en tu hoja de Google Sheets y enviará a Acabado org.</div>
         <span class="lbl" style="margin-top:12px;color:#ef4444">🔒 Token secreto del script</span>
-        <input class="inp" placeholder="Clave larga, cualquier texto único" value="${e(cfg.scriptToken || '')}" oninput="cfg.scriptToken=this.value;saveS()">
+        <input class="inp" placeholder="Clave larga, cualquier texto único" value="${e(cfg.scriptToken || '')}" oninput="cfg.scriptToken=this.value;saveBoard()">
         <div style="font-size:11px;color:#475569;margin-top:6px">Debe ser <b style="color:#ef4444">exactamente igual</b> a la constante <b>TOKEN</b> dentro del Apps Script (ver botón 🔄 Sheets). Sin esto, cualquiera con la URL del script podría borrar o modificar tus hojas.</div>
         <span class="lbl" style="margin-top:12px;color:#f59e0b">URL Script — Log HE / DI / KE / IS / AD / T (Empacado)</span>
-        <input class="inp" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.scanLogUrl || '')}" oninput="cfg.scanLogUrl=this.value;saveS()">
+        <input class="inp" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.scanLogUrl || '')}" oninput="cfg.scanLogUrl=this.value;saveBoard()">
         <div style="font-size:11px;color:#475569;margin-top:6px">Al escanear <b style="color:#f59e0b">HE</b>, <b style="color:#f59e0b">DI</b>, <b style="color:#f59e0b">KE</b>, <b style="color:#f59e0b">IS</b>, <b style="color:#f59e0b">AD</b> o <b style="color:#f59e0b">T</b>, manda el scan a este script. No mueve ninguna orden.</div>
         <span class="lbl" style="margin-top:12px;color:#38bdf8">URL Script — Log Máquinas (F| / P| / O| / IM|)</span>
-        <input class="inp" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.maqScanUrl || '')}" oninput="cfg.maqScanUrl=this.value;saveS()">
+        <input class="inp" placeholder="https://script.google.com/macros/s/.../exec" value="${e(cfg.maqScanUrl || '')}" oninput="cfg.maqScanUrl=this.value;saveBoard()">
         <div style="font-size:11px;color:#475569;margin-top:6px">Al escanear <b style="color:#38bdf8">F%W</b>, <b style="color:#38bdf8">P%W</b>, <b style="color:#38bdf8">O%W</b> o <b style="color:#38bdf8">IM%W</b> + número de máquina (10010, 1352, 6180, 6320…), manda a la hoja "Log Maquinas". Si se deja vacío usa el script principal.</div>
         <div style="font-size:11px;color:#166534;margin-top:4px">📋 Ver instrucciones para crear el script → botón 🔄 Sheets → "Cómo configurar"</div>
       </div>
       <div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px">
         <div style="font-size:12px;color:#4ade80;font-weight:700;letter-spacing:.5px;margin-bottom:4px">🤖 AUTO-CALIBRACIÓN Y ENTREGAS</div>
         <div class="g2">
-          <div><div style="font-size:12px;color:#64748b;margin-top:10px">Factor buffer entrega (×)</div><input class="inp" type="number" step="0.05" min="1" max="3" value="${cfg.bufferFactor || 1.3}" oninput="cfg.bufferFactor=+this.value;saveS()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">1.3 = 30% extra sobre el tiempo calculado</div></div>
+          <div><div style="font-size:12px;color:#64748b;margin-top:10px">Factor buffer entrega (×)</div><input class="inp" type="number" step="0.05" min="1" max="3" value="${cfg.bufferFactor || 1.3}" oninput="cfg.bufferFactor=+this.value;saveBoard()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">1.3 = 30% extra sobre el tiempo calculado</div></div>
           <div></div>
-          <div><div style="font-size:12px;color:#64748b;margin-top:10px">Rango mín. calibración (fracción)</div><input class="inp" type="number" step="0.05" min="0.1" max="1" value="${cfg.calibRangeMin || 0.5}" oninput="cfg.calibRangeMin=+this.value;saveS()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">0.5 = excluir muestras < 50% de la mediana</div></div>
-          <div><div style="font-size:12px;color:#64748b;margin-top:10px">Rango máx. calibración (fracción)</div><input class="inp" type="number" step="0.1" min="1" max="5" value="${cfg.calibRangeMax || 2.0}" oninput="cfg.calibRangeMax=+this.value;saveS()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">2.0 = excluir muestras > 200% de la mediana</div></div>
+          <div><div style="font-size:12px;color:#64748b;margin-top:10px">Rango mín. calibración (fracción)</div><input class="inp" type="number" step="0.05" min="0.1" max="1" value="${cfg.calibRangeMin || 0.5}" oninput="cfg.calibRangeMin=+this.value;saveBoard()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">0.5 = excluir muestras < 50% de la mediana</div></div>
+          <div><div style="font-size:12px;color:#64748b;margin-top:10px">Rango máx. calibración (fracción)</div><input class="inp" type="number" step="0.1" min="1" max="5" value="${cfg.calibRangeMax || 2.0}" oninput="cfg.calibRangeMax=+this.value;saveBoard()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">2.0 = excluir muestras > 200% de la mediana</div></div>
         </div>
       </div>
       ${secs.map(sec => `<div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px"><div style="font-size:12px;color:${sec.color};font-weight:700;letter-spacing:.5px;margin-bottom:4px">${sec.title}</div><div class="g2">${sec.items.map(([l, p, s]) => inp(l, p, s)).join('')}</div></div>`).join('')}
@@ -3397,9 +3410,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const ord = { ...o, tipo: o._split ? 'normal' : 'normal' };
             if (modalId === null) { orders.push({ ...ord, tipo: 'normal', id: nextId(), etapa: 'impresion', fechaCreacion: new Date().toISOString().split('T')[0] }); }
             else { const idx = orders.findIndex(x => x.id === modalId); if (idx >= 0) orders[idx] = { ...orders[idx], ...ord }; }
-            saveS(); modalId = undefined; render();
+            saveBoard(); modalId = undefined; render();
         }
-        function delOrd() { if (!confirm('¿Eliminar esta orden?')) return; orders = orders.filter(o => o.id !== modalId); delete etapaMap[modalId]; saveS(); modalId = undefined; render(); }
+        function delOrd() { if (!confirm('¿Eliminar esta orden?')) return; orders = orders.filter(o => o.id !== modalId); delete etapaMap[modalId]; saveBoard(); modalId = undefined; render(); }
         function mvOrd(id, dir) {
             const idx = orders.findIndex(o => o.id === id); if (idx < 0) return;
             const o = orders[idx];
@@ -3425,7 +3438,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 if (target.id === 'listo') { delete etapaMap[id]; clearOrderTimers(id); pushHistorial(orders[idx]); }
                 autoGroupFinish(id, target.id);
                 callScript(orders[idx], target.id, fromEtapa);
-                autoMergeCheck(); saveS(); render(); return;
+                autoMergeCheck();
+                (target.id === 'listo' ? saveS() : saveBoard());
+                render(); return;
             }
             const ni = ei + dir;
             if (ni < 0 || ni >= flow.length) return;
@@ -3436,7 +3451,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             autoGroupFinish(id, flow[ni].id);
             callScript(orders[idx], flow[ni].id, fromEtapa);
             autoMergeCheck();
-            saveS(); render();
+            (flow[ni].id === 'listo' ? saveS() : saveBoard());
+            render();
         }
         function openCfg() { showCfg = true; render(); }
         function closeCfg() { showCfg = false; render(); }
@@ -3448,7 +3464,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             if (autoSync) { runSync(); _autoSyncInt = setInterval(runSync, 5 * 60 * 1000); }
             render();
         }
-        function updCfg(el) { const path = el.dataset.cfg, val = +el.value, ks = path.split('.'); let o = cfg; for (let i = 0; i < ks.length - 1; i++)o = o[ks[i]]; o[ks[ks.length - 1]] = val; saveS(); }
+        function updCfg(el) { const path = el.dataset.cfg, val = +el.value, ks = path.split('.'); let o = cfg; for (let i = 0; i < ks.length - 1; i++)o = o[ks[i]]; o[ks[ks.length - 1]] = val; saveBoard(); }
 
         // ═══════════════════════════════════════════════════
         //  ESCÁNER DE CÓDIGO DE BARRAS
@@ -3620,7 +3636,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                         actionLabel = '▶ Continuando'; actionColor = '#4ade80';
                     }
                 });
-                saveTimers(); saveS(); render();
+                saveTimers(); saveBoard(); render();
                 if (!silent) {
                     showToast(actionLabel + ' ' + procLabel + ': ' + matches.map(o => o.titulo.substring(0, 15)).join(', '));
                     showScanFlash(matches[0].titulo, actionLabel + (matches.length > 1 ? ' ×' + matches.length : ''), actionColor);
@@ -3630,6 +3646,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
 
             // ── 5. PASA: avanza todas las órdenes del grupo ──────────────
             let movedLabels = [];
+            let _tocoLogsFull = false; // statsHistory (cierre de timer) y/o historial (llega a listo)
             matches.forEach(o => {
                 const idx = orders.findIndex(x => x.id === o.id);
                 const timerKey = o.id + (proc ? '_' + proc.pre : '');
@@ -3657,18 +3674,21 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     autoCalibrate();
                     delete _scanTimers[timerKey];
                     saveTimers();
+                    _tocoLogsFull = true;
                 }
                 orders[idx] = { ...orders[idx], etapa: nextStep.id };
                 etapaMap[o.id] = nextStep.id;
                 logMove(orders[idx], fromEtapa, nextStep.id, 'escaneo');
-                if (nextStep.id === 'listo') { delete etapaMap[o.id]; pushHistorial(orders[idx]); }
+                if (nextStep.id === 'listo') { delete etapaMap[o.id]; pushHistorial(orders[idx]); _tocoLogsFull = true; }
                 autoGroupFinish(o.id, nextStep.id);
                 callScript(orders[idx], nextStep.id, fromEtapa);
                 if (proc && proc.logScan) fetchLastSalidaRow(proc.label);
                 movedLabels.push(nextStep.label);
             });
 
-            autoMergeCheck(); saveS(); render();
+            autoMergeCheck();
+            (_tocoLogsFull ? saveS() : saveBoard());
+            render();
             const nextLbl = movedLabels[0] || '';
             const isSub = matches[0]?.tipo === 'int_sub' || matches[0]?.tipo === 'port_sub';
             const subNote = isSub && nextLbl === 'Empaque' ? ' (sub-orden → espera armado)' : '';
