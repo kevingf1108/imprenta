@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.999992';
+        const APP_VERSION = 'v8.999993';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -2290,7 +2290,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // el sync todavía no lo trajo, o porque de verdad no existe en ningún lado.
         async function buscarEnSheets(codigo) {
             if (!cfg.scriptUrl) { showToast('⚠️ Configura la URL del script primero'); return; }
-            const digits = String(codigo || '').replace(/\D/g, '').slice(0, 6);
+            // Mismo criterio que handleScan: quitar el sufijo "0013" del escáner antes de
+            // recortar, para no perder el 7º dígito en items que ya no son de solo 6.
+            let _digitsRaw = String(codigo || '').replace(/\D/g, '');
+            if (_digitsRaw.length > 7 && _digitsRaw.endsWith('0013')) _digitsRaw = _digitsRaw.slice(0, -4);
+            const digits = _digitsRaw.slice(0, 7);
             if (!digits) { showToast('⚠️ No hay número de item para buscar'); return; }
             showToast('🔎 Buscando ' + digits + ' en Google Sheets...', 3000);
             try {
@@ -3633,8 +3637,12 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             // grupo:true  → 5 dígitos, mueve todo el grupo (pegado y después)
             // grupo:false → 6 dígitos exactos, mueve SOLO esa orden (impresión, CI, plastificado…)
             const esGrupo = proc ? !!proc.grupo : false;
-            // Tomar solo los primeros 6 dígitos (ignora %W, sufijos del escáner como 0013, etc.)
-            const digits6 = ((ordId.match(/\d+/) || [''])[0] || ordId.replace(/\D/g, '')).slice(0, 6);
+            // El escáner a veces agrega un sufijo fijo "0013" al final del código — hay que
+            // quitarlo ANTES de recortar el número de item, si no se pierde su último dígito
+            // real (algunos items de Muestras ya llegan a 7 dígitos, no siempre 6).
+            let _allNums = (ordId.match(/\d+/) || [''])[0] || ordId.replace(/\D/g, '');
+            if (_allNums.length > 7 && _allNums.endsWith('0013')) _allNums = _allNums.slice(0, -4);
+            const digits6 = _allNums.slice(0, 7);
             const prefix5 = digits6.slice(0, 5);
 
             let matches;
