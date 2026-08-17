@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.99999';
+        const APP_VERSION = 'v8.999991';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -616,6 +616,7 @@
             bufferFactor: 1.3, calibRangeMin: 0.5, calibRangeMax: 2.0,
             scriptUrl: '', // URL del Google Apps Script Web App para marcar Listo en Sheets
             scriptToken: '', // Clave secreta — debe coincidir con la constante TOKEN dentro del Apps Script
+            feriados: [], // Fechas 'YYYY-MM-DD' que no cuentan como día hábil al calcular entregas
             maq: {
                 byn_fast: 150, byn_slow: 80, color_normal: 50, color_grueso: 25, color_slow_n: 40, color_slow_g: 20,
                 corteInicial: 200, plast_vel: 5, plast_hoja: 0.475,
@@ -745,7 +746,21 @@
         function nextGrpId() { const ns = orders.filter(o => o.grupoId).map(o => parseInt(o.grupoId.replace('GRP-', ''), 10)).filter(n => !isNaN(n)); return `GRP-${String((ns.length ? Math.max(...ns) : 0) + 1).padStart(2, '0')}`; }
         function encOf(id) { return TIPOS_ENC.find(t => t.id === id) || TIPOS_ENC[0]; }
         function etOf(id) { return ETAPAS.find(et => et.id === id) || ACAB_STEPS.find(s => s.id === id) || ETAPAS[0]; }
-        function addDias(base, totMin, hpd) { const mpd = hpd * 60, d = Math.ceil(totMin / mpd); const dt = new Date(base); let n = 0; while (n < d) { dt.setDate(dt.getDate() + 1); if (dt.getDay() && dt.getDay() < 6) n++; } return dt; }
+        // YYYY-MM-DD en hora LOCAL (no usar toISOString: convierte a UTC y puede correr
+        // la fecha un día según la zona horaria y la hora del día).
+        function ymdLocal(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+        function addDias(base, totMin, hpd) {
+            const mpd = hpd * 60, d = Math.ceil(totMin / mpd);
+            const dt = new Date(base);
+            const feriados = new Set(cfg.feriados || []);
+            let n = 0;
+            while (n < d) {
+                dt.setDate(dt.getDate() + 1);
+                const esLaborable = dt.getDay() && dt.getDay() < 6;
+                if (esLaborable && !feriados.has(ymdLocal(dt))) n++;
+            }
+            return dt;
+        }
         function prioSort(a, b) { const fa = a.fechaLimite || 'z', fb = b.fechaLimite || 'z'; if (fa !== fb) return fa < fb ? -1 : 1; if (a.urgente !== b.urgente) return a.urgente ? -1 : 1; return 0; }
 
         // ═══════════════════════════════════════════════════
@@ -3394,6 +3409,17 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           <div><div style="font-size:12px;color:#64748b;margin-top:10px">Rango máx. calibración (fracción)</div><input class="inp" type="number" step="0.1" min="1" max="5" value="${cfg.calibRangeMax || 2.0}" oninput="cfg.calibRangeMax=+this.value;saveBoard()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">2.0 = excluir muestras > 200% de la mediana</div></div>
         </div>
       </div>
+      <div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px">
+        <div style="font-size:12px;color:#4ade80;font-weight:700;letter-spacing:.5px;margin-bottom:4px">📅 DÍAS FERIADOS</div>
+        <div style="font-size:11px;color:#475569;margin-bottom:8px">No cuentan como día hábil al calcular fechas de entrega — solo se brincan sábados/domingos por defecto</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="inp" type="date" id="f_feriado" style="margin-bottom:0">
+          <button class="btn btn-sm btn-p" onclick="agregarFeriado()" style="white-space:nowrap">+ Agregar</button>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+          ${(cfg.feriados || []).length ? [...cfg.feriados].sort().map(f => `<span style="display:flex;align-items:center;gap:5px;background:#1e293b;border:1px solid #334155;border-radius:999px;padding:3px 6px 3px 10px;font-size:12px;color:#94a3b8">${fDate(f)}<button onclick="quitarFeriado('${f}')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:13px;line-height:1;padding:2px" title="Quitar">✕</button></span>`).join('') : '<span style="font-size:11px;color:#475569">Sin festivos agregados</span>'}
+        </div>
+      </div>
       ${secs.map(sec => `<div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px"><div style="font-size:12px;color:${sec.color};font-weight:700;letter-spacing:.5px;margin-bottom:4px">${sec.title}</div><div class="g2">${sec.items.map(([l, p, s]) => inp(l, p, s)).join('')}</div></div>`).join('')}
       <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn btn-g" onclick="closeCfg()">Cerrar</button></div>
     </div>
@@ -3477,6 +3503,19 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             render();
         }
         function updCfg(el) { const path = el.dataset.cfg, val = +el.value, ks = path.split('.'); let o = cfg; for (let i = 0; i < ks.length - 1; i++)o = o[ks[i]]; o[ks[ks.length - 1]] = val; saveBoard(); }
+        function agregarFeriado() {
+            const el = document.getElementById('f_feriado');
+            const val = el && el.value;
+            if (!val) return;
+            if (!cfg.feriados) cfg.feriados = [];
+            if (!cfg.feriados.includes(val)) cfg.feriados.push(val);
+            if (el) el.value = '';
+            saveBoard(); render();
+        }
+        function quitarFeriado(f) {
+            cfg.feriados = (cfg.feriados || []).filter(x => x !== f);
+            saveBoard(); render();
+        }
 
         // ═══════════════════════════════════════════════════
         //  ESCÁNER DE CÓDIGO DE BARRAS
