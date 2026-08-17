@@ -418,6 +418,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check-compat.js"></script>
 </head>
 
 <body>
@@ -425,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.99998';
+        const APP_VERSION = 'v8.99999';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -460,6 +461,17 @@
             messagingSenderId: "80250247267",
             appId: "1:80250247267:web:36ee4b66a593feba630056"
         });
+        // ── App Check (reCAPTCHA v3) ─────────────────────────
+        // Prueba que las peticiones a Firebase vienen de esta app real, no de un script
+        // cualquiera que solo tenga el apiKey. Mientras no se "exija" en la consola de
+        // Firebase (Build → App Check → Realtime Database → Enforce), esto solo observa —
+        // no bloquea a nadie. Se activa de verdad ahí, no aquí.
+        try {
+            firebase.appCheck().activate(
+                new firebase.appCheck.ReCaptchaV3Provider('6Lda9IotAAAAAAeGwQ5j48cvsJv_rl-x6_dxVwWK'),
+                true
+            );
+        } catch (e) { console.error('App Check no se pudo activar:', e); }
         const _db = firebase.database();
         const _ref = _db.ref('imprenta');
 
