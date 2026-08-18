@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.999993';
+        const APP_VERSION = 'v8.999994';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -710,18 +710,58 @@
             const manualOrders = orders.filter(o => !o._fromSheets);
             // update() en vez de set(): mismo resultado para estas claves, pero dejamos la
             // puerta abierta a saveBoard() para escribir solo una parte sin tocar el resto.
-            return _ref.update({ cfg, statsHistory, historial, etapaMap, manualOrders, scanLog, moveLog }).catch(e => {
+            const p = _ref.update({ cfg, statsHistory, historial, etapaMap, manualOrders, scanLog, moveLog }).catch(e => {
                 try { localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); localStorage.setItem('imp_h', JSON.stringify(historial)); } catch { }
             });
+            pushLiveStatus();
+            return p;
         }
         // Para acciones que NO tocan statsHistory/historial/scanLog (la mayoría de los
         // movimientos del día a día) — evita reenviar esos registros, que solo crecen con
         // el tiempo, en cada arrastre/escaneo/cambio de configuración.
         function saveBoard() {
             const manualOrders = orders.filter(o => !o._fromSheets);
-            return _ref.update({ cfg, etapaMap, manualOrders, moveLog }).catch(e => {
+            const p = _ref.update({ cfg, etapaMap, manualOrders, moveLog }).catch(e => {
                 try { localStorage.setItem('imp_c', JSON.stringify(cfg)); } catch { }
             });
+            pushLiveStatus();
+            return p;
+        }
+        // ── Resumen en vivo para el bot de Slack ────────────────────────────
+        // Se manda al Apps Script (no a Firebase) para que un endpoint sin acceso
+        // al motor de scheduling pueda de todos modos leer un estado ya calculado,
+        // sin duplicar scheduleMachines()/calcETA() en otro lenguaje/runtime.
+        function buildLiveStatus() {
+            const active = orders.filter(o => o.etapa !== 'listo' && !o._merged);
+            if (!active.length) return [];
+            const finishMin = scheduleMachines(orders, cfg).finishMin;
+            const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+            const etapaInfo = [...ETAPAS, ...ACAB_STEPS];
+            return active.map(o => {
+                // Para órdenes de sheets, mapImpRow()/mapAcabRow() rescriben fechaCreacion a
+                // "hoy" en CADA sync — no sirve como ancla. Usamos primerVistoLive (congelada
+                // en runSync, igual que etaPredicha) en su lugar. Las manuales sí traen una
+                // fechaCreacion real y estable puesta una sola vez al crearlas.
+                const anchor = o._fromSheets ? (o.primerVistoLive || null) : (o.fechaCreacion || o.primerVistoLive || null);
+                const diasTranscurridos = anchor ? Math.max(0, Math.round((hoy - new Date(anchor + 'T00:00:00')) / 86400000)) : 0;
+                const mins = finishMin[o.id];
+                const eta = mins != null ? calcETA(o, finishMin) : null;
+                if (eta) eta.setHours(0, 0, 0, 0);
+                const diasRestantes = eta ? Math.round((eta - hoy) / 86400000) : null;
+                const info = etapaInfo.find(e => e.id === o.etapa);
+                return {
+                    id: o.id, titulo: o.titulo || o.baseTitulo || o.id, cliente: o.cliente || '',
+                    cantidad: o.cantidad || 0, etapa: o.etapa, etapaLabel: info ? info.label : o.etapa,
+                    diasTranscurridos, diasRestantes, etaEstimada: eta ? ymdLocal(eta) : ''
+                };
+            });
+        }
+        function pushLiveStatus() {
+            if (!cfg.scriptUrl) return;
+            try {
+                const items = buildLiveStatus();
+                fetch(scriptURL('action=guardarestado'), { method: 'POST', mode: 'no-cors', body: JSON.stringify(items) }).catch(() => { });
+            } catch { }
         }
         function pushHistorial(o) {
             if (historial.find(h => h.id === o.id && h.ts && Date.now() - h.ts < 5000)) return;
@@ -1517,11 +1557,17 @@
                     // etaPredicha es una foto fija tomada la primera vez que vimos la orden —
                     // una vez que existe, se conserva tal cual en cada sync futuro.
                     if (local && local.etaPredicha) result = { ...result, etaPredicha: local.etaPredicha };
+                    // primerVistoLive: mismo criterio, para saber "cuántos días lleva" una orden
+                    // de sheets (que no tiene fechaCreacion) sin tener que adivinarlo cada vez.
+                    if (local && local.primerVistoLive) result = { ...result, primerVistoLive: local.primerVistoLive };
                     return result;
                 })];
                 // Congelar la primera predicción del motor para cada orden nueva/activa que
                 // todavía no tenga una — sirve después para medir qué tan preciso fue el motor
                 // comparando esta fecha contra cuándo se entregó de verdad (ver Stats).
+                // Solo aplica a órdenes de sheets: las manuales ya tienen una fechaCreacion
+                // real puesta una sola vez al crearlas (ver Nueva Orden).
+                orders = orders.map(o => (!o._fromSheets || o.primerVistoLive || o.etapa === 'listo' || o._merged) ? o : { ...o, primerVistoLive: ymdLocal(new Date()) });
                 const _sinPrediccion = orders.filter(o => !o.etaPredicha && o.etapa !== 'listo' && !o._merged);
                 if (_sinPrediccion.length) {
                     const _fm = scheduleMachines(orders, cfg).finishMin;
