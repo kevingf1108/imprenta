@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.999994';
+        const APP_VERSION = 'v8.999995';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -756,11 +756,41 @@
                 };
             });
         }
+        // Pasos que puede necesitar una orden nueva hipotética con flujo 'normal' (ver
+        // rama NORMAL de calcT) — usados para publicar cuándo se desocupa cada uno.
+        const ESTIMADOR_STEPS = ['iib', 'iic', 'ip', 'pl', 'ci', 'cp', 'pg', 'cf', 'cc', 'ap', 'ms', 'en', 'es', 'pi', 'pp', 'te'];
+        // Datos para que el bot de Slack pueda estimar una orden que TODAVÍA NO EXISTE
+        // (para decidir urgencias) sin duplicar el motor completo: manda las constantes ya
+        // calibradas tal cual (nunca se inventan del lado de Apps Script), más una proporción
+        // histórica hojas/(paginas×cantidad) — el único dato que un vendedor no puede dar
+        // (tabloides) y que aquí se estima desde trabajos reales ya completados — y cuándo
+        // se desocupa cada máquina ahorita mismo.
+        function buildEstimadorConfig() {
+            const calib = {
+                maq: cfg.maq, setup: cfg.setup, bufferFactor: cfg.bufferFactor, horasDia: cfg.horasDia,
+                startHour: cfg.startHour, pptDefault: cfg.pptDefault, portaPptDefault: cfg.portaPptDefault,
+                feriados: cfg.feriados || []
+            };
+            const ratios = statsHistory
+                .filter(r => r.hojas > 0 && r.paginas > 0 && r.cantidad > 0)
+                .map(r => r.hojas / (r.paginas * r.cantidad))
+                .sort((a, b) => a - b);
+            const tabPerPagPieza = ratios.length ? ratios[Math.floor(ratios.length / 2)] : null;
+            const machAvail = scheduleMachines(orders, cfg).machAvail;
+            const stepDisponibilidad = {};
+            ESTIMADOR_STEPS.forEach(stepId => {
+                const cands = MAQUINAS.filter(m => m.steps.includes(stepId));
+                if (!cands.length) return;
+                stepDisponibilidad[stepId] = Math.min(...cands.map(m => machAvail[m.id] || 0));
+            });
+            return { calib, tabPerPagPieza, stepDisponibilidad };
+        }
         function pushLiveStatus() {
             if (!cfg.scriptUrl) return;
             try {
                 const items = buildLiveStatus();
-                fetch(scriptURL('action=guardarestado'), { method: 'POST', mode: 'no-cors', body: JSON.stringify(items) }).catch(() => { });
+                const estimador = buildEstimadorConfig();
+                fetch(scriptURL('action=guardarestado'), { method: 'POST', mode: 'no-cors', body: JSON.stringify({ items, estimador }) }).catch(() => { });
             } catch { }
         }
         function pushHistorial(o) {
@@ -1086,7 +1116,7 @@
                 const st = ordState[o.id];
                 finishMin[o.id] = Math.max(st.intEnd, st.portEnd, st.mainEnd);
             });
-            return { blocks, colorMap, finishMin };
+            return { blocks, colorMap, finishMin, machAvail };
         }
 
         // ═══════════════════════════════════════════════════
