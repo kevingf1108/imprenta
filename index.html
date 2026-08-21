@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.999996';
+        const APP_VERSION = 'v8.999997';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -776,7 +776,11 @@
                 .map(r => r.hojas / (r.paginas * r.cantidad))
                 .sort((a, b) => a - b);
             const tabPerPagPieza = ratios.length ? ratios[Math.floor(ratios.length / 2)] : null;
-            const machAvail = scheduleMachines(orders, cfg).machAvail;
+            // Solo órdenes urgentes: si se mete una urgencia nueva, la producción normal
+            // que ya está en cola se recorre (el orden de prioridad real ya la manda
+            // después de las urgentes) — lo que de verdad compite por el tiempo de
+            // máquina es otra fila de urgencias, no el tablero completo.
+            const machAvail = scheduleMachines(orders.filter(o => o.urgente), cfg).machAvail;
             const stepDisponibilidad = {};
             ESTIMADOR_STEPS.forEach(stepId => {
                 const cands = MAQUINAS.filter(m => m.steps.includes(stepId));
