@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.999997';
+        const APP_VERSION = 'v8.999998';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -1323,7 +1323,7 @@
         function callTracking(order, toEtapa) {
             if (!cfg.scriptUrl) return;
             const item = encodeURIComponent(String(order.grupoId || order.id).replace(/-[MAPm]$/, '').trim());
-            const etapaTracking = order._isMuestra ? 'M. ' + toEtapa : 'P.' + toEtapa;
+            const etapaTracking = (order._isMuestra ? 'M. ' : 'P. ') + toEtapa;
             fetch(scriptURL('action=updateTracking&item=' + item + '&etapa=' + encodeURIComponent(etapaTracking) + '&trackingId=' + encodeURIComponent(TRACKING_SHEET_ID)), { mode: 'no-cors' }).catch(() => { });
         }
 
