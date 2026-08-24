@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.999999';
+        const APP_VERSION = 'v8.1000000';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -1046,10 +1046,17 @@
             if (idx < 0) return newEtapa;
             const o = orders[idx];
             if ((o.tipo !== 'int_sub' && o.tipo !== 'port_sub') || !o.grupoId || o._merged) return newEtapa;
+            // Si de verdad NO existe la otra mitad (no solo "todavía no está lista" — sino que
+            // no hay ninguna orden port_sub/int_sub activa con este mismo grupoId), no hay con
+            // qué unirse: dejarla seguir su curso normal a Empaque, nunca bloquearla para
+            // siempre esperando algo que no va a llegar.
+            const tipoPareja = o.tipo === 'int_sub' ? 'port_sub' : 'int_sub';
+            const parejaExiste = orders.some(x => x.grupoId === o.grupoId && x.tipo === tipoPareja && !x._merged && x.etapa !== 'listo');
+            if (!parejaExiste) return newEtapa;
             // mergeOrders reasigna el arreglo orders (orders = orders.map(...)) conservando el
             // mismo índice, así que orders[idx] sigue siendo ESTA orden — ahora con etapa:'listo'.
             if (mergeOrders(o.grupoId)) return orders[idx].etapa;
-            // La pareja no está lista todavía — se queda esperando en su último paso propio.
+            // La pareja SÍ existe pero no está lista todavía — se queda esperando en su último paso.
             const flow = getAcabFlow(o);
             const ultimoPaso = flow.length ? flow[flow.length - 1] : 'impresion';
             orders[idx] = { ...orders[idx], etapa: ultimoPaso };
