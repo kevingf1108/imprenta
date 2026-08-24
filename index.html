@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.999998';
+        const APP_VERSION = 'v8.999999';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -976,9 +976,33 @@
             return 'acab_pg'; // normal/rústica
         }
 
+        // Última etapa de acabados propia de una sub-orden (antes de los pasos compartidos de
+        // unión) — no basta con "está en algún paso de acabados" (isAcabEtapa), porque en
+        // pasta dura cada mitad tiene VARIOS pasos propios (ej. interior: ci→pg→cf→cdc) y no
+        // debe unirse a medio camino. También cuenta como "terminada" si ya está en empaque o
+        // listo (así detecta a la mitad que disparó el evento, cuyo etapa ya se actualizó).
+        function terminoAcabadosPropios_(o) {
+            const flow = getAcabFlow(o);
+            const ultimoPaso = flow.length ? flow[flow.length - 1] : 'impresion';
+            return o.etapa === ultimoPaso || o.etapa === 'empaque' || o.etapa === 'listo';
+        }
+
+        // Avisa a Sheets que una mitad (interior/portada) quedó lista al unirse — directo,
+        // sin pasar por callScript(), porque su inferencia automática de "hoja" (impresión vs
+        // acabados) se basa en el tipo de orden, no en dónde está realmente parada; en el
+        // momento de la unión SIEMPRE están en acabados (mergeOrders solo une cuando ambas ya
+        // terminaron su parte ahí), así que aquí se manda explícito para no mandar la hoja mal.
+        function avisarMitadUnida_(sub) {
+            if (!cfg.scriptUrl || !sub._fromSheets) return;
+            const item = String(sub.grupoId || '').trim();
+            if (!item) return;
+            const po = sub.tipo === 'int_sub' ? 'int' : 'port';
+            fetch(scriptURL('action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=acabados&po=' + po), { mode: 'no-cors' }).catch(() => { });
+        }
+
         function mergeOrders(grupoId) {
-            const intSub = orders.find(o => o.grupoId === grupoId && o.tipo === 'int_sub' && isAcabEtapa(o.etapa));
-            const portSub = orders.find(o => o.grupoId === grupoId && o.tipo === 'port_sub' && isAcabEtapa(o.etapa));
+            const intSub = orders.find(o => o.grupoId === grupoId && o.tipo === 'int_sub' && !o._merged && o.etapa !== 'listo' && terminoAcabadosPropios_(o));
+            const portSub = orders.find(o => o.grupoId === grupoId && o.tipo === 'port_sub' && !o._merged && o.etapa !== 'listo' && terminoAcabadosPropios_(o));
             if (!intSub || !portSub) return false;
             const enc = intSub.tipoEncuadernacion || 'normal';
             const startStep = getUnionStartStep(enc);
@@ -989,15 +1013,49 @@
             });
             orders = orders.map(o => (o.id === intSub.id || o.id === portSub.id) ? { ...o, etapa: 'listo', _merged: true } : o);
             delete etapaMap[intSub.id]; delete etapaMap[portSub.id];
+            avisarMitadUnida_(intSub);
+            avisarMitadUnida_(portSub);
             return true;
         }
 
-        // Revisa si algún grupo tiene ambas (INT + PORT) en Acabados y las une automáticamente
-        function autoMergeCheck() { return false; } // Desactivado — INT y PORT se mueven por separado
+        // Revisa TODOS los grupos divididos (Interior + Portada) y une automáticamente los que
+        // ya terminaron cada uno su propia parte de acabados — evita que una mitad se quede
+        // "esperando armado" indefinidamente si por alguna razón no se disparó al momento.
+        function autoMergeCheck() {
+            const gruposVistos = new Set();
+            let huboCambio = false;
+            orders.forEach(o => {
+                if (!o.grupoId || o._merged || o.etapa === 'listo') return;
+                if (o.tipo !== 'int_sub' && o.tipo !== 'port_sub') return;
+                if (gruposVistos.has(o.grupoId)) return;
+                gruposVistos.add(o.grupoId);
+                if (mergeOrders(o.grupoId)) huboCambio = true;
+            });
+            return huboCambio;
+        }
 
-        // Antes movía automáticamente a las órdenes hermanas (mismos 5 dígitos) al mismo destino
-        // cuando una llegaba a empaque/listo. Desactivado a pedido del usuario.
-        function autoGroupFinish(triggerId, newEtapa) { return; }
+        // Se llama justo después de que CUALQUIER orden cambia de etapa (escaneo, arrastre,
+        // botón de avanzar). Si es la mitad de una orden dividida (Interior/Portada) y el
+        // siguiente paso natural la sacaría de acabados hacia Empaque, no debe llegar SOLA:
+        // o se combina con su pareja (si la pareja YA terminó también) o se queda esperando en
+        // su último paso propio hasta que la pareja llegue. Regresa la etapa REAL en la que
+        // quedó la orden — normalmente la misma que se le pasó, salvo que se haya bloqueado.
+        function autoGroupFinish(triggerId, newEtapa) {
+            if (newEtapa !== 'empaque') return newEtapa;
+            const idx = orders.findIndex(o => o.id === triggerId);
+            if (idx < 0) return newEtapa;
+            const o = orders[idx];
+            if ((o.tipo !== 'int_sub' && o.tipo !== 'port_sub') || !o.grupoId || o._merged) return newEtapa;
+            // mergeOrders reasigna el arreglo orders (orders = orders.map(...)) conservando el
+            // mismo índice, así que orders[idx] sigue siendo ESTA orden — ahora con etapa:'listo'.
+            if (mergeOrders(o.grupoId)) return orders[idx].etapa;
+            // La pareja no está lista todavía — se queda esperando en su último paso propio.
+            const flow = getAcabFlow(o);
+            const ultimoPaso = flow.length ? flow[flow.length - 1] : 'impresion';
+            orders[idx] = { ...orders[idx], etapa: ultimoPaso };
+            etapaMap[o.id] = ultimoPaso;
+            return ultimoPaso;
+        }
 
         // ═══════════════════════════════════════════════════
         //  SCHEDULER PARA GANTT
@@ -2105,8 +2163,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             etapaMap[_dragId] = colId;
             logMove(orders[idx], fromEtapa, colId, 'arrastre');
             if (colId === 'listo') { delete etapaMap[_dragId]; clearOrderTimers(_dragId); pushHistorial(orders[idx]); }
-            autoGroupFinish(_dragId, colId);
-            callScript(orders[idx], colId, fromEtapa);
+            const _etapaFinalDrop = autoGroupFinish(_dragId, colId);
+            callScript(orders[idx], _etapaFinalDrop, fromEtapa);
             autoMergeCheck();
             (colId === 'listo' ? saveS() : saveBoard());
             render();
@@ -3577,8 +3635,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 etapaMap[id] = target.id;
                 logMove(orders[idx], fromEtapa, target.id, 'boton');
                 if (target.id === 'listo') { delete etapaMap[id]; clearOrderTimers(id); pushHistorial(orders[idx]); }
-                autoGroupFinish(id, target.id);
-                callScript(orders[idx], target.id, fromEtapa);
+                const _etapaFinalMv1 = autoGroupFinish(id, target.id);
+                callScript(orders[idx], _etapaFinalMv1, fromEtapa);
                 autoMergeCheck();
                 (target.id === 'listo' ? saveS() : saveBoard());
                 render(); return;
@@ -3589,8 +3647,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             etapaMap[id] = flow[ni].id;
             logMove(orders[idx], fromEtapa, flow[ni].id, 'boton');
             if (flow[ni].id === 'listo') { delete etapaMap[id]; clearOrderTimers(id); pushHistorial(orders[idx]); }
-            autoGroupFinish(id, flow[ni].id);
-            callScript(orders[idx], flow[ni].id, fromEtapa);
+            const _etapaFinalMv2 = autoGroupFinish(id, flow[ni].id);
+            callScript(orders[idx], _etapaFinalMv2, fromEtapa);
             autoMergeCheck();
             (flow[ni].id === 'listo' ? saveS() : saveBoard());
             render();
@@ -3839,10 +3897,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 etapaMap[o.id] = nextStep.id;
                 logMove(orders[idx], fromEtapa, nextStep.id, 'escaneo');
                 if (nextStep.id === 'listo') { delete etapaMap[o.id]; pushHistorial(orders[idx]); _tocoLogsFull = true; }
-                autoGroupFinish(o.id, nextStep.id);
-                callScript(orders[idx], nextStep.id, fromEtapa);
+                const etapaFinalScan = autoGroupFinish(o.id, nextStep.id);
+                callScript(orders[idx], etapaFinalScan, fromEtapa);
                 if (proc && proc.logScan) fetchLastSalidaRow(proc.label);
-                movedLabels.push(nextStep.label);
+                const labelFinal = (ETAPAS.find(e => e.id === etapaFinalScan) || ACAB_STEPS.find(s => s.id === etapaFinalScan) || {}).label || nextStep.label;
+                movedLabels.push(labelFinal);
             });
 
             autoMergeCheck();
@@ -3850,7 +3909,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             render();
             const nextLbl = movedLabels[0] || '';
             const isSub = matches[0]?.tipo === 'int_sub' || matches[0]?.tipo === 'port_sub';
-            const subNote = isSub && nextLbl === 'Empaque' ? ' (sub-orden → espera armado)' : '';
+            const ordenFinalScan = orders.find(x => x.id === matches[0]?.id);
+            const esperandoPareja = isSub && ordenFinalScan && !ordenFinalScan._merged && ordenFinalScan.etapa !== 'listo' && terminoAcabadosPropios_(ordenFinalScan);
+            const subNote = esperandoPareja ? ' (esperando a su pareja para pasar a empaque)' : '';
             if (!silent) {
                 showToast('✅ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl + subNote);
                 showScanFlash(matches[0].titulo, nextLbl + (matches.length > 1 ? ' ×' + matches.length : ''), '#f59e0b');
