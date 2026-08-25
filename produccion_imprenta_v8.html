@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.1000000';
+        const APP_VERSION = 'v8.1000001';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -3745,6 +3745,55 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
 
         // silent=true: para reintentos masivos — no muestra toast/flash por cada uno.
         // Devuelve true si encontró y movió la orden, false si no la encontró.
+        // Prefijo 'L' del escáner: confirma que una orden ya está terminada y la manda
+        // DIRECTO a Listo, sin importar en qué etapa esté (impresión, acabados o empaque) —
+        // para cuando alguien confirma visualmente que ya quedó lista sin tener que pasar por
+        // cada estación una por una. No cierra/loguea tiempos parciales de acabados (es un
+        // override manual, no un paso más del flujo normal) — solo limpia cualquier timer
+        // corriendo, igual que ya hace mvOrd/onDrop al arrastrar una tarjeta hasta Listo.
+        function forzarAListo_(ordIdRaw, silent) {
+            let _allNums = (ordIdRaw.match(/\d+/) || [''])[0] || ordIdRaw.replace(/\D/g, '');
+            if (_allNums.length > 7 && _allNums.endsWith('0013')) _allNums = _allNums.slice(0, -4);
+            const digits6 = _allNums.slice(0, 7);
+            const mMatch = ordIdRaw.match(/^M(%W)?(\d)/);
+            const scanMuestra = !!mMatch;
+
+            const matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
+                (scanMuestra ? !!x._isMuestra : !x._isMuestra) &&
+                (x.id.replace(/\D/g, '') === digits6 || (x.grupoId && x.grupoId.toString().replace(/\D/g, '') === digits6)));
+
+            if (!matches.length) {
+                const anyMatch = orders.filter(x => x.id.replace(/\D/g, '') === digits6 || x.grupoId?.toString().replace(/\D/g, '') === digits6);
+                const razon = anyMatch.length
+                    ? 'Existe pero filtrada: ' + anyMatch.map(x => x.id + ' etapa=' + x.etapa + (x._merged ? ' MERGED' : '') + (x._isMuestra ? ' MUESTRA' : '')).join(', ')
+                    : 'No existe en el tablero (digits=' + digits6 + ')';
+                scanLog.unshift({ ts: Date.now(), raw: 'L' + ordIdRaw, codigo: ordIdRaw, proceso: 'Forzar a Listo', razon });
+                if (scanLog.length > 200) scanLog = scanLog.slice(0, 200);
+                saveS();
+                if (!silent) showToast('❌ No encontrada: ' + ordIdRaw + ' [Forzar a Listo] — ' + razon, 6000);
+                return false;
+            }
+
+            matches.forEach(o => {
+                const idx = orders.findIndex(x => x.id === o.id);
+                const fromEtapa = orders[idx].etapa;
+                clearOrderTimers(o.id);
+                orders[idx] = { ...orders[idx], etapa: 'listo' };
+                delete etapaMap[o.id];
+                logMove(orders[idx], fromEtapa, 'listo', 'escaneo-forzar-listo');
+                pushHistorial(orders[idx]);
+                callScript(orders[idx], 'listo', fromEtapa);
+            });
+
+            saveS();
+            render();
+            if (!silent) {
+                showToast('✅ Marcado como Listo: ' + matches.map(o => o.titulo.substring(0, 15)).join(', '));
+                showScanFlash(matches[0].titulo, 'Listo', '#4ade80');
+            }
+            return true;
+        }
+
         function handleScan(raw, silent) {
             const raw2 = raw.trim().toUpperCase();
             // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
@@ -3760,6 +3809,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const isInicio = suffix === 'I';
             const isPaso = suffix === 'P';
             const cuerpo = (isInicio || isPaso) ? raw2.slice(0, -1) : raw2;
+
+            // ── 1b. Prefijo 'L' → forzar directo a Listo (ver forzarAListo_) ──
+            if (cuerpo.startsWith('L')) return forzarAListo_(cuerpo.slice(1), silent);
 
             // ── 2. Detectar prefijo de proceso ───────────────────────────
             let proc = null, ordId = cuerpo;
