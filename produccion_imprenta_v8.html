@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.1000007';
+        const APP_VERSION = 'v8.1000008';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -2222,7 +2222,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           if (!oc) return '';
           const cont = +oc.piezasEmpacadas || 0, tot = +oc.cantidad || 0;
           const listo = tot > 0 && cont >= tot;
-          return `<div title="Conteo de piezas en Empaque — escanea los códigos PZ1/PZ5.../PZ10 de la hoja para sumar" style="display:flex;align-items:center;gap:5px;background:${listo ? '#0a1f0a' : '#1e293b'};border:1px solid ${listo ? '#166534' : '#334155'};border-radius:8px;padding:5px 10px;font-size:11px;color:${listo ? '#4ade80' : '#60a5fa'};white-space:nowrap;cursor:default">📦 ${e(oc.titulo.substring(0, 18))}: ${cont}/${tot || '?'}</div>`;
+          return `<div title="Conteo de piezas en Empaque — escanea los códigos EPZ1/EPZ5.../EPZ10 de la hoja para sumar" style="display:flex;align-items:center;gap:5px;background:${listo ? '#0a1f0a' : '#1e293b'};border:1px solid ${listo ? '#166534' : '#334155'};border-radius:8px;padding:5px 10px;font-size:11px;color:${listo ? '#4ade80' : '#60a5fa'};white-space:nowrap;cursor:default">📦 ${e(oc.titulo.substring(0, 18))}: ${cont}/${tot || '?'}</div>`;
       })()}
       <button class="btn btn-p" onclick="openNew()" style="white-space:nowrap">+ Nueva Orden</button>
     </div>`;
@@ -3734,8 +3734,12 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // ninguna orden: son una hoja física con estos códigos pegada cerca de la mesa de
         // empaque, para ir sumando piezas conforme se meten a la caja sin tener que reescanear
         // el código completo de la orden una por una. Coincidencia EXACTA (no prefijo), para
-        // no chocar con ningún otro código real de orden.
-        const PIEZAS_SCAN_CODES = { 'PZ1': 1, 'PZ5': 5, 'PZ6': 6, 'PZ7': 7, 'PZ8': 8, 'PZ9': 9, 'PZ10': 10 };
+        // no chocar con ningún otro código real de orden. Prefijo "E" al inicio (EPZ1...EPZ10,
+        // no PZ1...PZ10) a pedido del usuario, para que coincida con la convención de su
+        // etiquetado (todo lo de Empaque empieza con E) — se checa por coincidencia exacta
+        // ANTES que cualquier otra lógica de escaneo, así que no choca con el prefijo 'E' de
+        // SCAN_PROC (Empaque de una orden real) aunque ambos empiecen igual.
+        const PIEZAS_SCAN_CODES = { 'EPZ1': 1, 'EPZ5': 5, 'EPZ6': 6, 'EPZ7': 7, 'EPZ8': 8, 'EPZ9': 9, 'EPZ10': 10 };
 
         // Orden "activa" para el conteo de piezas — se fija sola cuando esa orden entra a
         // Empaque VÍA ESCANEO (no arrastre/botón, a pedido del usuario). Los códigos genéricos
