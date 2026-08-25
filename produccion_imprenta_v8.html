@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.1000001';
+        const APP_VERSION = 'v8.1000002';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -1018,51 +1018,18 @@
             return true;
         }
 
-        // Revisa TODOS los grupos divididos (Interior + Portada) y une automáticamente los que
-        // ya terminaron cada uno su propia parte de acabados — evita que una mitad se quede
-        // "esperando armado" indefinidamente si por alguna razón no se disparó al momento.
-        function autoMergeCheck() {
-            const gruposVistos = new Set();
-            let huboCambio = false;
-            orders.forEach(o => {
-                if (!o.grupoId || o._merged || o.etapa === 'listo') return;
-                if (o.tipo !== 'int_sub' && o.tipo !== 'port_sub') return;
-                if (gruposVistos.has(o.grupoId)) return;
-                gruposVistos.add(o.grupoId);
-                if (mergeOrders(o.grupoId)) huboCambio = true;
-            });
-            return huboCambio;
-        }
+        // Revisa si algún grupo tiene ambas (INT + PORT) en Acabados y las une automáticamente.
+        // Desactivado a pedido del usuario (2026-08-25): se probó reactivarlo (une automático +
+        // espera a la pareja antes de Empaque) pero el usuario prefiere que INT y PORT se muevan
+        // siempre por separado, sin ningún tipo de coordinación entre sí. mergeOrders() se deja
+        // completo por si se retoma más adelante — hoy no la llama nadie.
+        function autoMergeCheck() { return false; }
 
-        // Se llama justo después de que CUALQUIER orden cambia de etapa (escaneo, arrastre,
-        // botón de avanzar). Si es la mitad de una orden dividida (Interior/Portada) y el
-        // siguiente paso natural la sacaría de acabados hacia Empaque, no debe llegar SOLA:
-        // o se combina con su pareja (si la pareja YA terminó también) o se queda esperando en
-        // su último paso propio hasta que la pareja llegue. Regresa la etapa REAL en la que
-        // quedó la orden — normalmente la misma que se le pasó, salvo que se haya bloqueado.
-        function autoGroupFinish(triggerId, newEtapa) {
-            if (newEtapa !== 'empaque') return newEtapa;
-            const idx = orders.findIndex(o => o.id === triggerId);
-            if (idx < 0) return newEtapa;
-            const o = orders[idx];
-            if ((o.tipo !== 'int_sub' && o.tipo !== 'port_sub') || !o.grupoId || o._merged) return newEtapa;
-            // Si de verdad NO existe la otra mitad (no solo "todavía no está lista" — sino que
-            // no hay ninguna orden port_sub/int_sub activa con este mismo grupoId), no hay con
-            // qué unirse: dejarla seguir su curso normal a Empaque, nunca bloquearla para
-            // siempre esperando algo que no va a llegar.
-            const tipoPareja = o.tipo === 'int_sub' ? 'port_sub' : 'int_sub';
-            const parejaExiste = orders.some(x => x.grupoId === o.grupoId && x.tipo === tipoPareja && !x._merged && x.etapa !== 'listo');
-            if (!parejaExiste) return newEtapa;
-            // mergeOrders reasigna el arreglo orders (orders = orders.map(...)) conservando el
-            // mismo índice, así que orders[idx] sigue siendo ESTA orden — ahora con etapa:'listo'.
-            if (mergeOrders(o.grupoId)) return orders[idx].etapa;
-            // La pareja SÍ existe pero no está lista todavía — se queda esperando en su último paso.
-            const flow = getAcabFlow(o);
-            const ultimoPaso = flow.length ? flow[flow.length - 1] : 'impresion';
-            orders[idx] = { ...orders[idx], etapa: ultimoPaso };
-            etapaMap[o.id] = ultimoPaso;
-            return ultimoPaso;
-        }
+        // Antes movía automáticamente a las órdenes hermanas (mismos 5 dígitos) al mismo destino
+        // cuando una llegaba a empaque/listo, y luego (2026-08-25) esperaba a que ambas mitades
+        // de una orden dividida terminaran antes de dejar pasar a Empaque. Desactivado a pedido
+        // del usuario las dos veces — INT y PORT siguen su rumbo normal, sin esperarse entre sí.
+        function autoGroupFinish(triggerId, newEtapa) { return newEtapa; }
 
         // ═══════════════════════════════════════════════════
         //  SCHEDULER PARA GANTT
@@ -2170,8 +2137,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             etapaMap[_dragId] = colId;
             logMove(orders[idx], fromEtapa, colId, 'arrastre');
             if (colId === 'listo') { delete etapaMap[_dragId]; clearOrderTimers(_dragId); pushHistorial(orders[idx]); }
-            const _etapaFinalDrop = autoGroupFinish(_dragId, colId);
-            callScript(orders[idx], _etapaFinalDrop, fromEtapa);
+            autoGroupFinish(_dragId, colId);
+            callScript(orders[idx], colId, fromEtapa);
             autoMergeCheck();
             (colId === 'listo' ? saveS() : saveBoard());
             render();
@@ -3642,8 +3609,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 etapaMap[id] = target.id;
                 logMove(orders[idx], fromEtapa, target.id, 'boton');
                 if (target.id === 'listo') { delete etapaMap[id]; clearOrderTimers(id); pushHistorial(orders[idx]); }
-                const _etapaFinalMv1 = autoGroupFinish(id, target.id);
-                callScript(orders[idx], _etapaFinalMv1, fromEtapa);
+                autoGroupFinish(id, target.id);
+                callScript(orders[idx], target.id, fromEtapa);
                 autoMergeCheck();
                 (target.id === 'listo' ? saveS() : saveBoard());
                 render(); return;
@@ -3654,8 +3621,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             etapaMap[id] = flow[ni].id;
             logMove(orders[idx], fromEtapa, flow[ni].id, 'boton');
             if (flow[ni].id === 'listo') { delete etapaMap[id]; clearOrderTimers(id); pushHistorial(orders[idx]); }
-            const _etapaFinalMv2 = autoGroupFinish(id, flow[ni].id);
-            callScript(orders[idx], _etapaFinalMv2, fromEtapa);
+            autoGroupFinish(id, flow[ni].id);
+            callScript(orders[idx], flow[ni].id, fromEtapa);
             autoMergeCheck();
             (flow[ni].id === 'listo' ? saveS() : saveBoard());
             render();
@@ -3956,23 +3923,18 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 etapaMap[o.id] = nextStep.id;
                 logMove(orders[idx], fromEtapa, nextStep.id, 'escaneo');
                 if (nextStep.id === 'listo') { delete etapaMap[o.id]; pushHistorial(orders[idx]); _tocoLogsFull = true; }
-                const etapaFinalScan = autoGroupFinish(o.id, nextStep.id);
-                callScript(orders[idx], etapaFinalScan, fromEtapa);
+                autoGroupFinish(o.id, nextStep.id);
+                callScript(orders[idx], nextStep.id, fromEtapa);
                 if (proc && proc.logScan) fetchLastSalidaRow(proc.label);
-                const labelFinal = (ETAPAS.find(e => e.id === etapaFinalScan) || ACAB_STEPS.find(s => s.id === etapaFinalScan) || {}).label || nextStep.label;
-                movedLabels.push(labelFinal);
+                movedLabels.push(nextStep.label);
             });
 
             autoMergeCheck();
             (_tocoLogsFull ? saveS() : saveBoard());
             render();
             const nextLbl = movedLabels[0] || '';
-            const isSub = matches[0]?.tipo === 'int_sub' || matches[0]?.tipo === 'port_sub';
-            const ordenFinalScan = orders.find(x => x.id === matches[0]?.id);
-            const esperandoPareja = isSub && ordenFinalScan && !ordenFinalScan._merged && ordenFinalScan.etapa !== 'listo' && terminoAcabadosPropios_(ordenFinalScan);
-            const subNote = esperandoPareja ? ' (esperando a su pareja para pasar a empaque)' : '';
             if (!silent) {
-                showToast('✅ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl + subNote);
+                showToast('✅ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl);
                 showScanFlash(matches[0].titulo, nextLbl + (matches.length > 1 ? ' ×' + matches.length : ''), '#f59e0b');
             }
             return true;
