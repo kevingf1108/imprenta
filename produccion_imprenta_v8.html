@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.1000003';
+        const APP_VERSION = 'v8.1000004';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -1026,15 +1026,19 @@
         function autoGroupFinish(triggerId, newEtapa) { return newEtapa; }
 
         // El usuario pidió (2026-08-25) que Interior y Portada de una orden dividida se muevan
-        // SIEMPRE juntos: cada vez que se mueve uno (escáner, arrastre o botón), el otro brinca
-        // automáticamente al MISMO paso, en cada estación del camino — no solo al final. Si no
-        // existe una pareja real (mismo grupoId, tipo opuesto, activa), no hace nada: nunca
-        // bloquea ni espera, solo copia el movimiento cuando SÍ hay a quién copiarle.
+        // SIEMPRE juntos por los pasos de acabados: cada vez que se mueve uno (escáner, arrastre
+        // o botón), el otro brinca automáticamente al MISMO paso. Si no existe una pareja real
+        // (mismo grupoId, tipo opuesto, activa), no hace nada: nunca bloquea ni espera, solo
+        // copia el movimiento cuando SÍ hay a quién copiarle.
         // El paso destino puede no pertenecer al flujo propio del hermano (ej. Portada entra a
         // Plastificado, que Interior normalmente ni siquiera tiene en su flujo) — se fuerza
-        // igual, tal como pidió el usuario; el tablero ya sabe mostrar una orden fuera de su
-        // flujo natural (mismo mecanismo que usa mvOrd cuando Sheets deja una orden así).
+        // igual; el tablero ya sabe mostrar una orden fuera de su flujo natural (mismo mecanismo
+        // que usa mvOrd cuando Sheets deja una orden así).
+        // Excepción explícita (mismo día, ajuste pedido después de probar la primera versión):
+        // Empaque y Listo NO se siguen automáticamente — cada mitad tiene que confirmarse por
+        // separado en esos dos pasos finales, uno a la vez.
         function seguirHermano_(orderId, nuevaEtapa) {
+            if (nuevaEtapa === 'empaque' || nuevaEtapa === 'listo') return;
             const idx = orders.findIndex(o => o.id === orderId);
             if (idx < 0) return;
             const o = orders[idx];
@@ -1047,8 +1051,7 @@
             const fromEtapa = hermano.etapa;
             clearOrderTimers(hermano.id); // el hermano no tiene timer real corriendo para este paso — no se inventa
             orders[hIdx] = { ...orders[hIdx], etapa: nuevaEtapa };
-            if (nuevaEtapa === 'listo') { delete etapaMap[hermano.id]; pushHistorial(orders[hIdx]); }
-            else etapaMap[hermano.id] = nuevaEtapa;
+            etapaMap[hermano.id] = nuevaEtapa;
             logMove(orders[hIdx], fromEtapa, nuevaEtapa, 'sigue-a-hermano');
             callScript(orders[hIdx], nuevaEtapa, fromEtapa);
         }
