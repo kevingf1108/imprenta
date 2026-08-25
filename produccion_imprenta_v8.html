@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.1000005';
+        const APP_VERSION = 'v8.1000006';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -3758,7 +3758,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const idx = orders.findIndex(o => o.id === _ordenContandoId);
             if (idx < 0 || orders[idx].etapa !== 'empaque' || orders[idx]._merged) {
                 _ordenContandoId = null; saveContando_();
-                if (!silent) showToast('❌ Esa orden ya no está en Empaque — escanéala de nuevo para reanudar el conteo', 5000);
+                if (!silent) showToast('❌ Esa orden ya no está en Empaque — usa el código CE + su número para reanudar el conteo', 5000);
                 return false;
             }
             const o = orders[idx];
@@ -3778,6 +3778,37 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     showToast('📦 ' + nuevoConteo + '/' + total + ' piezas — "' + o.titulo + '"');
                     showScanFlash(o.titulo, nuevoConteo + '/' + total, '#60a5fa');
                 }
+            }
+            return true;
+        }
+
+        // Prefijo 'CE' (Contar Empaque) + número de orden (2026-08-25) — activa esa orden
+        // para el conteo de piezas SIN resetear el progreso que ya llevaba (a diferencia de
+        // llegar a Empaque por primera vez, que sí arranca en 0). Resuelve dos huecos:
+        // 1) Retomar una orden que se dejó a medias al cambiar a contar otra.
+        // 2) Empezar a contar una orden que llegó a Empaque por arrastre/botón (nunca disparó
+        //    el arranque automático, que solo pasa al llegar por escaneo).
+        function activarConteoEmpaque_(digitsRaw, silent) {
+            let _allNums = (digitsRaw.match(/\d+/) || [''])[0] || digitsRaw.replace(/\D/g, '');
+            if (_allNums.length > 7 && _allNums.endsWith('0013')) _allNums = _allNums.slice(0, -4);
+            const digits6 = _allNums.slice(0, 7);
+            const match = orders.find(x => !x._merged && x.etapa === 'empaque' &&
+                (x.id.replace(/\D/g, '') === digits6 || (x.grupoId && x.grupoId.toString().replace(/\D/g, '') === digits6)));
+            if (!match) {
+                if (!silent) showToast('❌ No encontré esa orden en Empaque — verifica el número o que ya haya llegado ahí', 6000);
+                return false;
+            }
+            _ordenContandoId = match.id; saveContando_();
+            if (match.piezasEmpacadas == null) {
+                const idx = orders.findIndex(o => o.id === match.id);
+                orders[idx] = { ...orders[idx], piezasEmpacadas: 0 };
+                saveBoard();
+            }
+            render();
+            const conteo = orders.find(o => o.id === match.id);
+            if (!silent) {
+                showToast('🔄 Contando ahora: "' + conteo.titulo + '" — ' + (+conteo.piezasEmpacadas || 0) + '/' + (+conteo.cantidad || '?'));
+                showScanFlash(conteo.titulo, (+conteo.piezasEmpacadas || 0) + '/' + (+conteo.cantidad || '?'), '#60a5fa');
             }
             return true;
         }
@@ -3847,6 +3878,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const raw2 = raw.trim().toUpperCase();
             // ── -1. Códigos genéricos de conteo de piezas en Empaque (coincidencia exacta) ──
             if (PIEZAS_SCAN_CODES.hasOwnProperty(raw2)) return sumarPiezasEmpaque_(PIEZAS_SCAN_CODES[raw2], silent);
+            // ── -1b. 'CE' + número de orden → activar/retomar conteo de esa orden ──
+            if (raw2.startsWith('CE')) return activarConteoEmpaque_(raw2.slice(2), silent);
             // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
             const logPre = SCAN_LOG_PRE.find(p => raw2.startsWith(p));
             if (logPre) { sendScanToSheets(raw2); return true; }
