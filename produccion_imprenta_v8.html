@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.1000002';
+        const APP_VERSION = 'v8.1000003';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -1018,18 +1018,40 @@
             return true;
         }
 
-        // Revisa si algún grupo tiene ambas (INT + PORT) en Acabados y las une automáticamente.
-        // Desactivado a pedido del usuario (2026-08-25): se probó reactivarlo (une automático +
-        // espera a la pareja antes de Empaque) pero el usuario prefiere que INT y PORT se muevan
-        // siempre por separado, sin ningún tipo de coordinación entre sí. mergeOrders() se deja
-        // completo por si se retoma más adelante — hoy no la llama nadie.
+        // Se probaron dos variantes de coordinar Interior/Portada (unir en una sola orden al
+        // terminar acabados, y antes de eso esperar a la pareja antes de Empaque) — ambas
+        // descartadas a pedido del usuario. Se dejan como no-ops por si se retoman más adelante;
+        // hoy nadie las llama, ver seguirHermano_ para el comportamiento real vigente.
         function autoMergeCheck() { return false; }
-
-        // Antes movía automáticamente a las órdenes hermanas (mismos 5 dígitos) al mismo destino
-        // cuando una llegaba a empaque/listo, y luego (2026-08-25) esperaba a que ambas mitades
-        // de una orden dividida terminaran antes de dejar pasar a Empaque. Desactivado a pedido
-        // del usuario las dos veces — INT y PORT siguen su rumbo normal, sin esperarse entre sí.
         function autoGroupFinish(triggerId, newEtapa) { return newEtapa; }
+
+        // El usuario pidió (2026-08-25) que Interior y Portada de una orden dividida se muevan
+        // SIEMPRE juntos: cada vez que se mueve uno (escáner, arrastre o botón), el otro brinca
+        // automáticamente al MISMO paso, en cada estación del camino — no solo al final. Si no
+        // existe una pareja real (mismo grupoId, tipo opuesto, activa), no hace nada: nunca
+        // bloquea ni espera, solo copia el movimiento cuando SÍ hay a quién copiarle.
+        // El paso destino puede no pertenecer al flujo propio del hermano (ej. Portada entra a
+        // Plastificado, que Interior normalmente ni siquiera tiene en su flujo) — se fuerza
+        // igual, tal como pidió el usuario; el tablero ya sabe mostrar una orden fuera de su
+        // flujo natural (mismo mecanismo que usa mvOrd cuando Sheets deja una orden así).
+        function seguirHermano_(orderId, nuevaEtapa) {
+            const idx = orders.findIndex(o => o.id === orderId);
+            if (idx < 0) return;
+            const o = orders[idx];
+            if ((o.tipo !== 'int_sub' && o.tipo !== 'port_sub') || !o.grupoId) return;
+            const tipoPareja = o.tipo === 'int_sub' ? 'port_sub' : 'int_sub';
+            const hIdx = orders.findIndex(x => x.grupoId === o.grupoId && x.tipo === tipoPareja && !x._merged && x.etapa !== 'listo');
+            if (hIdx < 0) return;
+            const hermano = orders[hIdx];
+            if (hermano.etapa === nuevaEtapa) return;
+            const fromEtapa = hermano.etapa;
+            clearOrderTimers(hermano.id); // el hermano no tiene timer real corriendo para este paso — no se inventa
+            orders[hIdx] = { ...orders[hIdx], etapa: nuevaEtapa };
+            if (nuevaEtapa === 'listo') { delete etapaMap[hermano.id]; pushHistorial(orders[hIdx]); }
+            else etapaMap[hermano.id] = nuevaEtapa;
+            logMove(orders[hIdx], fromEtapa, nuevaEtapa, 'sigue-a-hermano');
+            callScript(orders[hIdx], nuevaEtapa, fromEtapa);
+        }
 
         // ═══════════════════════════════════════════════════
         //  SCHEDULER PARA GANTT
@@ -2137,9 +2159,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             etapaMap[_dragId] = colId;
             logMove(orders[idx], fromEtapa, colId, 'arrastre');
             if (colId === 'listo') { delete etapaMap[_dragId]; clearOrderTimers(_dragId); pushHistorial(orders[idx]); }
-            autoGroupFinish(_dragId, colId);
             callScript(orders[idx], colId, fromEtapa);
-            autoMergeCheck();
+            seguirHermano_(_dragId, colId);
             (colId === 'listo' ? saveS() : saveBoard());
             render();
             _dragId = null;
@@ -3609,9 +3630,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 etapaMap[id] = target.id;
                 logMove(orders[idx], fromEtapa, target.id, 'boton');
                 if (target.id === 'listo') { delete etapaMap[id]; clearOrderTimers(id); pushHistorial(orders[idx]); }
-                autoGroupFinish(id, target.id);
                 callScript(orders[idx], target.id, fromEtapa);
-                autoMergeCheck();
+                seguirHermano_(id, target.id);
                 (target.id === 'listo' ? saveS() : saveBoard());
                 render(); return;
             }
@@ -3621,9 +3641,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             etapaMap[id] = flow[ni].id;
             logMove(orders[idx], fromEtapa, flow[ni].id, 'boton');
             if (flow[ni].id === 'listo') { delete etapaMap[id]; clearOrderTimers(id); pushHistorial(orders[idx]); }
-            autoGroupFinish(id, flow[ni].id);
             callScript(orders[idx], flow[ni].id, fromEtapa);
-            autoMergeCheck();
+            seguirHermano_(id, flow[ni].id);
             (flow[ni].id === 'listo' ? saveS() : saveBoard());
             render();
         }
@@ -3923,13 +3942,12 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 etapaMap[o.id] = nextStep.id;
                 logMove(orders[idx], fromEtapa, nextStep.id, 'escaneo');
                 if (nextStep.id === 'listo') { delete etapaMap[o.id]; pushHistorial(orders[idx]); _tocoLogsFull = true; }
-                autoGroupFinish(o.id, nextStep.id);
                 callScript(orders[idx], nextStep.id, fromEtapa);
+                seguirHermano_(o.id, nextStep.id);
                 if (proc && proc.logScan) fetchLastSalidaRow(proc.label);
                 movedLabels.push(nextStep.label);
             });
 
-            autoMergeCheck();
             (_tocoLogsFull ? saveS() : saveBoard());
             render();
             const nextLbl = movedLabels[0] || '';
