@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.1000004';
+        const APP_VERSION = 'v8.1000005';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -2216,6 +2216,14 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       <button class="btn btn-sm" onclick="openSync()" style="background:#1e3a5f;color:#60a5fa;border:1px solid #1d4ed8;white-space:nowrap">🔄 Sheets</button>
       <button onclick="setAutoSync(!autoSync)" style="padding:5px 10px;border-radius:8px;border:1px solid ${autoSync ? '#166534' : '#334155'};background:${autoSync ? '#0a2e1a' : 'transparent'};color:${autoSync ? '#4ade80' : '#64748b'};font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap" title="Sincronizar automáticamente con Sheets cada 5 minutos">${autoSync ? '🔁 Auto ON' : '🔁 Auto'}</button>
       <div title="Escáner listo: escanea el código de barras de una orden para avanzarla al siguiente paso" style="display:flex;align-items:center;gap:5px;background:#0a1f0a;border:1px solid #166534;border-radius:8px;padding:5px 10px;font-size:11px;color:#4ade80;white-space:nowrap;cursor:default">📷 Escáner listo</div>
+      ${(() => {
+          if (!_ordenContandoId) return '';
+          const oc = orders.find(x => x.id === _ordenContandoId && x.etapa === 'empaque');
+          if (!oc) return '';
+          const cont = +oc.piezasEmpacadas || 0, tot = +oc.cantidad || 0;
+          const listo = tot > 0 && cont >= tot;
+          return `<div title="Conteo de piezas en Empaque — escanea los códigos PZ1/PZ5.../PZ10 de la hoja para sumar" style="display:flex;align-items:center;gap:5px;background:${listo ? '#0a1f0a' : '#1e293b'};border:1px solid ${listo ? '#166534' : '#334155'};border-radius:8px;padding:5px 10px;font-size:11px;color:${listo ? '#4ade80' : '#60a5fa'};white-space:nowrap;cursor:default">📦 ${e(oc.titulo.substring(0, 18))}: ${cont}/${tot || '?'}</div>`;
+      })()}
       <button class="btn btn-p" onclick="openNew()" style="white-space:nowrap">+ Nueva Orden</button>
     </div>`;
         }
@@ -3722,6 +3730,58 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // Prefijos de máquina: F%W, P%W, O%W → mandan a hoja de log de máquinas
         const MAQ_SCAN_PRE = ['F%W', 'P%W', 'O%W'];
 
+        // Códigos genéricos de conteo de piezas en Empaque (2026-08-25) — NO están atados a
+        // ninguna orden: son una hoja física con estos códigos pegada cerca de la mesa de
+        // empaque, para ir sumando piezas conforme se meten a la caja sin tener que reescanear
+        // el código completo de la orden una por una. Coincidencia EXACTA (no prefijo), para
+        // no chocar con ningún otro código real de orden.
+        const PIEZAS_SCAN_CODES = { 'PZ1': 1, 'PZ5': 5, 'PZ6': 6, 'PZ7': 7, 'PZ8': 8, 'PZ9': 9, 'PZ10': 10 };
+
+        // Orden "activa" para el conteo de piezas — se fija sola cuando esa orden entra a
+        // Empaque VÍA ESCANEO (no arrastre/botón, a pedido del usuario). Los códigos genéricos
+        // de arriba le suman piezas a ESTA orden hasta que se escanee otra que también entre a
+        // Empaque. Persistido por dispositivo (localStorage) — si hay varias mesas de empaque
+        // escaneando en paralelo, cada una lleva su propio conteo en su propio navegador.
+        let _ordenContandoId = null;
+        try { _ordenContandoId = localStorage.getItem('imp_conteo_orden') || null; } catch { }
+        function saveContando_() { try { if (_ordenContandoId) localStorage.setItem('imp_conteo_orden', _ordenContandoId); else localStorage.removeItem('imp_conteo_orden'); } catch { } }
+
+        // Suma N piezas a la orden que se está contando actualmente. Solo informa el avance —
+        // NUNCA avanza la orden a Listo sola, ni siquiera al llegar exacto a la cantidad total;
+        // eso se sigue confirmando aparte (escaneo/arrastre/botón), igual que cualquier otro
+        // paso, para no romper la regla de "cada paso final se confirma por separado".
+        function sumarPiezasEmpaque_(n, silent) {
+            if (!_ordenContandoId) {
+                if (!silent) showToast('❌ Primero escanea la orden para que entre a Empaque, luego cuenta las piezas', 5000);
+                return false;
+            }
+            const idx = orders.findIndex(o => o.id === _ordenContandoId);
+            if (idx < 0 || orders[idx].etapa !== 'empaque' || orders[idx]._merged) {
+                _ordenContandoId = null; saveContando_();
+                if (!silent) showToast('❌ Esa orden ya no está en Empaque — escanéala de nuevo para reanudar el conteo', 5000);
+                return false;
+            }
+            const o = orders[idx];
+            const total = +o.cantidad || 0;
+            const nuevoConteo = (+o.piezasEmpacadas || 0) + n;
+            orders[idx] = { ...orders[idx], piezasEmpacadas: nuevoConteo };
+            saveBoard();
+            render();
+            if (!silent) {
+                if (total > 0 && nuevoConteo === total) {
+                    showToast('✅ Completo — ' + nuevoConteo + '/' + total + ' piezas empacadas de "' + o.titulo + '"', 5000);
+                    showScanFlash(o.titulo, '✅ ' + nuevoConteo + '/' + total, '#4ade80');
+                } else if (total > 0 && nuevoConteo > total) {
+                    showToast('⚠️ ' + nuevoConteo + '/' + total + ' — te pasaste, revisa si escaneaste de más "' + o.titulo + '"', 6000);
+                    showScanFlash(o.titulo, '⚠️ ' + nuevoConteo + '/' + total, '#ef4444');
+                } else {
+                    showToast('📦 ' + nuevoConteo + '/' + total + ' piezas — "' + o.titulo + '"');
+                    showScanFlash(o.titulo, nuevoConteo + '/' + total, '#60a5fa');
+                }
+            }
+            return true;
+        }
+
         let _scanTimers = {};
         try { _scanTimers = JSON.parse(localStorage.getItem('imp_timers') || '{}'); } catch { }
         // Limpiar timers de órdenes ya en listo al arrancar
@@ -3785,6 +3845,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
 
         function handleScan(raw, silent) {
             const raw2 = raw.trim().toUpperCase();
+            // ── -1. Códigos genéricos de conteo de piezas en Empaque (coincidencia exacta) ──
+            if (PIEZAS_SCAN_CODES.hasOwnProperty(raw2)) return sumarPiezasEmpaque_(PIEZAS_SCAN_CODES[raw2], silent);
             // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
             const logPre = SCAN_LOG_PRE.find(p => raw2.startsWith(p));
             if (logPre) { sendScanToSheets(raw2); return true; }
@@ -3945,6 +4007,15 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 etapaMap[o.id] = nextStep.id;
                 logMove(orders[idx], fromEtapa, nextStep.id, 'escaneo');
                 if (nextStep.id === 'listo') { delete etapaMap[o.id]; pushHistorial(orders[idx]); _tocoLogsFull = true; }
+                // Conteo de piezas en Empaque: arranca en 0 al entrar por escaneo; si la orden
+                // que se estaba contando avanza a otra etapa (ya se selló/movió), se suelta el
+                // conteo para no seguir sumándole piezas a algo que ya no está en Empaque.
+                if (nextStep.id === 'empaque') {
+                    orders[idx] = { ...orders[idx], piezasEmpacadas: 0 };
+                    _ordenContandoId = o.id; saveContando_();
+                } else if (_ordenContandoId === o.id) {
+                    _ordenContandoId = null; saveContando_();
+                }
                 callScript(orders[idx], nextStep.id, fromEtapa);
                 seguirHermano_(o.id, nextStep.id);
                 if (proc && proc.logScan) fetchLastSalidaRow(proc.label);
