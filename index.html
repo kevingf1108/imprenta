@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.1000008';
+        const APP_VERSION = 'v8.1000009';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -626,6 +626,13 @@
                 ponchadora: 200, engrapadora: 2, corte_carton: 10, armado_pd: 0.33, mesa_trabajo: 0.5, espiralado: 2, termo: 10
             },
             setup: { byn: 4, color: 7, plastificado: 3, pegado: 15, corteFinal: 5, corteInicial: 0, termo: 0 },
+            // Inventario de tóner (2026-08-26) — se controla escaneando códigos genéricos
+            // (ver TONER_SCAN_CODES). Empieza solo con las 1350 (Color 1352/1351/1353,
+            // comparten el mismo tóner CMYK) — B/N y 10010 se agregan después.
+            // tonerMin son valores de arranque (placeholder) — el usuario todavía tiene que
+            // investigar el mínimo real por color; se ajustan a mano en ⚙️ Configuración.
+            tonerStock: { '1350_C': 65, '1350_M': 65, '1350_Y': 65, '1350_K': 65 },
+            tonerMin: { '1350_C': 5, '1350_M': 5, '1350_Y': 5, '1350_K': 5 },
         };
 
         // tipo: 'normal' | 'int_sub' | 'port_sub' | 'union_result'
@@ -3588,6 +3595,26 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         </div>
       </div>
       ${secs.map(sec => `<div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px"><div style="font-size:12px;color:${sec.color};font-weight:700;letter-spacing:.5px;margin-bottom:4px">${sec.title}</div><div class="g2">${sec.items.map(([l, p, s]) => inp(l, p, s)).join('')}</div></div>`).join('')}
+      <div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px">
+        <div style="font-size:12px;color:#a78bfa;font-weight:700;letter-spacing:.5px;margin-bottom:4px">🖨️ INVENTARIO DE TÓNER — 1350 (Color 1352/1351/1353)</div>
+        <div style="font-size:11px;color:#475569;margin-bottom:8px">Se controla escaneando los códigos T1350C+/T1350C-/M/Y/K. La existencia y el mínimo también se pueden corregir a mano aquí (ej. tras un recuento físico).</div>
+        <div class="g2">
+          ${['C', 'M', 'Y', 'K'].map(col => {
+              const key = '1350_' + col;
+              const nombre = { C: 'Cyan', M: 'Magenta', Y: 'Yellow', K: 'Black' }[col];
+              const stock = (cfg.tonerStock && cfg.tonerStock[key] != null) ? cfg.tonerStock[key] : 0;
+              const min = (cfg.tonerMin && cfg.tonerMin[key] != null) ? cfg.tonerMin[key] : 0;
+              const bajo = stock <= min;
+              return `<div style="background:#1e293b;border:1px solid ${bajo ? '#7f1d1d' : '#334155'};border-radius:8px;padding:8px">
+                <div style="font-size:12px;color:${bajo ? '#f87171' : '#cbd5e1'};font-weight:700;margin-bottom:6px">${nombre}${bajo ? ' ⚠️' : ''}</div>
+                <div style="display:flex;gap:6px;align-items:center">
+                  <div style="flex:1"><div style="font-size:10px;color:#64748b">Existencia</div><input class="inp" type="number" min="0" step="1" value="${stock}" oninput="cfg={...cfg,tonerStock:{...cfg.tonerStock,'${key}':+this.value}};saveBoard();render()" style="margin-top:2px"></div>
+                  <div style="flex:1"><div style="font-size:10px;color:#64748b">Mínimo</div><input class="inp" type="number" min="0" step="1" value="${min}" oninput="cfg={...cfg,tonerMin:{...cfg.tonerMin,'${key}':+this.value}};saveBoard();render()" style="margin-top:2px"></div>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>
       <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn btn-g" onclick="closeCfg()">Cerrar</button></div>
     </div>
   </div>`;
@@ -3741,6 +3768,47 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // SCAN_PROC (Empaque de una orden real) aunque ambos empiecen igual.
         const PIEZAS_SCAN_CODES = { 'EPZ1': 1, 'EPZ5': 5, 'EPZ6': 6, 'EPZ7': 7, 'EPZ8': 8, 'EPZ9': 9, 'EPZ10': 10 };
 
+        // ── Inventario de tóner (2026-08-26) ────────────────────────────────────────────
+        // Códigos genéricos fijos (una hoja pegada cerca de donde se guarda el tóner) para
+        // sumar (llegó una pieza nueva) o restar (se instaló/gastó una) por color. Empieza
+        // solo con las 1350 (Color 1352/1351/1353 comparten el mismo tóner CMYK) — B/N y
+        // 10010 se agregan después, siguiendo el mismo patrón.
+        const TONER_SCAN_CODES = {
+            'T1350C+': { key: '1350_C', delta: 1 }, 'T1350C-': { key: '1350_C', delta: -1 },
+            'T1350M+': { key: '1350_M', delta: 1 }, 'T1350M-': { key: '1350_M', delta: -1 },
+            'T1350Y+': { key: '1350_Y', delta: 1 }, 'T1350Y-': { key: '1350_Y', delta: -1 },
+            'T1350K+': { key: '1350_K', delta: 1 }, 'T1350K-': { key: '1350_K', delta: -1 },
+        };
+        const TONER_LABELS = { '1350_C': 'Tóner 1350 Cyan', '1350_M': 'Tóner 1350 Magenta', '1350_Y': 'Tóner 1350 Yellow', '1350_K': 'Tóner 1350 Black' };
+
+        // Suma o resta 1 al inventario de un color de tóner. Nunca baja de 0. Si al restar
+        // cruza de "por arriba del mínimo" a "en el mínimo o por debajo", avisa UNA vez por
+        // Slack (no se vuelve a avisar en cada escaneo mientras siga bajo — solo si vuelve a
+        // subir arriba del mínimo con una recarga y luego vuelve a bajar).
+        function ajustarToner_(key, delta, silent) {
+            if (!cfg.tonerStock) cfg.tonerStock = {};
+            const actual = +cfg.tonerStock[key] || 0;
+            const min = (cfg.tonerMin && cfg.tonerMin[key] != null) ? +cfg.tonerMin[key] : 0;
+            const nuevo = Math.max(0, actual + delta);
+            const cruzaHaciaAbajo = delta < 0 && actual > min && nuevo <= min;
+            cfg = { ...cfg, tonerStock: { ...cfg.tonerStock, [key]: nuevo } };
+            saveBoard();
+            render();
+            const label = TONER_LABELS[key] || key;
+            if (!silent) showToast((delta > 0 ? '➕ ' : '➖ ') + label + ': ' + nuevo + ' en existencia' + (delta < 0 && nuevo <= min ? ' — ¡quedan pocos!' : ''));
+            if (cruzaHaciaAbajo) avisarTonerBajo_(key, nuevo, min);
+            return true;
+        }
+
+        // Avisa por Slack (DM a Guillermo) cuando un tóner cruza su mínimo — vía el mismo
+        // Apps Script que ya maneja el bot de Slack, para no manejar credenciales aquí.
+        function avisarTonerBajo_(key, cantidad, min) {
+            if (!cfg.scriptUrl) return;
+            const label = TONER_LABELS[key] || key;
+            const msg = '⚠️ ' + label + ' está por acabarse: quedan ' + cantidad + ' (mínimo ' + min + ').';
+            fetch(scriptURL('action=avisarTonerBajo&mensaje=' + encodeURIComponent(msg)), { mode: 'no-cors' }).catch(() => { });
+        }
+
         // Orden "activa" para el conteo de piezas — se fija sola cuando esa orden entra a
         // Empaque VÍA ESCANEO (no arrastre/botón, a pedido del usuario). Los códigos genéricos
         // de arriba le suman piezas a ESTA orden hasta que se escanee otra que también entre a
@@ -3851,6 +3919,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const raw2 = raw.trim().toUpperCase();
             // ── -1. Códigos genéricos de conteo de piezas en Empaque (coincidencia exacta) ──
             if (PIEZAS_SCAN_CODES.hasOwnProperty(raw2)) return sumarPiezasEmpaque_(PIEZAS_SCAN_CODES[raw2], silent);
+            // ── -1c. Códigos genéricos de inventario de tóner (coincidencia exacta) ──
+            if (TONER_SCAN_CODES.hasOwnProperty(raw2)) { const t = TONER_SCAN_CODES[raw2]; return ajustarToner_(t.key, t.delta, silent); }
             // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
             const logPre = SCAN_LOG_PRE.find(p => raw2.startsWith(p));
             if (logPre) { sendScanToSheets(raw2); return true; }
