@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.1000009';
+        const APP_VERSION = 'v8.1000013';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -626,13 +626,14 @@
                 ponchadora: 200, engrapadora: 2, corte_carton: 10, armado_pd: 0.33, mesa_trabajo: 0.5, espiralado: 2, termo: 10
             },
             setup: { byn: 4, color: 7, plastificado: 3, pegado: 15, corteFinal: 5, corteInicial: 0, termo: 0 },
-            // Inventario de tóner (2026-08-26) — se controla escaneando códigos genéricos
-            // (ver TONER_SCAN_CODES). Empieza solo con las 1350 (Color 1352/1351/1353,
-            // comparten el mismo tóner CMYK) — B/N y 10010 se agregan después.
+            // Inventario de tóner (2026-08-26, ampliado 2026-08-28) — se controla escaneando
+            // códigos genéricos (ver TONER_SCAN_CODES). Grupos: 1350 (Color 1352/1351/1353,
+            // comparten tóner CMYK), 10010 (Color, CMYK propio), B/N (OCE 6320 / Titan 6180,
+            // comparten un solo tóner K — confirmado con Kevin el 2026-08-28).
             // tonerMin son valores de arranque (placeholder) — el usuario todavía tiene que
             // investigar el mínimo real por color; se ajustan a mano en ⚙️ Configuración.
-            tonerStock: { '1350_C': 65, '1350_M': 65, '1350_Y': 65, '1350_K': 65 },
-            tonerMin: { '1350_C': 5, '1350_M': 5, '1350_Y': 5, '1350_K': 5 },
+            tonerStock: { '1350_C': 65, '1350_M': 65, '1350_Y': 65, '1350_K': 65, '10010_C': 65, '10010_M': 65, '10010_Y': 65, '10010_K': 65, 'byn_K': 65 },
+            tonerMin: { '1350_C': 5, '1350_M': 5, '1350_Y': 5, '1350_K': 5, '10010_C': 5, '10010_M': 5, '10010_Y': 5, '10010_K': 5, 'byn_K': 5 },
         };
 
         // tipo: 'normal' | 'int_sub' | 'port_sub' | 'union_result'
@@ -974,63 +975,6 @@
             orders.push({ ...base, id: nextId(), tipo: 'port_sub', titulo: `PORT — ${f.baseTitulo || f.titulo}`, tipoInteriores: 'color' });
             saveBoard(); modalId = undefined; render();
         }
-
-        // Paso donde empieza un union_result después de unir INT+PORT
-        function getUnionStartStep(enc) {
-            if (enc === 'pasta_dura') return 'acab_ms';
-            if (enc === 'engrapado') return 'acab_en';
-            if (enc === 'espiral' || enc === 'espiral_pd') return 'acab_es';
-            return 'acab_pg'; // normal/rústica
-        }
-
-        // Última etapa de acabados propia de una sub-orden (antes de los pasos compartidos de
-        // unión) — no basta con "está en algún paso de acabados" (isAcabEtapa), porque en
-        // pasta dura cada mitad tiene VARIOS pasos propios (ej. interior: ci→pg→cf→cdc) y no
-        // debe unirse a medio camino. También cuenta como "terminada" si ya está en empaque o
-        // listo (así detecta a la mitad que disparó el evento, cuyo etapa ya se actualizó).
-        function terminoAcabadosPropios_(o) {
-            const flow = getAcabFlow(o);
-            const ultimoPaso = flow.length ? flow[flow.length - 1] : 'impresion';
-            return o.etapa === ultimoPaso || o.etapa === 'empaque' || o.etapa === 'listo';
-        }
-
-        // Avisa a Sheets que una mitad (interior/portada) quedó lista al unirse — directo,
-        // sin pasar por callScript(), porque su inferencia automática de "hoja" (impresión vs
-        // acabados) se basa en el tipo de orden, no en dónde está realmente parada; en el
-        // momento de la unión SIEMPRE están en acabados (mergeOrders solo une cuando ambas ya
-        // terminaron su parte ahí), así que aquí se manda explícito para no mandar la hoja mal.
-        function avisarMitadUnida_(sub) {
-            if (!cfg.scriptUrl || !sub._fromSheets) return;
-            const item = String(sub.grupoId || '').trim();
-            if (!item) return;
-            const po = sub.tipo === 'int_sub' ? 'int' : 'port';
-            fetch(scriptURL('action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=acabados&po=' + po), { mode: 'no-cors' }).catch(() => { });
-        }
-
-        function mergeOrders(grupoId) {
-            const intSub = orders.find(o => o.grupoId === grupoId && o.tipo === 'int_sub' && !o._merged && o.etapa !== 'listo' && terminoAcabadosPropios_(o));
-            const portSub = orders.find(o => o.grupoId === grupoId && o.tipo === 'port_sub' && !o._merged && o.etapa !== 'listo' && terminoAcabadosPropios_(o));
-            if (!intSub || !portSub) return false;
-            const enc = intSub.tipoEncuadernacion || 'normal';
-            const startStep = getUnionStartStep(enc);
-            orders.push({
-                ...intSub, id: nextId(), tipo: 'union_result',
-                titulo: intSub.baseTitulo || intSub.titulo.replace('INT — ', ''), etapa: startStep,
-                _fromSheets: false
-            });
-            orders = orders.map(o => (o.id === intSub.id || o.id === portSub.id) ? { ...o, etapa: 'listo', _merged: true } : o);
-            delete etapaMap[intSub.id]; delete etapaMap[portSub.id];
-            avisarMitadUnida_(intSub);
-            avisarMitadUnida_(portSub);
-            return true;
-        }
-
-        // Se probaron dos variantes de coordinar Interior/Portada (unir en una sola orden al
-        // terminar acabados, y antes de eso esperar a la pareja antes de Empaque) — ambas
-        // descartadas a pedido del usuario. Se dejan como no-ops por si se retoman más adelante;
-        // hoy nadie las llama, ver seguirHermano_ para el comportamiento real vigente.
-        function autoMergeCheck() { return false; }
-        function autoGroupFinish(triggerId, newEtapa) { return newEtapa; }
 
         // El usuario pidió (2026-08-25) que Interior y Portada de una orden dividida se muevan
         // SIEMPRE juntos por los pasos de acabados: cada vez que se mueve uno (escáner, arrastre
@@ -3596,24 +3540,32 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       </div>
       ${secs.map(sec => `<div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px"><div style="font-size:12px;color:${sec.color};font-weight:700;letter-spacing:.5px;margin-bottom:4px">${sec.title}</div><div class="g2">${sec.items.map(([l, p, s]) => inp(l, p, s)).join('')}</div></div>`).join('')}
       <div style="background:#0f172a;border-radius:10px;padding:12px;margin-top:12px">
-        <div style="font-size:12px;color:#a78bfa;font-weight:700;letter-spacing:.5px;margin-bottom:4px">🖨️ INVENTARIO DE TÓNER — 1350 (Color 1352/1351/1353)</div>
-        <div style="font-size:11px;color:#475569;margin-bottom:8px">Se controla escaneando los códigos T1350C+/T1350C-/M/Y/K. La existencia y el mínimo también se pueden corregir a mano aquí (ej. tras un recuento físico).</div>
-        <div class="g2">
-          ${['C', 'M', 'Y', 'K'].map(col => {
-              const key = '1350_' + col;
-              const nombre = { C: 'Cyan', M: 'Magenta', Y: 'Yellow', K: 'Black' }[col];
-              const stock = (cfg.tonerStock && cfg.tonerStock[key] != null) ? cfg.tonerStock[key] : 0;
-              const min = (cfg.tonerMin && cfg.tonerMin[key] != null) ? cfg.tonerMin[key] : 0;
-              const bajo = stock <= min;
-              return `<div style="background:#1e293b;border:1px solid ${bajo ? '#7f1d1d' : '#334155'};border-radius:8px;padding:8px">
-                <div style="font-size:12px;color:${bajo ? '#f87171' : '#cbd5e1'};font-weight:700;margin-bottom:6px">${nombre}${bajo ? ' ⚠️' : ''}</div>
-                <div style="display:flex;gap:6px;align-items:center">
-                  <div style="flex:1"><div style="font-size:10px;color:#64748b">Existencia</div><input class="inp" type="number" min="0" step="1" value="${stock}" oninput="cfg={...cfg,tonerStock:{...cfg.tonerStock,'${key}':+this.value}};saveBoard();render()" style="margin-top:2px"></div>
-                  <div style="flex:1"><div style="font-size:10px;color:#64748b">Mínimo</div><input class="inp" type="number" min="0" step="1" value="${min}" oninput="cfg={...cfg,tonerMin:{...cfg.tonerMin,'${key}':+this.value}};saveBoard();render()" style="margin-top:2px"></div>
-                </div>
-              </div>`;
-          }).join('')}
-        </div>
+        <div style="font-size:12px;color:#a78bfa;font-weight:700;letter-spacing:.5px;margin-bottom:4px">🖨️ INVENTARIO DE TÓNER</div>
+        <div style="font-size:11px;color:#475569;margin-bottom:8px">Se controla escaneando los códigos T&lt;máquina&gt;&lt;color&gt;+/- (ej. T1350C+, T10010K-, TBYNK+). La existencia y el mínimo también se pueden corregir a mano aquí (ej. tras un recuento físico).</div>
+        ${[
+            { titulo: '1350 (Color 1352 / 1351 / 1353 — comparten tóner)', prefijo: '1350', cols: ['C', 'M', 'Y', 'K'] },
+            { titulo: '10010 (Color)', prefijo: '10010', cols: ['C', 'M', 'Y', 'K'] },
+            { titulo: 'B/N (OCE 6320 / Titan 6180 — comparten tóner)', prefijo: 'byn', cols: ['K'] },
+        ].map((grupo, i) => `
+        <div style="margin-top:${i === 0 ? '0' : '10'}px">
+          <div style="font-size:11px;color:#64748b;margin-bottom:4px">${grupo.titulo}</div>
+          <div class="g2">
+            ${grupo.cols.map(col => {
+                const key = grupo.prefijo + '_' + col;
+                const nombre = { C: 'Cyan', M: 'Magenta', Y: 'Yellow', K: 'Black' }[col];
+                const stock = (cfg.tonerStock && cfg.tonerStock[key] != null) ? cfg.tonerStock[key] : 0;
+                const min = (cfg.tonerMin && cfg.tonerMin[key] != null) ? cfg.tonerMin[key] : 0;
+                const bajo = stock <= min;
+                return `<div style="background:#1e293b;border:1px solid ${bajo ? '#7f1d1d' : '#334155'};border-radius:8px;padding:8px">
+                  <div style="font-size:12px;color:${bajo ? '#f87171' : '#cbd5e1'};font-weight:700;margin-bottom:6px">${nombre}${bajo ? ' ⚠️' : ''}</div>
+                  <div style="display:flex;gap:6px;align-items:center">
+                    <div style="flex:1"><div style="font-size:10px;color:#64748b">Existencia</div><input class="inp" type="number" min="0" step="1" value="${stock}" oninput="cfg={...cfg,tonerStock:{...cfg.tonerStock,'${key}':+this.value}};saveBoard();render()" style="margin-top:2px"></div>
+                    <div style="flex:1"><div style="font-size:10px;color:#64748b">Mínimo</div><input class="inp" type="number" min="0" step="1" value="${min}" oninput="cfg={...cfg,tonerMin:{...cfg.tonerMin,'${key}':+this.value}};saveBoard();render()" style="margin-top:2px"></div>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>
+        </div>`).join('')}
       </div>
       <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn btn-g" onclick="closeCfg()">Cerrar</button></div>
     </div>
@@ -3768,18 +3720,28 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // SCAN_PROC (Empaque de una orden real) aunque ambos empiecen igual.
         const PIEZAS_SCAN_CODES = { 'EPZ1': 1, 'EPZ5': 5, 'EPZ6': 6, 'EPZ7': 7, 'EPZ8': 8, 'EPZ9': 9, 'EPZ10': 10 };
 
-        // ── Inventario de tóner (2026-08-26) ────────────────────────────────────────────
+        // ── Inventario de tóner (2026-08-26, ampliado 2026-08-28) ───────────────────────
         // Códigos genéricos fijos (una hoja pegada cerca de donde se guarda el tóner) para
-        // sumar (llegó una pieza nueva) o restar (se instaló/gastó una) por color. Empieza
-        // solo con las 1350 (Color 1352/1351/1353 comparten el mismo tóner CMYK) — B/N y
-        // 10010 se agregan después, siguiendo el mismo patrón.
+        // sumar (llegó una pieza nueva) o restar (se instaló/gastó una) por color/máquina.
+        // Grupos: 1350 (Color 1352/1351/1353, comparten tóner CMYK), 10010 (Color, CMYK
+        // propio), B/N (OCE 6320 / Titan 6180, comparten un solo tóner K — confirmado con
+        // Kevin el 2026-08-28, mismo patrón que las 1350).
         const TONER_SCAN_CODES = {
             'T1350C+': { key: '1350_C', delta: 1 }, 'T1350C-': { key: '1350_C', delta: -1 },
             'T1350M+': { key: '1350_M', delta: 1 }, 'T1350M-': { key: '1350_M', delta: -1 },
             'T1350Y+': { key: '1350_Y', delta: 1 }, 'T1350Y-': { key: '1350_Y', delta: -1 },
             'T1350K+': { key: '1350_K', delta: 1 }, 'T1350K-': { key: '1350_K', delta: -1 },
+            'T10010C+': { key: '10010_C', delta: 1 }, 'T10010C-': { key: '10010_C', delta: -1 },
+            'T10010M+': { key: '10010_M', delta: 1 }, 'T10010M-': { key: '10010_M', delta: -1 },
+            'T10010Y+': { key: '10010_Y', delta: 1 }, 'T10010Y-': { key: '10010_Y', delta: -1 },
+            'T10010K+': { key: '10010_K', delta: 1 }, 'T10010K-': { key: '10010_K', delta: -1 },
+            'TBYNK+': { key: 'byn_K', delta: 1 }, 'TBYNK-': { key: 'byn_K', delta: -1 },
         };
-        const TONER_LABELS = { '1350_C': 'Tóner 1350 Cyan', '1350_M': 'Tóner 1350 Magenta', '1350_Y': 'Tóner 1350 Yellow', '1350_K': 'Tóner 1350 Black' };
+        const TONER_LABELS = {
+            '1350_C': 'Tóner 1350 Cyan', '1350_M': 'Tóner 1350 Magenta', '1350_Y': 'Tóner 1350 Yellow', '1350_K': 'Tóner 1350 Black',
+            '10010_C': 'Tóner 10010 Cyan', '10010_M': 'Tóner 10010 Magenta', '10010_Y': 'Tóner 10010 Yellow', '10010_K': 'Tóner 10010 Black',
+            'byn_K': 'Tóner B/N (OCE 6320 / Titan 6180)',
+        };
 
         // Suma o resta 1 al inventario de un color de tóner. Nunca baja de 0. Si al restar
         // cruza de "por arriba del mínimo" a "en el mínimo o por debajo", avisa UNA vez por
