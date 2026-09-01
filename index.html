@@ -426,7 +426,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.1000014';
+        const APP_VERSION = 'v8.1000015';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -521,37 +521,48 @@
             { id: 'acab_te', label: 'Termo', icon: '🌡️', color: '#14b8a6' },
         ];
 
+        // Pasos "de unión" (post Interior+Portada) según encuadernación — antes solo vivían en
+        // el flujo de union_result (una tarjeta fusionada). Ya no se fusiona nada (a pedido del
+        // usuario, 2026-08-31), así que Interior y Portada los recorren cada una por su cuenta,
+        // como tarjetas separadas — si no, al terminar su último paso propio (ej. Corte Inicial)
+        // el flujo se queda corto y el tablero las salta directo a Empaque.
+        function pasosUnion_(enc) {
+            if (enc === 'pasta_dura') return ['acab_ms', 'acab_te'];
+            if (enc === 'engrapado') return ['acab_en', 'acab_te'];
+            if (enc === 'espiral' || enc === 'espiral_pd') return ['acab_es', 'acab_te'];
+            return ['acab_pg', 'acab_cf', 'acab_te']; // normal/rústica
+        }
+
         // Devuelve la secuencia exacta de pasos para una orden según tipo y encuadernación
         function getAcabFlow(o) {
             const enc = o.tipoEncuadernacion || 'normal';
             const tipo = o.tipo || 'normal';
             const isInt = tipo === 'int_sub';
             const isPort = tipo === 'port_sub';
-            const isUnion = tipo === 'union_result';
 
             // ── INTERIORES ──────────────────────────────────────────────
             if (isInt) {
-                if (enc === 'pasta_dura') return ['acab_ci', 'acab_pg', 'acab_cf', 'acab_cdc'];
-                if (enc === 'espiral' || enc === 'espiral_pd') return ['acab_ci', 'acab_pi'];
-                return ['acab_ci']; // normal, engrapado
+                if (enc === 'pasta_dura') return ['acab_ci', 'acab_pg', 'acab_cf', 'acab_cdc', ...pasosUnion_(enc)];
+                if (enc === 'espiral' || enc === 'espiral_pd') return ['acab_ci', 'acab_pi', ...pasosUnion_(enc)];
+                return ['acab_ci', ...pasosUnion_(enc)]; // normal, engrapado
             }
 
             // ── PORTADA ─────────────────────────────────────────────────
             if (isPort) {
-                if (enc === 'pasta_dura') return ['acab_pl', 'acab_ci', 'acab_cc', 'acab_ap'];
-                if (enc === 'espiral_pd') return ['acab_pl', 'acab_ci', 'acab_cc', 'acab_ap', 'acab_pp'];
-                if (enc === 'espiral') return ['acab_pl', 'acab_ci', 'acab_pp'];
-                return ['acab_pl', 'acab_ci']; // normal, engrapado
+                if (enc === 'pasta_dura') return ['acab_pl', 'acab_ci', 'acab_cc', 'acab_ap', ...pasosUnion_(enc)];
+                if (enc === 'espiral_pd') return ['acab_pl', 'acab_ci', 'acab_cc', 'acab_ap', 'acab_pp', ...pasosUnion_(enc)];
+                if (enc === 'espiral') return ['acab_pl', 'acab_ci', 'acab_pp', ...pasosUnion_(enc)];
+                return ['acab_pl', 'acab_ci', ...pasosUnion_(enc)]; // normal, engrapado
             }
 
             // ── FLUJO COMPLETO (union_result y órdenes normales sin separar) ─
             // El union_result usa el mismo flujo completo que normal para poder
             // regresar a Plastificado / Corte Inicial si se necesita corregir algo.
-            if (enc === 'pasta_dura') return ['acab_pl', 'acab_ci', 'acab_pg', 'acab_cf', 'acab_cdc', 'acab_cc', 'acab_ap', 'acab_ms', 'acab_te'];
-            if (enc === 'engrapado') return ['acab_pl', 'acab_ci', 'acab_en', 'acab_te'];
-            if (enc === 'espiral_pd') return ['acab_pl', 'acab_ci', 'acab_pi', 'acab_cc', 'acab_ap', 'acab_pp', 'acab_es', 'acab_te'];
-            if (enc === 'espiral') return ['acab_pl', 'acab_ci', 'acab_pi', 'acab_pp', 'acab_es', 'acab_te'];
-            return ['acab_pl', 'acab_ci', 'acab_pg', 'acab_cf', 'acab_te']; // normal/rústica
+            if (enc === 'pasta_dura') return ['acab_pl', 'acab_ci', 'acab_pg', 'acab_cf', 'acab_cdc', 'acab_cc', 'acab_ap', ...pasosUnion_(enc)];
+            if (enc === 'engrapado') return ['acab_pl', 'acab_ci', ...pasosUnion_(enc)];
+            if (enc === 'espiral_pd') return ['acab_pl', 'acab_ci', 'acab_pi', 'acab_cc', 'acab_ap', 'acab_pp', ...pasosUnion_(enc)];
+            if (enc === 'espiral') return ['acab_pl', 'acab_ci', 'acab_pi', 'acab_pp', ...pasosUnion_(enc)];
+            return ['acab_pl', 'acab_ci', ...pasosUnion_(enc)]; // normal/rústica
         }
 
         // Etapa actual de acabados: primera que corresponde al stepActual de la orden
