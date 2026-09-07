@@ -4095,6 +4095,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             // ── 5. PASA: avanza todas las órdenes del grupo ──────────────
             let movedLabels = [];
             let _tocoLogsFull = false; // statsHistory (cierre de timer) y/o historial (llega a listo)
+            // Aviso al operador cuando escanea "Pasa" sin haber escaneado "Inicia" antes en esa
+            // estación — la orden avanza igual, pero NO se guarda tiempo real para esa etapa
+            // (2026-09-07, a pedido de Kevin: solo Plastificado/Corte Inicial estaban mostrando
+            // tiempos porque en el resto de estaciones se escaneaba solo "Pasa").
+            let _faltoInicio = false;
             matches.forEach(o => {
                 const idx = orders.findIndex(x => x.id === o.id);
                 const timerKey = o.id + (proc ? '_' + proc.pre : '');
@@ -4124,6 +4129,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     delete _scanTimers[timerKey];
                     saveTimers();
                     _tocoLogsFull = true;
+                } else if (proc) {
+                    _faltoInicio = true;
                 }
                 orders[idx] = { ...orders[idx], etapa: nextStep.id };
                 etapaMap[o.id] = nextStep.id;
@@ -4148,8 +4155,13 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             render();
             const nextLbl = movedLabels[0] || '';
             if (!silent) {
-                showToast('✅ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl);
-                showScanFlash(matches[0].titulo, nextLbl + (matches.length > 1 ? ' ×' + matches.length : ''), '#f59e0b');
+                if (_faltoInicio) {
+                    showToast('⚠️ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl + ' — SIN tiempo registrado, faltó escanear "Inicia" al llegar a ' + procLabel, 6000);
+                    showScanFlash(matches[0].titulo, '⚠️ ' + nextLbl + ' (sin tiempo)' + (matches.length > 1 ? ' ×' + matches.length : ''), '#ef4444');
+                } else {
+                    showToast('✅ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl);
+                    showScanFlash(matches[0].titulo, nextLbl + (matches.length > 1 ? ' ×' + matches.length : ''), '#f59e0b');
+                }
             }
             return true;
         }
