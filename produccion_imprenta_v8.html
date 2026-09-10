@@ -466,15 +466,21 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.1';
+        const APP_VERSION = 'v9.2';
         let _pendingReload = false;
-        // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
-        // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
+        // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
+        // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
+        // Listo), ese cambio se pierde y la orden "regresa" a su etapa anterior en el
+        // siguiente sync con las hojas (2026-09-10, caso reportado por Kevin justo después
+        // de un cambio de versión). Contarlos aquí y tratarlos como "ocupado" evita la carrera.
+        let _pendingSaves = 0;
+        // No interrumpe a media acción (modal abierto, arrastrando, escribiendo, guardando) —
+        // reintenta cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
         function tryReload() {
             if (!_pendingReload) return;
             const activeTag = document.activeElement && document.activeElement.tagName;
             const busy = (typeof modalId !== 'undefined' && modalId !== undefined) || showCfg || showSync || _dragId ||
-                activeTag === 'INPUT' || activeTag === 'TEXTAREA';
+                activeTag === 'INPUT' || activeTag === 'TEXTAREA' || _pendingSaves > 0;
             if (busy) return;
             showToast('🔄 Hay una versión nueva — actualizando...', 3000);
             setTimeout(() => location.reload(true), 2500);
@@ -768,11 +774,12 @@
         }
         function saveS() {
             const manualOrders = orders.filter(o => !o._fromSheets);
+            _pendingSaves++;
             // update() en vez de set(): mismo resultado para estas claves, pero dejamos la
             // puerta abierta a saveBoard() para escribir solo una parte sin tocar el resto.
             const p = _ref.update({ cfg, statsHistory, historial, etapaMap, manualOrders, scanLog, moveLog }).catch(e => {
                 try { localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); localStorage.setItem('imp_h', JSON.stringify(historial)); } catch { }
-            });
+            }).finally(() => { _pendingSaves--; });
             pushLiveStatus();
             return p;
         }
@@ -781,9 +788,10 @@
         // el tiempo, en cada arrastre/escaneo/cambio de configuración.
         function saveBoard() {
             const manualOrders = orders.filter(o => !o._fromSheets);
+            _pendingSaves++;
             const p = _ref.update({ cfg, etapaMap, manualOrders, moveLog }).catch(e => {
                 try { localStorage.setItem('imp_c', JSON.stringify(cfg)); } catch { }
-            });
+            }).finally(() => { _pendingSaves--; });
             pushLiveStatus();
             return p;
         }
@@ -1398,6 +1406,17 @@
             fetch(scriptURL('action=updateTracking&item=' + item + '&etapa=' + encodeURIComponent(etapaTracking) + '&trackingId=' + encodeURIComponent(TRACKING_SHEET_ID)), { mode: 'no-cors' }).catch(() => { });
         }
 
+        // Avisa a la hoja de Google que una orden ya quedó Lista (marcarListo/marcarProcesado)
+        // — usa mode:'no-cors', así que NO puede saber si el Apps Script de verdad la marcó
+        // (solo detecta fallas de RED: sin conexión, DNS, etc., no errores internos del script
+        // como el candado de la limpieza automática ocupado). Antes esto fallaba en silencio
+        // total; ahora al menos avisa cuando la red falla del todo, para no descubrirlo días
+        // después viendo que la orden "regresó" (2026-09-10, caso reportado por Kevin).
+        function fetchListoOrWarn_(url, order) {
+            fetch(url, { mode: 'no-cors' }).catch(() => {
+                showToast('⚠️ No se pudo avisar a la hoja que "' + (order.titulo || order.baseTitulo || order.id).substring(0, 30) + '" ya está Listo — revisa la conexión y verifica a mano en la hoja', 8000);
+            });
+        }
         // Marca Listo=TRUE en Google Sheets cuando se avanza una orden
         // fromEtapa: etapa anterior (antes del movimiento)
         function callScript(order, toEtapa, fromEtapa) {
@@ -1407,7 +1426,7 @@
             if (order._isMuestra && order.grupoId) {
                 const it = encodeURIComponent(String(order.grupoId).replace(/-M$/, '').trim());
                 if (toEtapa === 'listo') {
-                    fetch(scriptURL('action=marcarProcesado&item=' + it), { mode: 'no-cors' }).catch(() => { });
+                    fetchListoOrWarn_(scriptURL('action=marcarProcesado&item=' + it), order);
                 } else {
                     fetch(scriptURL('action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa) + '&hoja=muestras'), { mode: 'no-cors' }).catch(() => { });
                 }
@@ -1419,7 +1438,7 @@
                 if (toEtapa === 'empaque') {
                     fetch(scriptURL('action=moverAempacado&item=' + it), { mode: 'no-cors' }).catch(() => { });
                 } else if (toEtapa === 'listo') {
-                    fetch(scriptURL('action=marcarListo&item=' + it + '&hoja=acabados'), { mode: 'no-cors' }).catch(() => { });
+                    fetchListoOrWarn_(scriptURL('action=marcarListo&item=' + it + '&hoja=acabados'), order);
                 } else if (isAcabEtapa(toEtapa)) {
                     fetch(scriptURL('action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa)), { mode: 'no-cors' }).catch(() => { });
                 }
@@ -1447,7 +1466,7 @@
             }
             // Llega a Listo → eliminar de Acabado org / Empacado
             if (toEtapa === 'listo') {
-                fetch(scriptURL('action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=' + hoja + (po ? '&po=' + po : '')), { mode: 'no-cors' }).catch(() => { });
+                fetchListoOrWarn_(scriptURL('action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=' + hoja + (po ? '&po=' + po : '')), order);
                 return;
             }
             // Movimiento dentro de Acabados → actualizar etapa_actual en Acabado org
