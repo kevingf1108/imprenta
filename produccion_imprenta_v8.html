@@ -466,7 +466,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.2';
+        const APP_VERSION = 'v9.3';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1399,24 +1399,26 @@
         }
         function scriptURL(qsNoQ) { return scriptURLBase(cfg.scriptUrl, qsNoQ); }
 
+        // Dispara una llamada a la hoja de Google y avisa con un toast si la red falla —
+        // usa mode:'no-cors', así que NO puede saber si el Apps Script de verdad hizo el
+        // cambio (solo detecta fallas de RED: sin conexión, DNS, etc., no errores internos
+        // del script como el candado de la limpieza automática ocupado). Antes TODAS estas
+        // llamadas fallaban en silencio total; ahora avisan cuando la red falla del todo,
+        // para no descubrirlo días después viendo que una orden "regresó" o se quedó mal
+        // reflejada en la hoja (2026-09-10, caso reportado por Kevin — extendido a todas las
+        // llamadas de callScript/callTracking, antes solo cubría "marcarListo").
+        function fetchOrWarn_(url, order, descripcion) {
+            fetch(url, { mode: 'no-cors' }).catch(() => {
+                showToast('⚠️ No se pudo avisar a la hoja (' + descripcion + ') de "' + (order.titulo || order.baseTitulo || order.id).substring(0, 30) + '" — revisa la conexión y verifica a mano en la hoja', 8000);
+            });
+        }
         function callTracking(order, toEtapa) {
             if (!cfg.scriptUrl) return;
             const item = encodeURIComponent(String(order.grupoId || order.id).replace(/-[MAPm]$/, '').trim());
             const etapaTracking = (order._isMuestra ? 'M. ' : 'P. ') + toEtapa;
-            fetch(scriptURL('action=updateTracking&item=' + item + '&etapa=' + encodeURIComponent(etapaTracking) + '&trackingId=' + encodeURIComponent(TRACKING_SHEET_ID)), { mode: 'no-cors' }).catch(() => { });
+            fetchOrWarn_(scriptURL('action=updateTracking&item=' + item + '&etapa=' + encodeURIComponent(etapaTracking) + '&trackingId=' + encodeURIComponent(TRACKING_SHEET_ID)), order, 'tracking');
         }
 
-        // Avisa a la hoja de Google que una orden ya quedó Lista (marcarListo/marcarProcesado)
-        // — usa mode:'no-cors', así que NO puede saber si el Apps Script de verdad la marcó
-        // (solo detecta fallas de RED: sin conexión, DNS, etc., no errores internos del script
-        // como el candado de la limpieza automática ocupado). Antes esto fallaba en silencio
-        // total; ahora al menos avisa cuando la red falla del todo, para no descubrirlo días
-        // después viendo que la orden "regresó" (2026-09-10, caso reportado por Kevin).
-        function fetchListoOrWarn_(url, order) {
-            fetch(url, { mode: 'no-cors' }).catch(() => {
-                showToast('⚠️ No se pudo avisar a la hoja que "' + (order.titulo || order.baseTitulo || order.id).substring(0, 30) + '" ya está Listo — revisa la conexión y verifica a mano en la hoja', 8000);
-            });
-        }
         // Marca Listo=TRUE en Google Sheets cuando se avanza una orden
         // fromEtapa: etapa anterior (antes del movimiento)
         function callScript(order, toEtapa, fromEtapa) {
@@ -1426,9 +1428,9 @@
             if (order._isMuestra && order.grupoId) {
                 const it = encodeURIComponent(String(order.grupoId).replace(/-M$/, '').trim());
                 if (toEtapa === 'listo') {
-                    fetchListoOrWarn_(scriptURL('action=marcarProcesado&item=' + it), order);
+                    fetchOrWarn_(scriptURL('action=marcarProcesado&item=' + it), order, 'marcar Lista');
                 } else {
-                    fetch(scriptURL('action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa) + '&hoja=muestras'), { mode: 'no-cors' }).catch(() => { });
+                    fetchOrWarn_(scriptURL('action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa) + '&hoja=muestras'), order, 'mover a ' + toEtapa);
                 }
                 return;
             }
@@ -1436,11 +1438,11 @@
             if (order.tipo === 'union_result' && order.grupoId) {
                 const it = encodeURIComponent(String(order.grupoId).trim());
                 if (toEtapa === 'empaque') {
-                    fetch(scriptURL('action=moverAempacado&item=' + it), { mode: 'no-cors' }).catch(() => { });
+                    fetchOrWarn_(scriptURL('action=moverAempacado&item=' + it), order, 'mover a Empaque');
                 } else if (toEtapa === 'listo') {
-                    fetchListoOrWarn_(scriptURL('action=marcarListo&item=' + it + '&hoja=acabados'), order);
+                    fetchOrWarn_(scriptURL('action=marcarListo&item=' + it + '&hoja=acabados'), order, 'marcar Lista');
                 } else if (isAcabEtapa(toEtapa)) {
-                    fetch(scriptURL('action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa)), { mode: 'no-cors' }).catch(() => { });
+                    fetchOrWarn_(scriptURL('action=updateEtapa&item=' + it + '&etapa=' + encodeURIComponent(toEtapa)), order, 'mover a ' + toEtapa);
                 }
                 return;
             }
@@ -1454,24 +1456,24 @@
 
             // Sale de Impresión hacia Acabados → mover fila de Impresion org a Acabado org
             if (fromEtapa === 'impresion' && isAcabEtapa(toEtapa)) {
-                fetch(scriptURL('action=moverAacabados&item=' + encodeURIComponent(item) + (po ? '&po=' + po : '')), { mode: 'no-cors' }).catch(() => { });
+                fetchOrWarn_(scriptURL('action=moverAacabados&item=' + encodeURIComponent(item) + (po ? '&po=' + po : '')), order, 'mover a Acabados');
                 // Pre-registrar posición para la orden union_result que aparecerá en el próximo sync
                 etapaMap[item + '-A'] = toEtapa;
                 return;
             }
             // Llega a Empaque → mover fila de Acabado org a Empacado
             if (toEtapa === 'empaque') {
-                fetch(scriptURL('action=moverAempacado&item=' + encodeURIComponent(item)), { mode: 'no-cors' }).catch(() => { });
+                fetchOrWarn_(scriptURL('action=moverAempacado&item=' + encodeURIComponent(item)), order, 'mover a Empaque');
                 return;
             }
             // Llega a Listo → eliminar de Acabado org / Empacado
             if (toEtapa === 'listo') {
-                fetchListoOrWarn_(scriptURL('action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=' + hoja + (po ? '&po=' + po : '')), order);
+                fetchOrWarn_(scriptURL('action=marcarListo&item=' + encodeURIComponent(item) + '&hoja=' + hoja + (po ? '&po=' + po : '')), order, 'marcar Lista');
                 return;
             }
             // Movimiento dentro de Acabados → actualizar etapa_actual en Acabado org
             if (isAcabEtapa(toEtapa)) {
-                fetch(scriptURL('action=updateEtapa&item=' + encodeURIComponent(item) + '&etapa=' + encodeURIComponent(toEtapa)), { mode: 'no-cors' }).catch(() => { });
+                fetchOrWarn_(scriptURL('action=updateEtapa&item=' + encodeURIComponent(item) + '&etapa=' + encodeURIComponent(toEtapa)), order, 'mover a ' + toEtapa);
             }
         }
         function markListoInSheets(order, fromEtapa) { callScript(order, 'listo', fromEtapa); }
