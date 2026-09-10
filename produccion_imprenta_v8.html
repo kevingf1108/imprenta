@@ -466,7 +466,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v8.1000015';
+        const APP_VERSION = 'v9.1';
         let _pendingReload = false;
         // No interrumpe a media acción (modal abierto, arrastrando, escribiendo) — reintenta
         // cada 30s hasta que esté libre, y avisa unos segundos antes de recargar.
@@ -1171,7 +1171,7 @@
                         stepId: step.id, stepNom: step.nom, machId: mach.id, machLabel: mach.label,
                         start, end, dur: step.min, color, urgente: o.urgente, fechaLimite: o.fechaLimite,
                         buddyGroup: buddyKey[o.id] || null,
-                        _isMuestra: o._isMuestra || false,
+                        _isMuestra: o._isMuestra || false, _piezaSuelta: o._piezaSuelta || null,
                     });
                 });
             });
@@ -1309,8 +1309,17 @@
             const acab = col(row, 'acabados', 'terminados', 'actividades');
             const hojas = parseInt(col(row, 'hojas', 'sheets', 'tabloides', 'tabs')) || 0;
             const status = col(row, 'status', 'estado');
+            const po = col(row, 'p_o', 'tipo', 'interior', 'portada');
 
             if (!nombre || !itemNum) return null;
+
+            // El tipo se mantiene 'union_result' siempre (el flujo de acabados y el scheduler
+            // dependen de eso) — PERO no todo lo que llega a Acabado org viene ya unido:
+            // Docket Manager a veces sigue mandando Interior y Portada como renglones
+            // separados con el mismo nombre (ver caso 288555/288554, 2026-09-09). _piezaSuelta
+            // es solo para la etiqueta visual, así no se ve "🔗 Unido" en algo que en realidad
+            // es nada más esa mitad — sin tocar cómo avanza la orden.
+            const _piezaSuelta = po.toLowerCase().includes('int') ? 'int' : po.toLowerCase().includes('port') ? 'port' : null;
 
             // Determina si es INT o PORT desde el status o asumimos "union_result" si solo hay 1 fila
             // En acabados normalmente ya vienen como trabajo unido
@@ -1330,7 +1339,7 @@
                 fechaLimite: parseDMDate(entrega),
                 etapa, urgente: urg.toLowerCase().includes('urgente'),
                 notas: acab.substring(0, 120),
-                _fromSheets: true,
+                _fromSheets: true, _piezaSuelta,
                 fechaCreacion: new Date().toISOString().split('T')[0],
             };
         }
@@ -2989,7 +2998,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const tipo = o.tipo || 'normal';
             const tipoBadge = tipo === 'int_sub' ? `<span class="badge" style="background:#818cf855;color:#818cf8">📄 INT</span>`
                 : tipo === 'port_sub' ? `<span class="badge" style="background:#c084fc55;color:#c084fc">🎨 PORT</span>`
-                    : tipo === 'union_result' ? `<span class="badge" style="background:#4ade8033;color:#4ade80">🔗 Unido</span>` : '';
+                    : tipo === 'union_result' ? (o._piezaSuelta === 'int' ? `<span class="badge" style="background:#818cf855;color:#818cf8">📄 Interior (sin unir)</span>`
+                        : o._piezaSuelta === 'port' ? `<span class="badge" style="background:#c084fc55;color:#c084fc">🎨 Portada (sin unir)</span>`
+                            : `<span class="badge" style="background:#4ade8033;color:#4ade80">🔗 Unido</span>`) : '';
             const activeTimerKey = Object.keys(_scanTimers).find(k => k === o.id || k.startsWith(o.id + '_'));
             const activeTimerVal = activeTimerKey ? _scanTimers[activeTimerKey] : null;
             const timerPaused = activeTimerVal && typeof activeTimerVal === 'object' && activeTimerVal.paused;
@@ -3071,7 +3082,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const ord = isNew ? { cliente: '', titulo: '', cantidad: 100, paginas: 200, ppt: 8, portaPpt: 2, tipoInteriores: 'byn', gramaje: 'normal', tipoEncuadernacion: 'normal', maquina: 'auto', tamano: 'tabloide', fechaLimite: '', urgente: false, notas: '' } : orders.find(o => o.id === modalId) || {};
             const segBtns = (name, opts, val) => opts.map(([v, l, c]) => `<button class="seg${val === v ? ' on' : ''}" id="seg_${name}_${v}" style="${val === v ? `background:${c || '#3b82f6'};color:#0f172a;border-color:transparent` : ''}" onclick="setSeg('${name}','${v}')">${l}</button>`).join('');
             const tipo = ord.tipo || 'normal';
-            const tipoLabel = tipo === 'int_sub' ? '📄 Interiores' : tipo === 'port_sub' ? '🎨 Portada' : tipo === 'union_result' ? '🔗 Unido' : '🖨️ Normal';
+            const tipoLabel = tipo === 'int_sub' ? '📄 Interiores' : tipo === 'port_sub' ? '🎨 Portada'
+                : tipo === 'union_result' ? (ord._piezaSuelta === 'int' ? '📄 Interior (sin unir)' : ord._piezaSuelta === 'port' ? '🎨 Portada (sin unir)' : '🔗 Unido') : '🖨️ Normal';
             return `<div class="overlay" onclick="if(event.target===this)closeModal()">
     <div class="modal" onclick="event.stopPropagation()">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -3575,7 +3587,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     const x = b.start * pxM, w = Math.max(b.dur * pxM, 6);
                     const brd = isOD(b.fechaLimite) ? 'border:2px solid #ef4444' : isSoon(b.fechaLimite) ? 'border:2px solid #f59e0b' : b._isMuestra ? 'border:2px dashed #94a3b8' : '';
                     const muestraStyle = b._isMuestra ? 'opacity:0.82;' : '';
-                    const tipoBadge = b.tipo === 'muestra' ? '🔬' : b.tipo === 'int_sub' ? 'I·' : b.tipo === 'port_sub' ? 'P·' : b.tipo === 'union_result' ? '🔗' : '';
+                    const tipoBadge = b.tipo === 'muestra' ? '🔬' : b.tipo === 'int_sub' ? 'I·' : b.tipo === 'port_sub' ? 'P·'
+                        : b.tipo === 'union_result' ? (b._piezaSuelta === 'int' ? 'I·' : b._piezaSuelta === 'port' ? 'P·' : '🔗') : '';
                     const buddyBadge = b.buddyGroup ? '🔗' : '';
                     const shortId = e(b.ordId);
                     const shortTit = b.titulo.length > 20 ? b.titulo.substring(0, 18) + '…' : b.titulo;
@@ -4011,12 +4024,31 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             let _allNums = (ordIdRaw.match(/\d+/) || [''])[0] || ordIdRaw.replace(/\D/g, '');
             if (_allNums.length > 7 && _allNums.endsWith('0013')) _allNums = _allNums.slice(0, -4);
             const digits6 = _allNums.slice(0, 7);
+            // Agrupa por los primeros 5 dígitos — igual que los pasos de unión (Empaque, Corte
+            // Final, etc.) — para que un solo escaneo de "Listo" cierre TODAS las piezas del
+            // mismo pedido (interior+portada, o las distintas capas de un formulario) aunque
+            // nunca se hayan combinado en un solo renglón (2026-09-09, a pedido de Kevin).
+            // Requiere además el MISMO título que la pieza ancla (la que coincide exacto con el
+            // código escaneado) — sin este filtro, otra orden de OTRO cliente que por pura
+            // coincidencia caiga en el mismo bloque de 5 dígitos también se marcaría Listo por
+            // error (confirmado con una prueba — ver incidente de "primeros 5 dígitos" en
+            // Ordenes DM, mismo patrón de riesgo). Con el título exigido, solo se agrupan
+            // hermanas reales del mismo trabajo.
+            const prefix5 = digits6.slice(0, 5);
             const mMatch = ordIdRaw.match(/^M(%W)?(\d)/);
             const scanMuestra = !!mMatch;
+            const _filtroBase = x => !x._merged && x.etapa !== 'listo' && (scanMuestra ? !!x._isMuestra : !x._isMuestra);
 
-            const matches = orders.filter(x => !x._merged && x.etapa !== 'listo' &&
-                (scanMuestra ? !!x._isMuestra : !x._isMuestra) &&
+            const ancla = orders.find(x => _filtroBase(x) &&
                 (x.id.replace(/\D/g, '') === digits6 || (x.grupoId && x.grupoId.toString().replace(/\D/g, '') === digits6)));
+
+            const matches = !ancla ? [] : (() => {
+                const tit = (ancla.baseTitulo || ancla.titulo || '').trim().toLowerCase();
+                return orders.filter(x => _filtroBase(x) &&
+                    ((x.grupoId && x.grupoId.toString().replace(/\D/g, '').startsWith(prefix5)) ||
+                        x.id.replace(/\D/g, '').startsWith(prefix5)) &&
+                    (x.id === ancla.id || (x.baseTitulo || x.titulo || '').trim().toLowerCase() === tit));
+            })();
 
             if (!matches.length) {
                 const anyMatch = orders.filter(x => x.id.replace(/\D/g, '') === digits6 || x.grupoId?.toString().replace(/\D/g, '') === digits6);
@@ -4228,7 +4260,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     delete _scanTimers[timerKey];
                     saveTimers();
                     _tocoLogsFull = true;
-                } else if (proc) {
+                } else if (proc && !oActual._isMuestra) {
+                    // Las muestras entran al tablero ya colocadas en su etapa (vienen directo
+                    // de la hoja "M Imp", nunca por un escaneo de "Inicia") — la alerta de
+                    // "sin tiempo" ahí siempre sería un falso positivo, así que no aplica a
+                    // ningún paso de una muestra (2026-09-10, a pedido de Kevin).
                     _faltoInicio = true;
                 }
                 orders[idx] = { ...orders[idx], etapa: nextStep.id };
