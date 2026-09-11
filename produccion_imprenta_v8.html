@@ -466,7 +466,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.4';
+        const APP_VERSION = 'v9.5';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1566,11 +1566,13 @@
                     } catch { }
                     return null;
                 }
-                const [respImp, respAcab, respMuestras] = await Promise.all([
-                    fetchCSV('impresion'),
-                    fetchCSV('acabados'),
-                    fetchCSV('muestras'),
-                ]);
+                // Secuencial (no Promise.all) — con varias computadoras con el tablero
+                // abierto a la vez, cada una ya compite por el candado del Apps Script;
+                // pedir las 3 hojas en paralelo desde la MISMA computadora multiplicaba
+                // esa contención sin necesidad.
+                const respImp = await fetchCSV('impresion');
+                const respAcab = await fetchCSV('acabados');
+                const respMuestras = await fetchCSV('muestras');
 
                 let newOrders = [];
                 let countImp = 0, countAcab = 0, countMuestras = 0;
