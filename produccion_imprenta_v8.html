@@ -466,7 +466,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.6';
+        const APP_VERSION = 'v9.7';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1059,11 +1059,11 @@
         // Plastificado, que Interior normalmente ni siquiera tiene en su flujo) — se fuerza
         // igual; el tablero ya sabe mostrar una orden fuera de su flujo natural (mismo mecanismo
         // que usa mvOrd cuando Sheets deja una orden así).
-        // Excepción explícita (mismo día, ajuste pedido después de probar la primera versión):
-        // Empaque y Listo NO se siguen automáticamente — cada mitad tiene que confirmarse por
-        // separado en esos dos pasos finales, uno a la vez.
+        // Empaque y Listo SÍ se siguen automáticamente (2026-09-21, a pedido de Kevin — revierte
+        // la excepción del 2026-08-25): si uno de los dos llega a Empaque o Listo, el otro salta
+        // ahí también, con la misma limpieza (etapaMap/historial) que usa una orden normal al
+        // llegar a Listo.
         function seguirHermano_(orderId, nuevaEtapa) {
-            if (nuevaEtapa === 'empaque' || nuevaEtapa === 'listo') return;
             const idx = orders.findIndex(o => o.id === orderId);
             if (idx < 0) return;
             const o = orders[idx];
@@ -1078,6 +1078,7 @@
             orders[hIdx] = { ...orders[hIdx], etapa: nuevaEtapa };
             etapaMap[hermano.id] = nuevaEtapa;
             logMove(orders[hIdx], fromEtapa, nuevaEtapa, 'sigue-a-hermano');
+            if (nuevaEtapa === 'listo') { delete etapaMap[hermano.id]; pushHistorial(orders[hIdx]); }
             callScript(orders[hIdx], nuevaEtapa, fromEtapa);
         }
 
