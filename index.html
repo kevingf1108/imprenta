@@ -466,7 +466,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.5';
+        const APP_VERSION = 'v9.6';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -2233,7 +2233,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const _scrollLeft = _oldBoard ? _oldBoard.scrollLeft : 0;
             root.innerHTML = `
     <div style="background:#1e293b;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #334155;position:sticky;top:0;z-index:50">${hdrHTML()}</div>
-    <div id="mc">${V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : boardHTML()}</div>
+    <div id="mc">${V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : V === 'muestras' ? muestrasHTML() : boardHTML()}</div>
     ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}`;
             const _newBoard = document.querySelector('.board');
             if (_newBoard) _newBoard.scrollLeft = _scrollLeft;
@@ -2276,7 +2276,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             return `
     <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">${APP_VERSION}</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
-      ${[['kanban', '📋 Tablero'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['salida', '📦 Salida del día'], ['tv', '📺 TV'], ['scan_log', `🔍 No encontrados${scanLog.length ? ' ('+scanLog.length+')' : ''}`]].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
+      ${[['kanban', '📋 Tablero'], ['muestras', '🔬 Muestras'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['salida', '📦 Salida del día'], ['tv', '📺 TV'], ['scan_log', `🔍 No encontrados${scanLog.length ? ' ('+scanLog.length+')' : ''}`]].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
     <div style="display:flex;align-items:center;gap:8px;background:#0f172a;border-radius:8px;padding:6px 12px;flex:1;min-width:170px;max-width:290px">
       <div style="flex:1"><div style="font-size:10px;color:#64748b;margin-bottom:3px">CAPACIDAD EN COLA</div>
@@ -2975,10 +2975,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // ═══════════════════════════════════════════════════
         function renderBoard() {
             const mc = document.getElementById('mc');
-            if (!mc || V !== 'kanban') return;
+            if (!mc || (V !== 'kanban' && V !== 'muestras')) return;
             const oldBoard = mc.querySelector('.board');
             const scrollLeft = oldBoard ? oldBoard.scrollLeft : 0;
-            mc.innerHTML = boardHTML();
+            mc.innerHTML = V === 'muestras' ? muestrasHTML() : boardHTML();
             const newBoard = mc.querySelector('.board');
             if (newBoard) newBoard.scrollLeft = scrollLeft;
         }
@@ -3020,8 +3020,16 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const finishMin = scheduleMachines(orders, cfg).finishMin;
             return `<div class="board">${etapas.map((et, ei) => colHTML(et, ei, etapas, finishMin)).join('')}</div>`;
         }
-        function colHTML(et, ei, etapas, finishMin) {
-            const allTotal = orders.filter(o => o.etapa === et.id && !o._merged);
+        function muestrasHTML() {
+            const muestraOrders = orders.filter(o => o._isMuestra);
+            if (!muestraOrders.length) return `<div style="color:#334155;font-size:13px;text-align:center;padding:40px 0">🔬 Sin muestras en el sistema todavía</div>`;
+            const etapas = allEtapas(muestraOrders);
+            const finishMin = scheduleMachines(muestraOrders, cfg).finishMin;
+            return `<div class="board">${etapas.map((et, ei) => colHTML(et, ei, etapas, finishMin, muestraOrders)).join('')}</div>`;
+        }
+        function colHTML(et, ei, etapas, finishMin, srcOrders) {
+            srcOrders = srcOrders || orders;
+            const allTotal = srcOrders.filter(o => o.etapa === et.id && !o._merged);
             const all = allTotal.filter(o => matchSearch(o));
             const isAcab = isAcabEtapa(et.id);
             const badgeLabel = searchQ && all.length !== allTotal.length ? `${all.length}/${allTotal.length}` : `${allTotal.length}`;
