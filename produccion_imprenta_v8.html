@@ -466,7 +466,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.11';
+        const APP_VERSION = 'v9.12';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -2251,7 +2251,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const _scrollLeft = _oldBoard ? _oldBoard.scrollLeft : 0;
             root.innerHTML = `
     <div style="background:#1e293b;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #334155;position:sticky;top:0;z-index:50">${hdrHTML()}</div>
-    <div id="mc">${V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : V === 'muestras' ? muestrasHTML() : V === 'pegado' ? etapaSolaHTML('acab_pg') : boardHTML()}</div>
+    <div id="mc">${V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : V === 'muestras' ? muestrasHTML() : V === 'pegado' ? etapaSolaHTML('acab_pg') : V === 'faltapg' ? faltanPorHTML('pg') : boardHTML()}</div>
     ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}`;
             const _newBoard = document.querySelector('.board');
             if (_newBoard) _newBoard.scrollLeft = _scrollLeft;
@@ -2294,7 +2294,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             return `
     <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">${APP_VERSION}</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
-      ${[['kanban', '📋 Tablero'], ['muestras', '🔬 Muestras'], ['pegado', '🔥 Pegado'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['salida', '📦 Salida del día'], ['tv', '📺 TV'], ['scan_log', `🔍 No encontrados${scanLog.length ? ' ('+scanLog.length+')' : ''}`]].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
+      ${[['kanban', '📋 Tablero'], ['muestras', '🔬 Muestras'], ['pegado', '🔥 Pegado'], ['faltapg', '⏳ Faltan pegar'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['salida', '📦 Salida del día'], ['tv', '📺 TV'], ['scan_log', `🔍 No encontrados${scanLog.length ? ' ('+scanLog.length+')' : ''}`]].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
     <div style="display:flex;align-items:center;gap:8px;background:#0f172a;border-radius:8px;padding:6px 12px;flex:1;min-width:170px;max-width:290px">
       <div style="flex:1"><div style="font-size:10px;color:#64748b;margin-bottom:3px">CAPACIDAD EN COLA</div>
@@ -2993,10 +2993,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // ═══════════════════════════════════════════════════
         function renderBoard() {
             const mc = document.getElementById('mc');
-            if (!mc || (V !== 'kanban' && V !== 'muestras' && V !== 'pegado')) return;
+            if (!mc || (V !== 'kanban' && V !== 'muestras' && V !== 'pegado' && V !== 'faltapg')) return;
             const oldBoard = mc.querySelector('.board');
             const scrollLeft = oldBoard ? oldBoard.scrollLeft : 0;
-            mc.innerHTML = V === 'muestras' ? muestrasHTML() : V === 'pegado' ? etapaSolaHTML('acab_pg') : boardHTML();
+            mc.innerHTML = V === 'muestras' ? muestrasHTML() : V === 'pegado' ? etapaSolaHTML('acab_pg') : V === 'faltapg' ? faltanPorHTML('pg') : boardHTML();
             const newBoard = mc.querySelector('.board');
             if (newBoard) newBoard.scrollLeft = scrollLeft;
         }
@@ -3038,24 +3038,27 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const finishMin = scheduleMachines(orders, cfg).finishMin;
             return `<div class="board">${etapas.map((et, ei) => colHTML(et, ei, etapas, finishMin)).join('')}</div>`;
         }
+        // Cantidad de libros (copias) en una lista de órdenes, no número de tarjetas — una
+        // sola orden puede ser 300 copias de un libro. Interior/Portada (u órdenes
+        // multi-volumen) comparten los primeros 5 dígitos del ID y son el MISMO libro
+        // físico — si ambas caen en la lista, contar solo una vez (mismo criterio de
+        // "grupo hermano" que ya usa scheduleMachines para el Gantt).
+        function sumaLibrosDedup_(items) {
+            const vistos = new Set();
+            return items.reduce((s, o) => {
+                const digits = String(o.id).replace(/\D/g, '');
+                const prefix = digits.length >= 5 ? digits.slice(0, 5) : null;
+                if (prefix) { if (vistos.has(prefix)) return s; vistos.add(prefix); }
+                return s + (+o.cantidad || 0);
+            }, 0);
+        }
         // Vista de una sola etapa (ej. Pegado/Hotmelt) con el total bien grande arriba —
         // para responder de un vistazo "cuántos libros hay que pegar ahorita" sin tener
         // que ir a buscar el badge chiquito de la columna en el Tablero completo.
         function etapaSolaHTML(etapaId) {
             const et = etOf(etapaId);
             const items = orders.filter(o => o.etapa === etapaId && !o._merged);
-            // Cantidad de libros (copias), no número de órdenes/tarjetas — una sola orden
-            // puede ser 300 copias de un libro. Interior/Portada (u órdenes multi-volumen)
-            // comparten los primeros 5 dígitos del ID y son el MISMO libro físico — si las
-            // dos están en esta etapa a la vez, contar solo una vez (mismo criterio de
-            // "grupo hermano" que ya usa scheduleMachines para el Gantt).
-            const _vistos = new Set();
-            const totalLibros = items.reduce((s, o) => {
-                const digits = String(o.id).replace(/\D/g, '');
-                const prefix = digits.length >= 5 ? digits.slice(0, 5) : null;
-                if (prefix) { if (_vistos.has(prefix)) return s; _vistos.add(prefix); }
-                return s + (+o.cantidad || 0);
-            }, 0);
+            const totalLibros = sumaLibrosDedup_(items);
             const finishMin = scheduleMachines(orders, cfg).finishMin;
             return `<div style="padding:14px">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
@@ -3066,6 +3069,32 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       </div>
     </div>
     <div class="board" style="justify-content:flex-start">${colHTML(et, 0, [et], finishMin)}</div>
+  </div>`;
+        }
+        // Vista "todavía les falta este paso" — a diferencia de etapaSolaHTML (que solo cuenta
+        // quién está AHORITA parado en la etapa), esta suma TODO lo que en algún momento tiene
+        // que pasar por este paso y no lo ha hecho todavía: desde Impresión, pasando por lo que
+        // ya está en la etapa misma (no se ha movido de ahí, así que también le falta), hasta
+        // lo que está justo antes. Usa pasosRestantes_() para no contar lo ya hecho.
+        function faltanPorHTML(stepId) {
+            const et = ACAB_STEPS.find(s => s.id === 'acab_' + stepId) || etOf('acab_' + stepId);
+            const relevantes = orders.filter(o => {
+                if (o.etapa === 'listo' || o._merged) return false;
+                return pasosRestantes_(o, calcT(o, cfg)).some(p => p.id === stepId);
+            });
+            if (!relevantes.length) return `<div style="color:#334155;font-size:13px;text-align:center;padding:40px 0">✅ Nada pendiente de ${et.label}</div>`;
+            const totalLibros = sumaLibrosDedup_(relevantes);
+            const etapas = allEtapas(relevantes);
+            const finishMin = scheduleMachines(orders, cfg).finishMin;
+            return `<div style="padding:14px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <span style="font-size:26px">⏳</span>
+      <div>
+        <div style="font-size:22px;font-weight:800;color:${et.color}">${totalLibros.toLocaleString('es')} libro${totalLibros === 1 ? '' : 's'}</div>
+        <div style="font-size:12px;color:#64748b">todavía les falta ${et.label} · ${relevantes.length} orden${relevantes.length === 1 ? '' : 'es'}</div>
+      </div>
+    </div>
+    <div class="board">${etapas.map((e2, ei) => colHTML(e2, ei, etapas, finishMin, relevantes)).join('')}</div>
   </div>`;
         }
         function muestrasHTML() {
