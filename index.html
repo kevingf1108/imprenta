@@ -466,7 +466,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.12';
+        const APP_VERSION = 'v9.13';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -3071,17 +3071,31 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     <div class="board" style="justify-content:flex-start">${colHTML(et, 0, [et], finishMin)}</div>
   </div>`;
         }
+        // ¿A esta orden todavía le falta pasar por este paso, dado en qué punto de SU flujo
+        // va? Se fija en getAcabFlow() (el recorrido real de columnas que la tarjeta hace en
+        // el tablero), NO en calcT()/pasosRestantes_() — calcT no genera un paso de tiempo
+        // separado de Pegado/Corte final/Termo para Interior o Portada divididos (ese tiempo
+        // solo se calcula para una orden sin dividir), así que basarse en calcT dejaba fuera
+        // a la mayoría de las órdenes reales, que sí son Interior/Portada.
+        function faltaPasoFlujo_(o, stepId) {
+            if (o.etapa === 'listo' || o._merged) return false;
+            const flow = getAcabFlow(o), wantId = 'acab_' + stepId;
+            if (o.etapa === 'impresion') return flow.includes(wantId);
+            if (o.etapa === 'empaque') return false;
+            if (isAcabEtapa(o.etapa)) {
+                const ci = flow.indexOf(o.etapa);
+                return (ci >= 0 ? flow.slice(ci) : flow).includes(wantId);
+            }
+            return false;
+        }
         // Vista "todavía les falta este paso" — a diferencia de etapaSolaHTML (que solo cuenta
         // quién está AHORITA parado en la etapa), esta suma TODO lo que en algún momento tiene
         // que pasar por este paso y no lo ha hecho todavía: desde Impresión, pasando por lo que
         // ya está en la etapa misma (no se ha movido de ahí, así que también le falta), hasta
-        // lo que está justo antes. Usa pasosRestantes_() para no contar lo ya hecho.
+        // lo que está justo antes.
         function faltanPorHTML(stepId) {
             const et = ACAB_STEPS.find(s => s.id === 'acab_' + stepId) || etOf('acab_' + stepId);
-            const relevantes = orders.filter(o => {
-                if (o.etapa === 'listo' || o._merged) return false;
-                return pasosRestantes_(o, calcT(o, cfg)).some(p => p.id === stepId);
-            });
+            const relevantes = orders.filter(o => faltaPasoFlujo_(o, stepId));
             if (!relevantes.length) return `<div style="color:#334155;font-size:13px;text-align:center;padding:40px 0">✅ Nada pendiente de ${et.label}</div>`;
             const totalLibros = sumaLibrosDedup_(relevantes);
             const etapas = allEtapas(relevantes);
