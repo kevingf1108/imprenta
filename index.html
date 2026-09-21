@@ -466,7 +466,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.9';
+        const APP_VERSION = 'v9.10';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -3043,14 +3043,17 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // que ir a buscar el badge chiquito de la columna en el Tablero completo.
         function etapaSolaHTML(etapaId) {
             const et = etOf(etapaId);
-            const total = orders.filter(o => o.etapa === etapaId && !o._merged).length;
+            const items = orders.filter(o => o.etapa === etapaId && !o._merged);
+            // Cantidad de libros (copias), no número de órdenes/tarjetas — una sola orden
+            // puede ser 300 copias de un libro.
+            const totalLibros = items.reduce((s, o) => s + (+o.cantidad || 0), 0);
             const finishMin = scheduleMachines(orders, cfg).finishMin;
             return `<div style="padding:14px">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
       <span style="font-size:26px">${et.icon}</span>
       <div>
-        <div style="font-size:22px;font-weight:800;color:${et.color}">${total} libro${total === 1 ? '' : 's'}</div>
-        <div style="font-size:12px;color:#64748b">en ${et.label} ahorita</div>
+        <div style="font-size:22px;font-weight:800;color:${et.color}">${totalLibros.toLocaleString('es')} libro${totalLibros === 1 ? '' : 's'}</div>
+        <div style="font-size:12px;color:#64748b">en ${et.label} ahorita · ${items.length} orden${items.length === 1 ? '' : 'es'}</div>
       </div>
     </div>
     <div class="board" style="justify-content:flex-start">${colHTML(et, 0, [et], finishMin)}</div>
