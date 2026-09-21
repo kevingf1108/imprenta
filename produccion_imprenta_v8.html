@@ -466,7 +466,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.10';
+        const APP_VERSION = 'v9.11';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -3045,8 +3045,17 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const et = etOf(etapaId);
             const items = orders.filter(o => o.etapa === etapaId && !o._merged);
             // Cantidad de libros (copias), no número de órdenes/tarjetas — una sola orden
-            // puede ser 300 copias de un libro.
-            const totalLibros = items.reduce((s, o) => s + (+o.cantidad || 0), 0);
+            // puede ser 300 copias de un libro. Interior/Portada (u órdenes multi-volumen)
+            // comparten los primeros 5 dígitos del ID y son el MISMO libro físico — si las
+            // dos están en esta etapa a la vez, contar solo una vez (mismo criterio de
+            // "grupo hermano" que ya usa scheduleMachines para el Gantt).
+            const _vistos = new Set();
+            const totalLibros = items.reduce((s, o) => {
+                const digits = String(o.id).replace(/\D/g, '');
+                const prefix = digits.length >= 5 ? digits.slice(0, 5) : null;
+                if (prefix) { if (_vistos.has(prefix)) return s; _vistos.add(prefix); }
+                return s + (+o.cantidad || 0);
+            }, 0);
             const finishMin = scheduleMachines(orders, cfg).finishMin;
             return `<div style="padding:14px">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
