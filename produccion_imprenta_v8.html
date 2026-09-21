@@ -466,7 +466,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.7';
+        const APP_VERSION = 'v9.8';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1082,6 +1082,22 @@
             callScript(orders[hIdx], nuevaEtapa, fromEtapa);
         }
 
+        // Pasos de calcT() que a ESTA orden le faltan de verdad, dado en qué paso de SU
+        // flujo de acabados va — no basta con saber que está "en algún paso de acabados"
+        // (todos los acab_* comparten fase 'acab'), porque entonces una orden que ya está
+        // en Corte Final seguía arrastrando el tiempo de Pegado (ya hecho) tanto en el
+        // Gantt como en Carga por Máquina. Mismo criterio que ya usa calcRemainingMin().
+        function pasosRestantes_(o, t) {
+            if (o.etapa === 'empaque') return t.pasos.filter(p => p.fase === 'emp');
+            if (isAcabEtapa(o.etapa)) {
+                const acabFlow = getAcabFlow(o);
+                const ci = acabFlow.indexOf(o.etapa);
+                const remIds = new Set((ci >= 0 ? acabFlow.slice(ci) : acabFlow).map(s => s.replace('acab_', '')));
+                return t.pasos.filter(p => (p.fase === 'acab' && remIds.has(p.id)) || p.fase === 'emp');
+            }
+            return t.pasos; // impresión: todo el flujo queda por delante
+        }
+
         // ═══════════════════════════════════════════════════
         //  SCHEDULER PARA GANTT
         // ═══════════════════════════════════════════════════
@@ -1090,8 +1106,6 @@
             const ordState = {}, blocks = [], colorMap = {};
             const sorted = [...ordList].filter(o => o.etapa !== 'listo' && !o._merged).sort(prioSort);
             sorted.forEach((o, oi) => { colorMap[o.id] = o._isMuestra ? MUESTRA_COLORS[oi % MUESTRA_COLORS.length] : ORD_COLORS[oi % ORD_COLORS.length]; });
-            const etapaFaseStart = { impresion: 0, empaque: 2, listo: 3 };
-            ACAB_STEPS.forEach(s => { etapaFaseStart[s.id] = 1; });
 
             // Detectar grupos hermanos: órdenes que comparten los primeros 5 dígitos del ID
             // (ej. 276871-A y 276872-A forman el mismo trabajo)
@@ -1116,9 +1130,7 @@
             sorted.forEach(o => {
                 if (!buddyKey[o.id]) return;
                 const t = calcT(o, c);
-                const fi = etapaFaseStart[o.etapa] ?? 0;
-                const fo = ['imp', 'acab', 'emp'];
-                const preJoinDur = t.pasos.filter(p => fo.indexOf(p.fase) >= fi && !JOIN_STEPS.has(p.id))
+                const preJoinDur = pasosRestantes_(o, t).filter(p => !JOIN_STEPS.has(p.id))
                     .reduce((s, p) => s + p.min, 0);
                 const gkey = buddyKey[o.id];
                 groupPreJoinMin[gkey] = Math.max(groupPreJoinMin[gkey] || 0, preJoinDur);
@@ -1137,16 +1149,21 @@
 
             sorted.forEach(o => {
                 const t = calcT(o, c), color = colorMap[o.id];
-                const fi = etapaFaseStart[o.etapa] ?? 0;
-                const fo = ['imp', 'acab', 'emp'];
-                const remaining = t.pasos.filter(p => fo.indexOf(p.fase) >= fi);
+                const remaining = pasosRestantes_(o, t);
                 ordState[o.id] = { intEnd: 0, portEnd: 0, mainEnd: 0 };
                 const INT_IDS = ['iib', 'iic', 'ci', 'pg', 'cf', 'cdc', 'pi'];
                 const PORT_IDS = ['ip', 'pl', 'cp', 'cc', 'ap', 'pp'];
                 const JOIN_IDS = ['pg', 'cf', 'ms', 'en', 'es', 'te'];
                 remaining.forEach(step => {
-                    const cands = MAQUINAS.filter(m => m.steps.includes(step.id));
+                    let cands = MAQUINAS.filter(m => m.steps.includes(step.id));
                     if (!cands.length) return;
+                    // Si la orden ya tiene máquina de impresión asignada (no 'auto'), respetarla:
+                    // antes el scheduler igual la mandaba a la que estuviera menos ocupada entre
+                    // OCE/Titan o entre las 4 de color, aunque Kevin ya hubiera elegido una específica.
+                    if (o.maquina && o.maquina !== 'auto') {
+                        const forced = cands.find(m => m.id === o.maquina);
+                        if (forced) cands = [forced];
+                    }
 
                     // Grupos hermanos en pasos de unión: reutilizar el slot del líder, no crear nueva barra
                     if (JOIN_STEPS.has(step.id) && buddyKey[o.id]) {
@@ -3331,11 +3348,27 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const machLoad = {};
             MAQUINAS.forEach(m => { machLoad[m.id] = { mach: m, pendMin: 0, ords: new Set() }; });
             active.forEach(o => {
-                calcT(o, cfg).pasos.forEach(p => {
-                    const ms = MAQUINAS.filter(m => m.steps.includes(p.id));
-                    if (!ms.length) return;
-                    const share = p.min / ms.length;
-                    ms.forEach(m => { machLoad[m.id].pendMin += share; machLoad[m.id].ords.add(o.id); });
+                // Solo lo que a ESTA orden le falta desde donde va — antes se sumaban TODOS los
+                // pasos de su flujo completo (calcT trae el flujo entero, no lo ya hecho), así que
+                // una orden ya en Corte Final seguía apareciendo con tiempo pendiente de Pegado.
+                pasosRestantes_(o, calcT(o, cfg)).forEach(p => {
+                    let cands = MAQUINAS.filter(m => m.steps.includes(p.id));
+                    if (!cands.length) return;
+                    // Si la orden ya tiene máquina de impresión asignada (no 'auto'), todo su
+                    // tiempo va ahí — antes se repartía a partes iguales entre TODAS las máquinas
+                    // capaces del mismo tipo (ej. entre las 4 de color) aunque ya se supiera cuál
+                    // la iba a correr, lo que inflaba la carga de las otras 3 sin motivo.
+                    if (o.maquina && o.maquina !== 'auto') {
+                        const forced = cands.find(m => m.id === o.maquina);
+                        if (forced) cands = [forced];
+                    }
+                    // Entre las candidatas restantes (o cuando no hay máquina fija, ej. acabados),
+                    // todo el paso cae en la que tenga MENOS carga acumulada hasta el momento —
+                    // mismo criterio "menos ocupada" que usa el scheduler del Gantt — en vez de
+                    // fraccionar el minutaje entre varias máquinas que en la práctica no lo corren.
+                    const mach = cands.reduce((best, m) => machLoad[m.id].pendMin < machLoad[best.id].pendMin ? m : best);
+                    machLoad[mach.id].pendMin += p.min;
+                    machLoad[mach.id].ords.add(o.id);
                 });
             });
             const grupos = [...new Set(MAQUINAS.map(m => m.grupo))];
