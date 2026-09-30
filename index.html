@@ -466,7 +466,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.14';
+        const APP_VERSION = 'v9.15';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -713,7 +713,7 @@
         // ═══════════════════════════════════════════════════
         //  ESTADO
         // ═══════════════════════════════════════════════════
-        let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [], historial = [], etapaMap = {}, scanLog = [], moveLog = [];
+        let V = 'resumen', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [], historial = [], etapaMap = {}, scanLog = [], moveLog = [];
         // hiddenGroups: órdenes que Kevin eliminó con 🗑 y que vienen de Sheets (_fromSheets) —
         // sin esto, runSync() las volvía a traer cada 5 min (autoSync) porque la fila seguía
         // existiendo en la hoja de Google; delOrd() solo las quitaba de la memoria local, nunca
@@ -2271,7 +2271,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const _scrollLeft = _oldBoard ? _oldBoard.scrollLeft : 0;
             root.innerHTML = `
     <div style="background:#1e293b;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #334155;position:sticky;top:0;z-index:50">${hdrHTML()}</div>
-    <div id="mc">${V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : V === 'muestras' ? muestrasHTML() : V === 'pegado' ? etapaSolaHTML('acab_pg') : V === 'faltapg' ? faltanPorHTML('pg') : boardHTML()}</div>
+    <div id="mc">${V === 'resumen' ? resumenDiaHTML() : V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : V === 'muestras' ? muestrasHTML() : V === 'pegado' ? etapaSolaHTML('acab_pg') : V === 'faltapg' ? faltanPorHTML('pg') : boardHTML()}</div>
     ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}`;
             const _newBoard = document.querySelector('.board');
             if (_newBoard) _newBoard.scrollLeft = _scrollLeft;
@@ -2314,7 +2314,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             return `
     <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">${APP_VERSION}</span>
     <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
-      ${[['kanban', '📋 Tablero'], ['muestras', '🔬 Muestras'], ['pegado', '🔥 Pegado'], ['faltapg', '⏳ Faltan pegar'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['salida', '📦 Salida del día'], ['tv', '📺 TV'], ['scan_log', `🔍 No encontrados${scanLog.length ? ' ('+scanLog.length+')' : ''}`]].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
+      ${[['resumen', '🏠 Resumen'], ['kanban', '📋 Tablero'], ['muestras', '🔬 Muestras'], ['pegado', '🔥 Pegado'], ['faltapg', '⏳ Faltan pegar'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['salida', '📦 Salida del día'], ['tv', '📺 TV'], ['scan_log', `🔍 No encontrados${scanLog.length ? ' ('+scanLog.length+')' : ''}`]].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
     </div>
     <div style="display:flex;align-items:center;gap:8px;background:#0f172a;border-radius:8px;padding:6px 12px;flex:1;min-width:170px;max-width:290px">
       <div style="flex:1"><div style="font-size:10px;color:#64748b;margin-bottom:3px">CAPACIDAD EN COLA</div>
@@ -3425,22 +3425,14 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // ═══════════════════════════════════════════════════
         //  KPI
         // ═══════════════════════════════════════════════════
-        function kpiHTML() {
-            const active = orders.filter(o => o.etapa !== 'listo' && !o._merged);
-            const done = orders.filter(o => o.etapa === 'listo' && !o._merged);
-            const urg = active.filter(o => o.urgente), od = active.filter(o => isOD(o.fechaLimite)), sn = active.filter(o => isSoon(o.fechaLimite));
-            const totMin = active.reduce((s, o) => s + calcT(o, cfg).paralelo, 0), avg = active.length ? Math.round(totMin / active.length) : 0;
-            const cp = Math.min(100, Math.round(totMin / (cfg.horasDia * 60 * 5) * 100)), cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
-            const _allEt = [...ETAPAS.slice(0, 1), ...ACAB_STEPS, ...ETAPAS.slice(1)];
-            const byEt = _allEt.map(et => ({ ...et, cnt: orders.filter(o => o.etapa === et.id && !o._merged).length }));
-            const bott = byEt.slice(0, 5).reduce((a, b) => b.cnt > a.cnt ? b : a, byEt[0]);
-            const kpis = [['📦', 'Activas', active.length, '#60a5fa'], ['✅', 'Completadas', done.length, '#4ade80'], ['⚡', 'Urgentes', urg.length, '#f59e0b'], ['🔴', 'Vencidas', od.length, '#ef4444'], ['🟡', 'Vencen 48h', sn.length, '#f97316'], ['⏱', 'T promedio', mStr(avg), '#c084fc']];
-
-            // ── Carga por máquina ──────────────────────────────────────────
+        // Carga por máquina — compartida entre KPIs y Resumen del día, para que "quién es el
+        // cuello de botella" sea SIEMPRE el mismo número en toda la app, no dos cálculos que
+        // puedan desalinearse con el tiempo.
+        function calcMachLoad_(activeOrders) {
             const capDia = (cfg.horasDia || 10) * 60;
             const machLoad = {};
             MAQUINAS.forEach(m => { machLoad[m.id] = { mach: m, pendMin: 0, ords: new Set() }; });
-            active.forEach(o => {
+            activeOrders.forEach(o => {
                 // Solo lo que a ESTA orden le falta desde donde va — antes se sumaban TODOS los
                 // pasos de su flujo completo (calcT trae el flujo entero, no lo ya hecho), así que
                 // una orden ya en Corte Final seguía apareciendo con tiempo pendiente de Pegado.
@@ -3464,6 +3456,107 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     machLoad[mach.id].ords.add(o.id);
                 });
             });
+            return { machLoad, capDia };
+        }
+        // Resumen del día — todo lo que hoy vive repartido en Tablero/KPIs/Pegado/Faltan pegar,
+        // en un solo vistazo al abrir la app. No reemplaza esas pestañas, las resume.
+        function resumenDiaHTML() {
+            const active = orders.filter(o => o.etapa !== 'listo' && !o._merged);
+            const od = active.filter(o => isOD(o.fechaLimite));
+            const sn = active.filter(o => isSoon(o.fechaLimite));
+            const urg = active.filter(o => o.urgente);
+            const hoy = new Date().toLocaleDateString('es', { weekday: 'long', day: '2-digit', month: 'long' });
+
+            const kpiRow = [
+                ['📦', 'Activas', active.length, '#60a5fa'],
+                ['⚡', 'Urgentes', urg.length, '#f59e0b'],
+                ['🔴', 'Vencidas', od.length, '#ef4444'],
+                ['🟡', 'Vencen 48h', sn.length, '#f97316'],
+            ].map(([ic, l, v, c]) => `<div style="background:#0f172a;border-radius:10px;padding:12px 14px;flex:1;min-width:110px">
+    <div style="font-size:11px;color:#64748b;margin-bottom:4px">${ic} ${l}</div>
+    <div style="font-size:24px;font-weight:800;color:${c}">${v}</div>
+  </div>`).join('');
+
+            // Libros por etapa — mismo conteo (cantidad, no tarjetas, sin duplicar INT+PORT)
+            // que ya usan Pegado/Faltan pegar, pero para TODAS las etapas con algo dentro.
+            const etapasConDatos = allEtapas(active);
+            const filasEtapa = etapasConDatos.map(et => {
+                const items = active.filter(o => o.etapa === et.id);
+                if (!items.length) return null;
+                const libros = sumaLibrosDedup_(items);
+                return { et, libros, ords: items.length };
+            }).filter(Boolean);
+            const maxLibros = Math.max(1, ...filasEtapa.map(f => f.libros));
+            const filasEtapaHTML = filasEtapa.map(f => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+    <div style="width:26px;text-align:center;font-size:15px">${f.et.icon}</div>
+    <div style="width:110px;font-size:12px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.et.label}</div>
+    <div style="flex:1;background:#0f172a;border-radius:4px;height:11px;overflow:hidden"><div style="height:100%;border-radius:4px;width:${Math.round(f.libros / maxLibros * 100)}%;background:${f.et.color}"></div></div>
+    <div style="width:74px;text-align:right;font-size:12px;font-weight:700;color:${f.et.color}">${f.libros} libro${f.libros === 1 ? '' : 's'}</div>
+    <div style="width:52px;text-align:right;font-size:11px;color:#475569">${f.ords} ord</div>
+  </div>`).join('');
+
+            // Cuello de botella — la máquina más cargada ahorita, mismo cálculo que KPIs.
+            const { machLoad, capDia } = calcMachLoad_(active);
+            const peor = Object.values(machLoad).reduce((a, b) => b.pendMin > a.pendMin ? b : a, Object.values(machLoad)[0]);
+            const peorPct = peor ? Math.round(peor.pendMin / capDia * 100) : 0;
+            const peorCo = peorPct >= 100 ? '#ef4444' : peorPct >= 70 ? '#f59e0b' : '#22c55e';
+
+            // Próximas entregas — las 5 fechas límite más cercanas entre las activas.
+            const proximas = active.filter(o => o.fechaLimite).sort((a, b) => a.fechaLimite.localeCompare(b.fechaLimite)).slice(0, 5);
+
+            return `<div style="padding:16px;display:flex;flex-direction:column;gap:22px;max-width:920px">
+    <div>
+      <div style="font-size:12px;color:#64748b;text-transform:capitalize">${hoy}</div>
+      <div style="font-size:22px;font-weight:800;color:#f1f5f9">Resumen del día</div>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap">${kpiRow}</div>
+
+    ${(od.length || urg.length) ? `<div style="background:#1a0a0a;border:1px solid #7f1d1d;border-radius:10px;padding:14px">
+      <div style="font-size:12px;font-weight:700;color:#f87171;margin-bottom:8px">🔴 Necesitan atención ahora</div>
+      ${[...od, ...urg.filter(o => !od.includes(o))].slice(0, 6).map(o => `
+      <div onclick="openOrd('${e(o.id)}')" style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid #451a1a;cursor:pointer">
+        <span style="font-size:12.5px;color:#fca5a5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(o.titulo)}${o.urgente ? ' ⚡' : ''}</span>
+        <span style="font-size:11.5px;color:#94a3b8;flex:none">${o.fechaLimite ? fDate(o.fechaLimite) : '—'}</span>
+      </div>`).join('')}
+    </div>` : `<div style="background:#0a2e1a;border:1px solid #166534;border-radius:10px;padding:12px 14px;font-size:13px;color:#4ade80">✅ Nada urgente ni vencido ahorita</div>`}
+
+    <div style="background:#0f172a;border-radius:10px;padding:14px">
+      <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:10px;letter-spacing:.05em">LIBROS POR ETAPA</div>
+      ${filasEtapaHTML || '<div style="color:#334155;font-size:12px">Sin órdenes activas</div>'}
+    </div>
+
+    ${peor && peor.pendMin > 0 ? `<div style="background:#0f172a;border-radius:10px;padding:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:12px;color:#475569;font-weight:700;letter-spacing:.05em;margin-bottom:4px">CUELLO DE BOTELLA AHORITA</div>
+        <div style="font-size:15px;color:#f1f5f9;font-weight:700">${peor.mach.label} <span style="color:${peorCo}">· ${peorPct}%</span></div>
+      </div>
+      <div style="font-size:12px;color:#94a3b8">${peor.ords.size} orden${peor.ords.size === 1 ? '' : 'es'} en cola · ${mStr(Math.round(peor.pendMin))}</div>
+    </div>` : ''}
+
+    ${proximas.length ? `<div style="background:#0f172a;border-radius:10px;padding:14px">
+      <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:8px;letter-spacing:.05em">PRÓXIMAS ENTREGAS</div>
+      ${proximas.map(o => `<div onclick="openOrd('${e(o.id)}')" style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid #1e293b;cursor:pointer">
+        <span style="font-size:12.5px;color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(o.titulo)}</span>
+        <span style="font-size:11.5px;color:${isOD(o.fechaLimite) ? '#ef4444' : isSoon(o.fechaLimite) ? '#f59e0b' : '#94a3b8'};flex:none">${fDate(o.fechaLimite)}</span>
+      </div>`).join('')}
+    </div>` : ''}
+  </div>`;
+        }
+        function kpiHTML() {
+            const active = orders.filter(o => o.etapa !== 'listo' && !o._merged);
+            const done = orders.filter(o => o.etapa === 'listo' && !o._merged);
+            const urg = active.filter(o => o.urgente), od = active.filter(o => isOD(o.fechaLimite)), sn = active.filter(o => isSoon(o.fechaLimite));
+            const totMin = active.reduce((s, o) => s + calcT(o, cfg).paralelo, 0), avg = active.length ? Math.round(totMin / active.length) : 0;
+            const cp = Math.min(100, Math.round(totMin / (cfg.horasDia * 60 * 5) * 100)), cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
+            const _allEt = [...ETAPAS.slice(0, 1), ...ACAB_STEPS, ...ETAPAS.slice(1)];
+            const byEt = _allEt.map(et => ({ ...et, cnt: orders.filter(o => o.etapa === et.id && !o._merged).length }));
+            const bott = byEt.slice(0, 5).reduce((a, b) => b.cnt > a.cnt ? b : a, byEt[0]);
+            const kpis = [['📦', 'Activas', active.length, '#60a5fa'], ['✅', 'Completadas', done.length, '#4ade80'], ['⚡', 'Urgentes', urg.length, '#f59e0b'], ['🔴', 'Vencidas', od.length, '#ef4444'], ['🟡', 'Vencen 48h', sn.length, '#f97316'], ['⏱', 'T promedio', mStr(avg), '#c084fc']];
+
+            // ── Carga por máquina ──────────────────────────────────────────
+            const capDia = (cfg.horasDia || 10) * 60;
+            const machLoad = calcMachLoad_(active).machLoad;
             const grupos = [...new Set(MAQUINAS.map(m => m.grupo))];
             const machGruposHTML = grupos.map(gr => {
                 const ms = MAQUINAS.filter(m => m.grupo === gr);
