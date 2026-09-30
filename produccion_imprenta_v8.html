@@ -466,7 +466,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.13';
+        const APP_VERSION = 'v9.14';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -714,6 +714,12 @@
         //  ESTADO
         // ═══════════════════════════════════════════════════
         let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [], historial = [], etapaMap = {}, scanLog = [], moveLog = [];
+        // hiddenGroups: órdenes que Kevin eliminó con 🗑 y que vienen de Sheets (_fromSheets) —
+        // sin esto, runSync() las volvía a traer cada 5 min (autoSync) porque la fila seguía
+        // existiendo en la hoja de Google; delOrd() solo las quitaba de la memoria local, nunca
+        // de la fuente. Clave = grupoId (oculta INT+PORT juntos) o id si no hay grupoId. Se
+        // persiste en Firebase para que no reaparezcan tampoco en otro dispositivo/recarga.
+        let hiddenGroups = {};
         let modalId = undefined, showCfg = false, showSync = false, tvTimer = null, tvSub = 'gantt', ganttZoom = 180;
         let searchQ = '';
         let salidaFecha = null; // ISO yyyy-mm-dd; null = hoy (pestaña 📦 Salida del día)
@@ -766,6 +772,7 @@
                     const rawH = data.historial;
                     historial = rawH ? (Array.isArray(rawH) ? rawH : Object.values(rawH)).filter(Boolean) : [];
                     etapaMap = data.etapaMap || {};
+                    hiddenGroups = data.hiddenGroups || {};
                     // Restaurar órdenes manuales (union_results) guardadas en Firebase
                     const rawMO = data.manualOrders;
                     if (rawMO) {
@@ -789,7 +796,7 @@
             _pendingSaves++;
             // update() en vez de set(): mismo resultado para estas claves, pero dejamos la
             // puerta abierta a saveBoard() para escribir solo una parte sin tocar el resto.
-            const p = _ref.update({ cfg, statsHistory, historial, etapaMap, manualOrders, scanLog, moveLog }).catch(e => {
+            const p = _ref.update({ cfg, statsHistory, historial, etapaMap, manualOrders, scanLog, moveLog, hiddenGroups }).catch(e => {
                 try { localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); localStorage.setItem('imp_h', JSON.stringify(historial)); } catch { }
             }).finally(() => { _pendingSaves--; });
             pushLiveStatus();
@@ -801,7 +808,7 @@
         function saveBoard() {
             const manualOrders = orders.filter(o => !o._fromSheets);
             _pendingSaves++;
-            const p = _ref.update({ cfg, etapaMap, manualOrders, moveLog }).catch(e => {
+            const p = _ref.update({ cfg, etapaMap, manualOrders, moveLog, hiddenGroups }).catch(e => {
                 try { localStorage.setItem('imp_c', JSON.stringify(cfg)); } catch { }
             }).finally(() => { _pendingSaves--; });
             pushLiveStatus();
@@ -1674,6 +1681,11 @@
                     return true;
                 });
 
+                // No resucitar lo que Kevin eliminó a propósito con 🗑 — la fila sigue viva en
+                // Sheets (borrar en la app no borra la hoja), así que sin este filtro cada sync
+                // la volvía a traer como si fuera nueva.
+                newOrders = newOrders.filter(o => !hiddenGroups[o.grupoId || o.id]);
+
                 if (!respImp && !respAcab && !respMuestras) {
                     recordSyncFail_('sync completo: no conectó a ninguna hoja');
                     if (log) log.innerHTML = '<span style="color:#ef4444">❌ No se pudo conectar a ninguna hoja. Verifica la red o que las hojas estén publicadas como CSV.</span>';
@@ -1779,6 +1791,14 @@
         <h2 style="font-size:17px;font-weight:700">🔄 Sincronizar con Google Sheets</h2>
         <button class="bico" onclick="closeSync()" style="font-size:20px;color:#94a3b8">✕</button>
       </div>
+      ${Object.keys(hiddenGroups).length ? `<div style="background:#1a0a0a;border:1px solid #7f1d1d;border-radius:10px;padding:12px;margin-bottom:16px">
+        <div style="color:#f87171;font-weight:700;font-size:12px;margin-bottom:8px">🗑 Eliminadas (${Object.keys(hiddenGroups).length}) — no vuelven a aparecer al sincronizar</div>
+        ${Object.entries(hiddenGroups).sort((a, b) => (b[1].ts || 0) - (a[1].ts || 0)).map(([gid, info]) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #451a1a;font-size:12px">
+          <span style="color:#fca5a5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(info.titulo || gid)}</span>
+          <button onclick="restaurarOculta_('${e(gid)}')" style="flex:none;padding:3px 9px;border-radius:6px;border:1px solid #166534;background:#0a2e1a;color:#4ade80;font-size:11px;font-weight:700;cursor:pointer">♻️ Restaurar</button>
+        </div>`).join('')}
+      </div>` : ''}
       <div style="background:#0f172a;border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px">
         <div style="color:#60a5fa;font-weight:700;margin-bottom:8px">📋 Hojas leídas (vía tu Apps Script, con token):</div>
         <div style="color:#94a3b8;margin-bottom:4px">🖨️ <b style="color:#fb923c">Impresión</b> — hoja "Impresion org"</div>
@@ -3964,7 +3984,20 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             else { const idx = orders.findIndex(x => x.id === modalId); if (idx >= 0) orders[idx] = { ...orders[idx], ...ord }; }
             saveBoard(); modalId = undefined; render();
         }
-        function delOrd() { if (!confirm('¿Eliminar esta orden?')) return; orders = orders.filter(o => o.id !== modalId); delete etapaMap[modalId]; saveBoard(); modalId = undefined; render(); }
+        function delOrd() {
+            if (!confirm('¿Eliminar esta orden?')) return;
+            const o = orders.find(x => x.id === modalId);
+            // Si viene de Sheets, recordar el grupo como oculto — si no, el siguiente sync
+            // (automático cada 5 min) la vuelve a traer porque la fila sigue en la hoja.
+            if (o && o._fromSheets) hiddenGroups[o.grupoId || o.id] = { titulo: o.baseTitulo || o.titulo || o.id, ts: Date.now() };
+            // Si la orden tiene grupoId (INT+PORT del mismo libro), quitar también al hermano
+            // de una vez — si no, se queda visible hasta el siguiente sync.
+            orders = orders.filter(x => x.id !== modalId && !(o && o.grupoId && x.grupoId === o.grupoId));
+            delete etapaMap[modalId];
+            saveBoard();
+            modalId = undefined;
+            render();
+        }
         function mvOrd(id, dir) {
             const idx = orders.findIndex(o => o.id === id); if (idx < 0) return;
             const o = orders[idx];
@@ -4008,6 +4041,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function closeCfg() { showCfg = false; render(); }
         function openSync() { showSync = true; render(); }
         function closeSync() { showSync = false; render(); }
+        // Deshace un eliminado por accidente — el siguiente sync la vuelve a traer de Sheets
+        // como si nunca la hubieras borrado (no revive nada manual, solo destraba el filtro).
+        function restaurarOculta_(gid) { delete hiddenGroups[gid]; saveBoard(); render(); showToast('♻️ Restaurada — aparecerá en el próximo sync'); }
         function setAutoSync(v) {
             autoSync = v;
             if (_autoSyncInt) { clearInterval(_autoSyncInt); _autoSyncInt = null; }
