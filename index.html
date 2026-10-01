@@ -414,6 +414,112 @@
             }
         }
 
+        /* Menú lateral — antes era una fila de botones arriba; con 14 vistas ya no cabía
+           sin apretarse en pantallas angostas. En celular se reduce a una tira de iconos
+           (el texto se oculta, el title="" sigue dando el nombre al mantener presionado). */
+        .app-shell {
+            display: flex;
+            min-height: 100vh
+        }
+
+        .sidebar {
+            flex: none;
+            width: 176px;
+            background: #1e293b;
+            border-right: 1px solid #334155;
+            position: sticky;
+            top: 0;
+            align-self: flex-start;
+            height: 100vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            padding: 16px 10px;
+            gap: 2px;
+            z-index: 40
+        }
+
+        .side-title {
+            font-weight: 800;
+            font-size: 15px;
+            color: #f8fafc;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 0 8px
+        }
+
+        .side-ver {
+            font-size: 10px;
+            color: #475569;
+            padding: 2px 8px 14px
+        }
+
+        .side-btn {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            padding: 8px 9px;
+            border-radius: 8px;
+            border: none;
+            background: transparent;
+            color: #94a3b8;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: left;
+            width: 100%;
+            white-space: nowrap;
+            overflow: hidden
+        }
+
+        .side-btn.on {
+            background: #3b82f6;
+            color: #fff
+        }
+
+        .side-btn:hover:not(.on) {
+            background: #0f172a
+        }
+
+        .side-ic {
+            flex: none;
+            font-size: 15px
+        }
+
+        .side-label {
+            overflow: hidden;
+            text-overflow: ellipsis
+        }
+
+        .main-col {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column
+        }
+
+        @media(max-width:760px) {
+            .sidebar {
+                width: 54px;
+                padding: 12px 6px
+            }
+
+            .side-title,
+            .side-ver {
+                display: none
+            }
+
+            .side-btn {
+                justify-content: center;
+                padding: 10px 0
+            }
+
+            .side-label {
+                display: none
+            }
+        }
+
         /* Impresión de la lista de "Salida del día" — oculta todo lo demás (header, tabs,
            botones) y deja solo la tabla en blanco y negro, legible en papel. */
         @media print {
@@ -466,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.15';
+        const APP_VERSION = 'v9.16';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -713,7 +819,7 @@
         // ═══════════════════════════════════════════════════
         //  ESTADO
         // ═══════════════════════════════════════════════════
-        let V = 'resumen', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [], historial = [], etapaMap = {}, scanLog = [], moveLog = [];
+        let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [], historial = [], etapaMap = {}, scanLog = [], moveLog = [];
         // hiddenGroups: órdenes que Kevin eliminó con 🗑 y que vienen de Sheets (_fromSheets) —
         // sin esto, runSync() las volvía a traer cada 5 min (autoSync) porque la fila seguía
         // existiendo en la hoja de Google; delOrd() solo las quitaba de la memoria local, nunca
@@ -1066,11 +1172,15 @@
         // Plastificado, que Interior normalmente ni siquiera tiene en su flujo) — se fuerza
         // igual; el tablero ya sabe mostrar una orden fuera de su flujo natural (mismo mecanismo
         // que usa mvOrd cuando Sheets deja una orden así).
-        // Empaque y Listo SÍ se siguen automáticamente (2026-09-21, a pedido de Kevin — revierte
-        // la excepción del 2026-08-25): si uno de los dos llega a Empaque o Listo, el otro salta
-        // ahí también, con la misma limpieza (etapaMap/historial) que usa una orden normal al
-        // llegar a Listo.
+        // Empaque SÍ se sigue automáticamente (2026-09-21, a pedido de Kevin). Listo NO
+        // (2026-10-01, ajuste pedido después de ver el problema en piso): si el hermano
+        // saltaba a Listo solo porque el otro se escaneó como Listo, se quedaban copias
+        // físicas atrasadas en Empaque sin que nadie lo notara porque el sistema ya las
+        // daba por terminadas. Cada mitad tiene que confirmarse Listo por separado, con su
+        // propio escaneo — Empaque sigue siendo automático porque ahí no se pierde nada
+        // (las dos mitades de verdad llegan juntas a esa mesa).
         function seguirHermano_(orderId, nuevaEtapa) {
+            if (nuevaEtapa === 'listo') return;
             const idx = orders.findIndex(o => o.id === orderId);
             if (idx < 0) return;
             const o = orders[idx];
@@ -1085,7 +1195,6 @@
             orders[hIdx] = { ...orders[hIdx], etapa: nuevaEtapa };
             etapaMap[hermano.id] = nuevaEtapa;
             logMove(orders[hIdx], fromEtapa, nuevaEtapa, 'sigue-a-hermano');
-            if (nuevaEtapa === 'listo') { delete etapaMap[hermano.id]; pushHistorial(orders[hIdx]); }
             callScript(orders[hIdx], nuevaEtapa, fromEtapa);
         }
 
@@ -2261,6 +2370,25 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             _dragId = null;
         }
 
+        // Vistas disponibles en el menú lateral — [id, icono, etiqueta]. Una sola lista:
+        // antes vivía inline dentro de hdrHTML() como fila de botones arriba; con 14 vistas
+        // ya no cabía sin apretujarse en pantallas angostas.
+        function sideTabs_() {
+            return [
+                ['kanban', '📋', 'Tablero'], ['resumen', '🏠', 'Resumen'],
+                ['imp_solo', '🖨️', 'Impresión'], ['acab_solo', '✂️', 'Acabados'],
+                ['urgentes', '⚡', 'Urgentes'], ['atrasadas', '🔴', 'Atrasadas'],
+                ['muestras', '🔬', 'Muestras'], ['pegado', '🔥', 'Pegado'], ['faltapg', '⏳', 'Faltan pegar'],
+                ['kpi', '📊', 'KPIs'], ['stats', '⏱', 'Stats'], ['salida', '📦', 'Salida del día'],
+                ['tv', '📺', 'TV'], ['scan_log', '🔍', `No encontrados${scanLog.length ? ' (' + scanLog.length + ')' : ''}`],
+            ];
+        }
+        function sidebarHTML() {
+            return `
+    <div class="side-title">🖨️ ${e(cfg.nombreImprenta)}</div>
+    <div class="side-ver">${APP_VERSION}</div>
+    ${sideTabs_().map(([v, ic, l]) => `<button class="side-btn${V === v ? ' on' : ''}" title="${e(l)}" onclick="setV('${v}')"><span class="side-ic">${ic}</span><span class="side-label">${e(l)}</span></button>`).join('')}`;
+        }
         function render() {
             if (tvTimer) { clearInterval(tvTimer); tvTimer = null; }
             const root = document.getElementById('root');
@@ -2270,8 +2398,13 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const _oldBoard = document.querySelector('.board');
             const _scrollLeft = _oldBoard ? _oldBoard.scrollLeft : 0;
             root.innerHTML = `
-    <div style="background:#1e293b;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #334155;position:sticky;top:0;z-index:50">${hdrHTML()}</div>
-    <div id="mc">${V === 'resumen' ? resumenDiaHTML() : V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : V === 'muestras' ? muestrasHTML() : V === 'pegado' ? etapaSolaHTML('acab_pg') : V === 'faltapg' ? faltanPorHTML('pg') : boardHTML()}</div>
+    <div class="app-shell">
+      <nav class="sidebar">${sidebarHTML()}</nav>
+      <div class="main-col">
+        <div style="background:#1e293b;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #334155;position:sticky;top:0;z-index:30">${hdrHTML()}</div>
+        <div id="mc">${V === 'resumen' ? resumenDiaHTML() : V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : BOARD_VIEWS[V] ? BOARD_VIEWS[V]() : boardHTML()}</div>
+      </div>
+    </div>
     ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}`;
             const _newBoard = document.querySelector('.board');
             if (_newBoard) _newBoard.scrollLeft = _scrollLeft;
@@ -2312,10 +2445,6 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const diasCola = impMin > 0 ? (impMin / dayMin).toFixed(1) + 'd' : '0d';
             const cl = cp < 60 ? `✅ ${diasCola} en cola` : cp < 85 ? `⚠️ ${diasCola} — Limitado` : `🔴 ${diasCola} — Al límite`;
             return `
-    <span style="font-weight:800;font-size:17px;color:#f8fafc;white-space:nowrap">🖨️ ${e(cfg.nombreImprenta)}</span><span style="font-size:10px;color:#475569;margin-left:6px">${APP_VERSION}</span>
-    <div style="display:flex;gap:3px;background:#0f172a;border-radius:8px;padding:3px">
-      ${[['resumen', '🏠 Resumen'], ['kanban', '📋 Tablero'], ['muestras', '🔬 Muestras'], ['pegado', '🔥 Pegado'], ['faltapg', '⏳ Faltan pegar'], ['kpi', '📊 KPIs'], ['stats', '⏱ Stats'], ['salida', '📦 Salida del día'], ['tv', '📺 TV'], ['scan_log', `🔍 No encontrados${scanLog.length ? ' ('+scanLog.length+')' : ''}`]].map(([v, l]) => `<button onclick="setV('${v}')" style="padding:4px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${V === v ? '#3b82f6' : 'transparent'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${l}</button>`).join('')}
-    </div>
     <div style="display:flex;align-items:center;gap:8px;background:#0f172a;border-radius:8px;padding:6px 12px;flex:1;min-width:170px;max-width:290px">
       <div style="flex:1"><div style="font-size:10px;color:#64748b;margin-bottom:3px">CAPACIDAD EN COLA</div>
         <div class="capbar"><div style="height:100%;border-radius:999px;width:${cp}%;background:${cc}"></div></div></div>
@@ -3011,12 +3140,21 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // ═══════════════════════════════════════════════════
         //  KANBAN
         // ═══════════════════════════════════════════════════
+        // Registro de "vistas tipo tablero" — una sola lista en vez de dos listas de V que
+        // revisar (el dispatcher de render() y el de renderBoard()) cada vez que se agrega una
+        // vista nueva; ya se nos desincronizaron antes entre las dos por olvidar una de las dos.
+        const BOARD_VIEWS = {
+            kanban: boardHTML, muestras: muestrasHTML,
+            pegado: () => etapaSolaHTML('acab_pg'), faltapg: () => faltanPorHTML('pg'),
+            imp_solo: soloImpresionHTML, acab_solo: soloAcabadosHTML,
+            urgentes: urgentesHTML, atrasadas: atrasadasHTML,
+        };
         function renderBoard() {
             const mc = document.getElementById('mc');
-            if (!mc || (V !== 'kanban' && V !== 'muestras' && V !== 'pegado' && V !== 'faltapg')) return;
+            if (!mc || !BOARD_VIEWS[V]) return;
             const oldBoard = mc.querySelector('.board');
             const scrollLeft = oldBoard ? oldBoard.scrollLeft : 0;
-            mc.innerHTML = V === 'muestras' ? muestrasHTML() : V === 'pegado' ? etapaSolaHTML('acab_pg') : V === 'faltapg' ? faltanPorHTML('pg') : boardHTML();
+            mc.innerHTML = BOARD_VIEWS[V]();
             const newBoard = mc.querySelector('.board');
             if (newBoard) newBoard.scrollLeft = scrollLeft;
         }
@@ -3138,6 +3276,20 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const finishMin = scheduleMachines(muestraOrders, cfg).finishMin;
             return `<div class="board">${etapas.map((et, ei) => colHTML(et, ei, etapas, finishMin, muestraOrders)).join('')}</div>`;
         }
+        // Tablero filtrado genérico — mismo kanban completo (colHTML/allEtapas), pero con un
+        // subconjunto de órdenes. Reutilizado para Impresión-solo, Acabados-solo, Urgentes y
+        // Atrasadas — una sola función en vez de 4 copias casi iguales.
+        function vistaFiltradaHTML(filterFn, vacioMsg) {
+            const subset = orders.filter(o => o.etapa !== 'listo' && !o._merged && filterFn(o));
+            if (!subset.length) return `<div style="color:#334155;font-size:13px;text-align:center;padding:40px 0">${vacioMsg}</div>`;
+            const etapas = allEtapas(subset);
+            const finishMin = scheduleMachines(subset, cfg).finishMin;
+            return `<div class="board">${etapas.map((et, ei) => colHTML(et, ei, etapas, finishMin, subset)).join('')}</div>`;
+        }
+        function soloImpresionHTML() { return vistaFiltradaHTML(o => o.etapa === 'impresion', '🖨️ Nada en Impresión ahorita'); }
+        function soloAcabadosHTML() { return vistaFiltradaHTML(o => isAcabEtapa(o.etapa), '✂️ Nada en Acabados ahorita'); }
+        function urgentesHTML() { return vistaFiltradaHTML(o => o.urgente, '✅ Sin órdenes urgentes'); }
+        function atrasadasHTML() { return vistaFiltradaHTML(o => isOD(o.fechaLimite), '✅ Nada atrasado ahorita'); }
         function colHTML(et, ei, etapas, finishMin, srcOrders) {
             srcOrders = srcOrders || orders;
             const allTotal = srcOrders.filter(o => o.etapa === et.id && !o._merged);
