@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.16';
+        const APP_VERSION = 'v9.17';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -827,6 +827,7 @@
         // persiste en Firebase para que no reaparezcan tampoco en otro dispositivo/recarga.
         let hiddenGroups = {};
         let modalId = undefined, showCfg = false, showSync = false, tvTimer = null, tvSub = 'gantt', ganttZoom = 180;
+        let ganttFase = 'todas'; // 'todas' | 'impresion' | 'acabados' | 'empaque' — filtro de fase del Gantt en TV
         let searchQ = '';
         let salidaFecha = null; // ISO yyyy-mm-dd; null = hoy (pestaña 📦 Salida del día)
         let autoSync = false, _autoSyncInt = null, _syncing = false, _fbReady = false;
@@ -1042,6 +1043,17 @@
             return dt;
         }
         function prioSort(a, b) { const fa = a.fechaLimite || 'z', fb = b.fechaLimite || 'z'; if (fa !== fb) return fa < fb ? -1 : 1; if (a.urgente !== b.urgente) return a.urgente ? -1 : 1; return 0; }
+        // Cuándo entró esta orden a su etapa ACTUAL — el registro más reciente en moveLog con
+        // ese destino (moveLog guarda lo más nuevo primero, así que el primer match ya es el
+        // correcto). moveLog se sincroniza por Firebase (a diferencia de _scanTimers, que es
+        // solo de este navegador), así que esto funciona igual visto desde el TV que desde el
+        // celular que escaneó. Si no hay registro (orden vieja, o recién migrada de Sheets sin
+        // pasar por un escaneo), usa fechaCreacion como mejor aproximación disponible.
+        function entradaEtapaTs_(o) {
+            const mv = moveLog.find(m => m.ordId === o.id && m.to === o.etapa);
+            if (mv) return mv.ts;
+            return o.fechaCreacion ? new Date(o.fechaCreacion + 'T00:00:00').getTime() : 0;
+        }
 
         // ═══════════════════════════════════════════════════
         //  CÁLCULO DE TIEMPOS — consciente del tipo de orden
@@ -1220,7 +1232,18 @@
         function scheduleMachines(ordList, c) {
             const machAvail = {}; MAQUINAS.forEach(m => machAvail[m.id] = 0);
             const ordState = {}, blocks = [], colorMap = {};
-            const sorted = [...ordList].filter(o => o.etapa !== 'listo' && !o._merged).sort(prioSort);
+            // Entre órdenes que YA están paradas en la MISMA etapa (compitiendo por la misma
+            // máquina ahorita), la que llegó primero a esa etapa va primero en la cola — una
+            // máquina no puede "adelantar" a una orden que ya tiene dentro solo porque otra
+            // tiene fecha de entrega más urgente; eso ya pasó en la realidad. Entre órdenes en
+            // etapas DISTINTAS, prioSort (fecha límite/urgencia) sigue mandando como antes.
+            const sorted = [...ordList].filter(o => o.etapa !== 'listo' && !o._merged).sort((a, b) => {
+                if (a.etapa === b.etapa) {
+                    const ta = entradaEtapaTs_(a), tb = entradaEtapaTs_(b);
+                    if (ta !== tb) return ta - tb;
+                }
+                return prioSort(a, b);
+            });
             sorted.forEach((o, oi) => { colorMap[o.id] = o._isMuestra ? MUESTRA_COLORS[oi % MUESTRA_COLORS.length] : ORD_COLORS[oi % ORD_COLORS.length]; });
 
             // Detectar grupos hermanos: órdenes que comparten los primeros 5 dígitos del ID
@@ -3282,7 +3305,12 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function vistaFiltradaHTML(filterFn, vacioMsg) {
             const subset = orders.filter(o => o.etapa !== 'listo' && !o._merged && filterFn(o));
             if (!subset.length) return `<div style="color:#334155;font-size:13px;text-align:center;padding:40px 0">${vacioMsg}</div>`;
-            const etapas = allEtapas(subset);
+            // allEtapas() siempre incluye Impresión+Empaque+Listo (y cualquier acab futuro de la
+            // orden) aunque estén vacíos — correcto para el Tablero normal (no quiere perder la
+            // columna de destino al arrastrar), pero aquí "Impresión sola"/"Acabados solo" deben
+            // mostrar SOLO lo que de verdad tiene algo — si no, "sola" no era cierto (apareció el
+            // resto de columnas vacías, que es lo que Kevin reportó el 1 de oct).
+            const etapas = allEtapas(subset).filter(et => subset.some(o => o.etapa === et.id));
             const finishMin = scheduleMachines(subset, cfg).finishMin;
             return `<div class="board">${etapas.map((et, ei) => colHTML(et, ei, etapas, finishMin, subset)).join('')}</div>`;
         }
@@ -3970,15 +3998,28 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // ═══════════════════════════════════════════════════
         function tvHTML() {
             const ts = v => `padding:6px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:700;background:${tvSub === v ? '#3b82f6' : 'transparent'};color:${tvSub === v ? '#fff' : '#94a3b8'}`;
+            const fs = v => `padding:5px 11px;border-radius:7px;border:none;cursor:pointer;font-size:12px;font-weight:700;background:${ganttFase === v ? '#334155' : 'transparent'};color:${ganttFase === v ? '#f1f5f9' : '#64748b'}`;
             return `<div class="tv-wrap">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <div style="font-size:22px;font-weight:800;color:#f1f5f9">🖨️ Tablero de Producción</div>
-      <div style="display:flex;align-items:center;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <div style="background:#0f172a;border-radius:10px;padding:4px;display:flex;gap:2px">
           <button style="${ts('gantt')}" onclick="setTVSub('gantt')">📊 Gantt</button>
           <button style="${ts('kanban')}" onclick="setTVSub('kanban')">🗂 Kanban</button>
         </div>
-        ${tvSub === 'gantt' ? `<button onclick="ganttZoom=Math.min(ganttZoom*1.5,240);render()" class="btn btn-g btn-sm">🔍+</button><button onclick="ganttZoom=Math.max(ganttZoom/1.5,20);render()" class="btn btn-g btn-sm">🔍−</button>` : ''}
+        ${tvSub === 'gantt' ? `
+        <div style="background:#0f172a;border-radius:9px;padding:3px;display:flex;gap:1px" title="Dividir el Gantt por fase">
+          <button style="${fs('todas')}" onclick="setGanttFase_('todas')">Todas</button>
+          <button style="${fs('impresion')}" onclick="setGanttFase_('impresion')">🖨️ Impresión</button>
+          <button style="${fs('acabados')}" onclick="setGanttFase_('acabados')">✂️ Acabados</button>
+          <button style="${fs('empaque')}" onclick="setGanttFase_('empaque')">📦 Empaque</button>
+        </div>
+        <div style="background:#0f172a;border-radius:9px;padding:3px;display:flex;gap:1px" title="Cuánto tiempo mostrar de un vistazo">
+          <button class="btn btn-g btn-sm" onclick="setGanttRange_(1)">Día</button>
+          <button class="btn btn-g btn-sm" onclick="setGanttRange_(5)">Semana</button>
+          <button class="btn btn-g btn-sm" onclick="setGanttRange_(22)">Mes</button>
+        </div>
+        <button onclick="ganttZoom=Math.min(ganttZoom*1.5,400);render()" class="btn btn-g btn-sm">🔍+</button><button onclick="ganttZoom=Math.max(ganttZoom/1.5,4);render()" class="btn btn-g btn-sm">🔍−</button>` : ''}
         <div id="tv-clock" style="font-size:26px;font-weight:700;color:#60a5fa;font-variant-numeric:tabular-nums">--:--</div>
         <button class="btn btn-g btn-sm" onclick="exitTV()">✕ Salir</button>
       </div>
@@ -3986,10 +4027,30 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     ${tvSub === 'gantt' ? ganttHTML() : tvKanbanHTML()}
   </div>`;
         }
+        function setGanttFase_(f) { ganttFase = f; render(); }
+        // Calcula el zoom (px por hora) para que quepan ~N días laborales en lo que se ve de
+        // la pantalla sin tener que hacer scroll horizontal — "Día/Semana/Mes" de un vistazo.
+        function setGanttRange_(dias) {
+            const hpd = cfg.horasDia || 10, mpd = hpd * 60;
+            const viewport = Math.max((window.innerWidth || 1200) - 260, 320);
+            const pxPerMin = viewport / (dias * mpd);
+            ganttZoom = Math.min(400, Math.max(4, Math.round(pxPerMin * 60)));
+            render();
+        }
+        // ¿A qué fase pertenece el grupo de una máquina? — para el filtro "dividir por fase"
+        // del Gantt del TV. MAQUINAS.grupo ya viene categorizado (ver const MAQUINAS arriba).
+        function faseDeGrupo_(grupo) {
+            if (grupo.includes('Impresión')) return 'impresion';
+            if (grupo.includes('Empaque')) return 'empaque';
+            return 'acabados';
+        }
 
         function ganttHTML() {
-            const { blocks, colorMap } = scheduleMachines(orders, cfg);
-            if (!blocks.length) return `<div style="color:#334155;text-align:center;padding:60px;font-size:20px">Sin órdenes activas</div>`;
+            const { blocks: allBlocks, colorMap, finishMin } = scheduleMachines(orders, cfg);
+            if (!allBlocks.length) return `<div style="color:#334155;text-align:center;padding:60px;font-size:20px">Sin órdenes activas</div>`;
+            const machFase = {}; MAQUINAS.forEach(m => { machFase[m.id] = faseDeGrupo_(m.grupo); });
+            const blocks = ganttFase === 'todas' ? allBlocks : allBlocks.filter(b => machFase[b.machId] === ganttFase);
+            if (!blocks.length) return `<div style="color:#334155;text-align:center;padding:60px;font-size:20px">Nada en esta fase ahorita</div>`;
             const pxM = ganttZoom / 60;
             const hpd = cfg.horasDia || 10;          // horas laborales por día (default 10 = 8am-6pm)
             const startH = cfg.startHour || 8;       // hora de inicio de jornada
@@ -4005,6 +4066,17 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             // Marcadores de tiempo: cuadrícula por jornada laboral
             const numDays = Math.ceil(maxEnd / mpd) + 1;
             const markers = [];
+            // Fuera de horario: el eje ya está en "minutos laborales" (salta la noche sola — la
+            // jornada de mañana empieza justo donde terminó la de hoy, sin huecos), así que la
+            // noche/fin de semana no ocupa pixeles propios. Para que SE VEA el corte (y no
+            // parezca que el trabajo sigue de corrido), se dibuja una franja gris con rayas
+            // diagonales justo en cada frontera de día — un aviso visual, no un hueco real.
+            const hatchW = Math.max(8, Math.min(26, pxM * 18));
+            const offHours = [];
+            for (let d = 1; d < numDays; d++) {
+                const x = d * mpd * pxM;
+                offHours.push(`<div style="position:absolute;left:${x - hatchW / 2}px;top:0;bottom:0;width:${hatchW}px;background:repeating-linear-gradient(45deg,#334155,#334155 3px,#1a2332 3px,#1a2332 7px);pointer-events:none" title="Fuera de horario laboral"></div>`);
+            }
             for (let d = 0; d < numDays; d++) {
                 const dayWmS = d * mpd;
                 const dayDate = new Date(todayStart); dayDate.setDate(dayDate.getDate() + d);
@@ -4021,9 +4093,6 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 }
             }
             const timeMarkers = markers.join('');
-            const sorted = orders.filter(o => o.etapa !== 'listo' && !o._merged).sort(prioSort);
-            // Leyenda con nombre completo de la orden
-            const legend = sorted.map(o => `<div style="display:flex;align-items:center;gap:5px;white-space:nowrap"><div style="width:12px;height:12px;border-radius:2px;background:${colorMap[o.id] || '#666'};flex-shrink:0"></div><span style="font-size:11px;color:#94a3b8"><b style="color:#f1f5f9">${e(o.id)}</b> ${e(o.titulo.substring(0, 28))}${o.titulo.length > 28 ? '…' : ''}</span></div>`).join('');
             const usedIds = new Set(blocks.map(b => b.machId));
             const usedM = MAQUINAS.filter(m => usedIds.has(m.id));
             let lastG = '';
@@ -4040,13 +4109,17 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     const shortId = e(b.ordId);
                     const shortTit = b.titulo.length > 20 ? b.titulo.substring(0, 18) + '…' : b.titulo;
                     const buddyTip = b.buddyGroup ? `&#10;🔗 Grupo: ${b.buddyGroup} (espera piezas del mismo trabajo)` : '';
+                    // Cuánto le falta a la orden COMPLETA (no solo este paso) — solo para
+                    // barras de una orden real (las de grupo hermano usan la clave del grupo,
+                    // que no está en finishMin, así que ahí se omite para no inventar un número).
+                    const faltaTip = (!b.buddyGroup && finishMin[b.ordId] != null) ? `&#10;⏳ Falta total: ${mStr(finishMin[b.ordId])}` : '';
                     // Primera barra y es muy angosta → etiqueta a la izquierda
                     if (bi === 0 && w <= 38) {
                         const leftLabel = `<div style="position:absolute;left:${x - 4}px;top:50%;transform:translate(-100%,-50%);font-size:10px;color:#e2e8f0;white-space:nowrap;pointer-events:none;font-weight:700;background:#0f172a;padding:0 3px;border-radius:3px">${tipoBadge}${buddyBadge}${shortId}</div>`;
-                        return leftLabel + `<div class="gantt-bar" style="left:${x}px;width:${w}px;background:${b.color};${brd};${muestraStyle}overflow:hidden;text-overflow:clip" title="${e(b.ordId)}: ${e(b.titulo)}&#10;${e(b.stepNom)} · ${mStr(b.dur)}${b.urgente ? '&#10;⚡ URGENTE' : ''}${b._isMuestra ? '&#10;🔬 MUESTRA' : ''}${buddyTip}"></div>`;
+                        return leftLabel + `<div class="gantt-bar" style="left:${x}px;width:${w}px;background:${b.color};${brd};${muestraStyle}overflow:hidden;text-overflow:clip" title="${e(b.ordId)}: ${e(b.titulo)}&#10;${e(b.stepNom)} · ${mStr(b.dur)}${b.urgente ? '&#10;⚡ URGENTE' : ''}${b._isMuestra ? '&#10;🔬 MUESTRA' : ''}${buddyTip}${faltaTip}"></div>`;
                     }
                     const barLabel = w > 90 ? `${tipoBadge}${buddyBadge}${shortId} ${e(shortTit)}` : w > 38 ? `${tipoBadge}${buddyBadge}${shortId}` : tipoBadge || buddyBadge;
-                    return `<div class="gantt-bar" style="left:${x}px;width:${w}px;background:${b.color};${brd};${muestraStyle}overflow:hidden;text-overflow:clip" title="${e(b.ordId)}: ${e(b.titulo)}&#10;${e(b.stepNom)} · ${mStr(b.dur)}${b.urgente ? '&#10;⚡ URGENTE' : ''}${b._isMuestra ? '&#10;🔬 MUESTRA' : ''}${buddyTip}">${barLabel}</div>`;
+                    return `<div class="gantt-bar" style="left:${x}px;width:${w}px;background:${b.color};${brd};${muestraStyle}overflow:hidden;text-overflow:clip" title="${e(b.ordId)}: ${e(b.titulo)}&#10;${e(b.stepNom)} · ${mStr(b.dur)}${b.urgente ? '&#10;⚡ URGENTE' : ''}${b._isMuestra ? '&#10;🔬 MUESTRA' : ''}${buddyTip}${faltaTip}">${barLabel}</div>`;
                 }).join('');
                 const gh = mach.grupo !== lastG ? `<div style="display:flex;border-bottom:1px solid #334155;background:#060d1a"><div style="width:160px;flex-shrink:0;padding:3px 10px;font-size:10px;color:#475569;font-weight:700;border-right:1px solid #1e293b">${e(mach.grupo)}</div><div style="flex:1"></div></div>` : '';
                 lastG = mach.grupo;
@@ -4057,13 +4130,13 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       <div style="display:flex"><div style="width:160px;flex-shrink:0;position:sticky;left:0;z-index:20;background:#060d1a;border-bottom:1px solid #334155;border-right:1px solid #1e293b"><div style="padding:6px 10px;font-size:11px;color:#64748b;font-weight:700">MÁQUINA</div></div>
         <div style="position:relative;height:30px;flex:1;min-width:${totalW}px;border-bottom:1px solid #334155;background:#060d1a">${timeMarkers}</div>
       </div>
-      <div style="position:relative">${rows}
+      <div style="position:relative">${offHours.join('')}${rows}
         <div style="position:absolute;top:0;left:${160 + nowPx}px;bottom:0;width:2px;background:#ef4444;z-index:5;pointer-events:none">
           <div style="position:absolute;top:2px;left:4px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;white-space:nowrap">AHORA</div>
         </div>
       </div>
     </div>
-    <div style="font-size:10px;color:#475569;text-align:center">🕗 Jornada: ${String(startH).padStart(2, '0')}:00–${String(endH).padStart(2, '0')}:00 · I=Interiores · P=Portada · 🔗=Unido · Cursor sobre barra = detalle</div>
+    <div style="font-size:10px;color:#475569;text-align:center">🕗 Jornada: ${String(startH).padStart(2, '0')}:00–${String(endH).padStart(2, '0')}:00 · I=Interiores · P=Portada · 🔗=Unido · Rayas grises=fuera de horario · Cursor sobre barra = detalle</div>
   </div>`;
         }
 
