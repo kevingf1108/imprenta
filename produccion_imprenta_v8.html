@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.17';
+        const APP_VERSION = 'v9.18';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -2396,21 +2396,24 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // Vistas disponibles en el menú lateral — [id, icono, etiqueta]. Una sola lista:
         // antes vivía inline dentro de hdrHTML() como fila de botones arriba; con 14 vistas
         // ya no cabía sin apretujarse en pantallas angostas.
+        // "Tablero" ya cubre Impresión/Acabados/Urgentes/Muestras/Atrasadas/Pegado/Faltan pegar
+        // con su propia barra de filtros arriba (ver tableroFiltroBarHTML) — antes cada una era
+        // una entrada aparte en este menú, 7 filas para variantes del mismo tablero.
         function sideTabs_() {
             return [
                 ['kanban', '📋', 'Tablero'], ['resumen', '🏠', 'Resumen'],
-                ['imp_solo', '🖨️', 'Impresión'], ['acab_solo', '✂️', 'Acabados'],
-                ['urgentes', '⚡', 'Urgentes'], ['atrasadas', '🔴', 'Atrasadas'],
-                ['muestras', '🔬', 'Muestras'], ['pegado', '🔥', 'Pegado'], ['faltapg', '⏳', 'Faltan pegar'],
                 ['kpi', '📊', 'KPIs'], ['stats', '⏱', 'Stats'], ['salida', '📦', 'Salida del día'],
                 ['tv', '📺', 'TV'], ['scan_log', '🔍', `No encontrados${scanLog.length ? ' (' + scanLog.length + ')' : ''}`],
             ];
         }
         function sidebarHTML() {
+            // El botón "Tablero" se marca activo con CUALQUIER filtro de BOARD_VIEWS, no solo
+            // 'kanban' — todas esas vistas viven ahora bajo el mismo "Tablero".
+            const activo = v => v === 'kanban' ? !!BOARD_VIEWS[V] : V === v;
             return `
     <div class="side-title">🖨️ ${e(cfg.nombreImprenta)}</div>
     <div class="side-ver">${APP_VERSION}</div>
-    ${sideTabs_().map(([v, ic, l]) => `<button class="side-btn${V === v ? ' on' : ''}" title="${e(l)}" onclick="setV('${v}')"><span class="side-ic">${ic}</span><span class="side-label">${e(l)}</span></button>`).join('')}`;
+    ${sideTabs_().map(([v, ic, l]) => `<button class="side-btn${activo(v) ? ' on' : ''}" title="${e(l)}" onclick="setV('${v}')"><span class="side-ic">${ic}</span><span class="side-label">${e(l)}</span></button>`).join('')}`;
         }
         function render() {
             if (tvTimer) { clearInterval(tvTimer); tvTimer = null; }
@@ -2425,7 +2428,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       <nav class="sidebar">${sidebarHTML()}</nav>
       <div class="main-col">
         <div style="background:#1e293b;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #334155;position:sticky;top:0;z-index:30">${hdrHTML()}</div>
-        <div id="mc">${V === 'resumen' ? resumenDiaHTML() : V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : BOARD_VIEWS[V] ? BOARD_VIEWS[V]() : boardHTML()}</div>
+        <div id="mc">${V === 'resumen' ? resumenDiaHTML() : V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : tableroConFiltroHTML()}</div>
       </div>
     </div>
     ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}`;
@@ -3172,12 +3175,26 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             imp_solo: soloImpresionHTML, acab_solo: soloAcabadosHTML,
             urgentes: urgentesHTML, atrasadas: atrasadasHTML,
         };
+        // Barra de filtros arriba del Tablero — mismo patrón que el filtro de fase del Gantt en
+        // TV (Todas/Impresión/Acabados/Empaque): un solo tablero, botones arriba para cambiar
+        // qué se ve, en vez de una entrada de menú aparte por cada filtro.
+        function tableroFiltroBarHTML() {
+            const opts = [
+                ['kanban', '📋', 'Todas'], ['imp_solo', '🖨️', 'Impresión'], ['acab_solo', '✂️', 'Acabados'],
+                ['urgentes', '⚡', 'Urgentes'], ['muestras', '🔬', 'Muestras'], ['atrasadas', '🔴', 'Atrasadas'],
+                ['pegado', '🔥', 'Pegado'], ['faltapg', '⏳', 'Faltan por pegar'],
+            ];
+            return `<div style="display:flex;gap:5px;flex-wrap:wrap;padding:10px 14px 0">
+    ${opts.map(([v, ic, l]) => `<button onclick="setV('${v}')" style="padding:6px 13px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-weight:700;background:${V === v ? '#3b82f6' : '#1e293b'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${ic} ${l}</button>`).join('')}
+  </div>`;
+        }
+        function tableroConFiltroHTML() { return tableroFiltroBarHTML() + (BOARD_VIEWS[V] ? BOARD_VIEWS[V]() : boardHTML()); }
         function renderBoard() {
             const mc = document.getElementById('mc');
             if (!mc || !BOARD_VIEWS[V]) return;
             const oldBoard = mc.querySelector('.board');
             const scrollLeft = oldBoard ? oldBoard.scrollLeft : 0;
-            mc.innerHTML = BOARD_VIEWS[V]();
+            mc.innerHTML = tableroConFiltroHTML();
             const newBoard = mc.querySelector('.board');
             if (newBoard) newBoard.scrollLeft = scrollLeft;
         }
