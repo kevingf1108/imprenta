@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.19';
+        const APP_VERSION = 'v9.20';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1041,13 +1041,19 @@
         }
         function addDias(base, totMin, hpd) {
             const mpd = hpd * 60, d = Math.ceil(totMin / mpd);
+            return diaLaboralN_(base, d);
+        }
+        // El N-ésimo día LABORAL desde una fecha base (N=0 = la fecha base tal cual) — salta
+        // sábado/domingo y cfg.feriados. Antes solo la vivía adentro de addDias(); el Gantt del
+        // TV necesitaba lo mismo (ver diaLaboralN_ en ganttHTML) así que se independizó.
+        function diaLaboralN_(base, n) {
             const dt = new Date(base);
             const feriados = new Set(cfg.feriados || []);
-            let n = 0;
-            while (n < d) {
+            let contados = 0;
+            while (contados < n) {
                 dt.setDate(dt.getDate() + 1);
                 const esLaborable = dt.getDay() && dt.getDay() < 6;
-                if (esLaborable && !feriados.has(ymdLocal(dt))) n++;
+                if (esLaborable && !feriados.has(ymdLocal(dt))) contados++;
             }
             return dt;
         }
@@ -4108,7 +4114,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             }
             for (let d = 0; d < numDays; d++) {
                 const dayWmS = d * mpd;
-                const dayDate = new Date(todayStart); dayDate.setDate(dayDate.getDate() + d);
+                // El día d es el d-ésimo día LABORAL desde hoy (salta fines de semana/feriados,
+                // igual que addDias) — antes contaba calendario corrido, así que un trabajo que
+                // cruzaba un fin de semana mostraba "mañana" como el día 2 aunque fuera domingo,
+                // sin coincidir con la fecha que sí calcula bien la tarjeta de la orden.
+                const dayDate = diaLaboralN_(todayStart, d);
                 const dayLbl = dayDate.toLocaleDateString('es', { weekday: 'short', day: '2-digit', month: 'short' });
                 // Línea y etiqueta de inicio de jornada
                 markers.push(`<div style="position:absolute;left:${dayWmS * pxM}px;top:0;bottom:0;border-left:2px solid #3b4f6b;pointer-events:none"><div style="position:absolute;top:0;left:3px;font-size:11px;color:#60a5fa;white-space:nowrap;font-weight:700;background:#060d1a;padding:0 3px">${dayLbl} ${String(startH).padStart(2, '0')}:00</div></div>`);
