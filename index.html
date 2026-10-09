@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.18';
+        const APP_VERSION = 'v9.19';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -995,6 +995,15 @@
             if (historial.find(h => h.id === o.id && h.ts && Date.now() - h.ts < 5000)) return;
             historial.push({ id: o.id, titulo: o.titulo || o.baseTitulo || o.id, cliente: o.cliente || '', cantidad: o.cantidad || 0, tipoEncuadernacion: o.tipoEncuadernacion || '', fechaLimite: o.fechaLimite || '', fechaCreacion: o.fechaCreacion || '', etaPredicha: o.etaPredicha || '', ts: Date.now() });
             historial = trimByAge(historial, cfg.retencionHistorialMeses);
+            // Una vez que una orden de Sheets llega a Listo, la limpieza automática del Apps
+            // Script (cada 15 min) la saca de Impresion org/Acabado org — pero si esa fila
+            // vuelve a aparecer en Sheets más tarde por cualquier motivo (Docket Manager la
+            // re-exporta, un re-pegado accidental, etc.), runSync() no tenía forma de saber que
+            // esa orden YA se había completado, y la volvía a traer como si fuera nueva. Se
+            // reusa hiddenGroups (igual que al eliminar a mano) para que no reaparezca sola —
+            // Kevin puede traerla de vuelta con el mismo botón "♻️ Restaurar" del panel de Sync
+            // si de verdad es un reimpreso a propósito.
+            if (o._fromSheets) hiddenGroups[o.grupoId || o.id] = { titulo: o.baseTitulo || o.titulo || o.id, ts: Date.now() };
         }
 
         // Historial de movimientos por orden — de dónde a dónde, cómo y cuándo.
@@ -1813,10 +1822,13 @@
                     return true;
                 });
 
-                // No resucitar lo que Kevin eliminó a propósito con 🗑 — la fila sigue viva en
-                // Sheets (borrar en la app no borra la hoja), así que sin este filtro cada sync
-                // la volvía a traer como si fuera nueva.
-                newOrders = newOrders.filter(o => !hiddenGroups[o.grupoId || o.id]);
+                // No resucitar lo que Kevin eliminó a propósito con 🗑 (hiddenGroups) NI nada
+                // que YA llegó a Listo alguna vez (historial) — ambos casos son filas que
+                // siguen vivas en Sheets (o que volvieron a aparecer ahí) pero que de este lado
+                // ya se dieron por terminadas. El chequeo contra historial cubre TODO lo ya
+                // completado desde antes de este fix, sin necesitar ninguna migración — pushó
+                // a historial en su momento con el mismo id que esta fila volvería a traer.
+                newOrders = newOrders.filter(o => !hiddenGroups[o.grupoId || o.id] && !historial.some(h => h.id === o.id));
 
                 if (!respImp && !respAcab && !respMuestras) {
                     recordSyncFail_('sync completo: no conectó a ninguna hoja');
@@ -1924,7 +1936,7 @@
         <button class="bico" onclick="closeSync()" style="font-size:20px;color:#94a3b8">✕</button>
       </div>
       ${Object.keys(hiddenGroups).length ? `<div style="background:#1a0a0a;border:1px solid #7f1d1d;border-radius:10px;padding:12px;margin-bottom:16px">
-        <div style="color:#f87171;font-weight:700;font-size:12px;margin-bottom:8px">🗑 Eliminadas (${Object.keys(hiddenGroups).length}) — no vuelven a aparecer al sincronizar</div>
+        <div style="color:#f87171;font-weight:700;font-size:12px;margin-bottom:8px">🗑 Eliminadas / ya completadas (${Object.keys(hiddenGroups).length}) — no vuelven a aparecer solas al sincronizar</div>
         ${Object.entries(hiddenGroups).sort((a, b) => (b[1].ts || 0) - (a[1].ts || 0)).map(([gid, info]) => `
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #451a1a;font-size:12px">
           <span style="color:#fca5a5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(info.titulo || gid)}</span>
