@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.21';
+        const APP_VERSION = 'v9.22';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -820,12 +820,30 @@
         //  ESTADO
         // ═══════════════════════════════════════════════════
         let V = 'kanban', orders = [], cfg = JSON.parse(JSON.stringify(CFG0)), statsHistory = [], historial = [], etapaMap = {}, scanLog = [], moveLog = [];
-        // hiddenGroups: órdenes que Kevin eliminó con 🗑 y que vienen de Sheets (_fromSheets) —
-        // sin esto, runSync() las volvía a traer cada 5 min (autoSync) porque la fila seguía
-        // existiendo en la hoja de Google; delOrd() solo las quitaba de la memoria local, nunca
-        // de la fuente. Clave = grupoId (oculta INT+PORT juntos) o id si no hay grupoId. Se
-        // persiste en Firebase para que no reaparezcan tampoco en otro dispositivo/recarga.
+        // hiddenGroups: órdenes que Kevin eliminó con 🗑 (o que ya llegaron a Listo) y que vienen
+        // de Sheets (_fromSheets) — sin esto, runSync() las volvía a traer cada 5 min (autoSync)
+        // porque la fila seguía existiendo en la hoja de Google. Clave = grupoId (oculta INT+PORT
+        // juntos) o id si no hay grupoId.
         let hiddenGroups = {};
+        // setHiddenGroup_/removeHiddenGroup_ (2026-10-14): escriben SOLO esa clave en Firebase
+        // (ruta "hiddenGroups/<key>"), no todo el objeto. Antes, agregar una orden a hiddenGroups
+        // vivía nada más en memoria hasta el siguiente saveS()/saveBoard() — y esas dos funciones
+        // mandan TODO hiddenGroups de un jalón. Con varias computadoras con la app abierta a la
+        // vez (normal en un taller), una pestaña con una copia vieja en memoria podía guardar
+        // DESPUÉS y borrar sin querer lo que otra pestaña acababa de agregar — esto explicaba
+        // órdenes ya completadas que de todos modos "volvían a aparecer" (reportado 2026-10-13,
+        // confirmado 2026-10-14 con varias órdenes: 294372, 293862, 293506/293508). Con una
+        // escritura acotada a esa sola clave, ninguna otra pestaña puede pisarla por accidente.
+        function setHiddenGroup_(key, value) {
+            hiddenGroups[key] = value;
+            const patch = {}; patch['hiddenGroups/' + key] = value;
+            _ref.update(patch).catch(() => { });
+        }
+        function removeHiddenGroup_(key) {
+            delete hiddenGroups[key];
+            const patch = {}; patch['hiddenGroups/' + key] = null; // null en Firebase = elimina esa clave
+            _ref.update(patch).catch(() => { });
+        }
         let modalId = undefined, showCfg = false, showSync = false, tvTimer = null, tvSub = 'gantt', ganttZoom = 180;
         let ganttFase = 'todas'; // 'todas' | 'impresion' | 'acabados' | 'empaque' — filtro de fase del Gantt en TV
         let searchQ = '';
@@ -903,7 +921,9 @@
             _pendingSaves++;
             // update() en vez de set(): mismo resultado para estas claves, pero dejamos la
             // puerta abierta a saveBoard() para escribir solo una parte sin tocar el resto.
-            const p = _ref.update({ cfg, statsHistory, historial, etapaMap, manualOrders, scanLog, moveLog, hiddenGroups }).catch(e => {
+            // hiddenGroups NO va aquí — se escribe aparte, clave por clave, vía
+            // setHiddenGroup_/removeHiddenGroup_ (ver nota en la declaración de hiddenGroups).
+            const p = _ref.update({ cfg, statsHistory, historial, etapaMap, manualOrders, scanLog, moveLog }).catch(e => {
                 try { localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); localStorage.setItem('imp_h', JSON.stringify(historial)); } catch { }
             }).finally(() => { _pendingSaves--; });
             pushLiveStatus();
@@ -915,7 +935,7 @@
         function saveBoard() {
             const manualOrders = orders.filter(o => !o._fromSheets);
             _pendingSaves++;
-            const p = _ref.update({ cfg, etapaMap, manualOrders, moveLog, hiddenGroups }).catch(e => {
+            const p = _ref.update({ cfg, etapaMap, manualOrders, moveLog }).catch(e => {
                 try { localStorage.setItem('imp_c', JSON.stringify(cfg)); } catch { }
             }).finally(() => { _pendingSaves--; });
             pushLiveStatus();
@@ -1003,7 +1023,7 @@
             // reusa hiddenGroups (igual que al eliminar a mano) para que no reaparezca sola —
             // Kevin puede traerla de vuelta con el mismo botón "♻️ Restaurar" del panel de Sync
             // si de verdad es un reimpreso a propósito.
-            if (o._fromSheets) hiddenGroups[o.grupoId || o.id] = { titulo: o.baseTitulo || o.titulo || o.id, ts: Date.now() };
+            if (o._fromSheets) setHiddenGroup_(o.grupoId || o.id, { titulo: o.baseTitulo || o.titulo || o.id, ts: Date.now() });
         }
 
         // Historial de movimientos por orden — de dónde a dónde, cómo y cuándo.
@@ -4353,7 +4373,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const o = orders.find(x => x.id === modalId);
             // Si viene de Sheets, recordar el grupo como oculto — si no, el siguiente sync
             // (automático cada 5 min) la vuelve a traer porque la fila sigue en la hoja.
-            if (o && o._fromSheets) hiddenGroups[o.grupoId || o.id] = { titulo: o.baseTitulo || o.titulo || o.id, ts: Date.now() };
+            if (o && o._fromSheets) setHiddenGroup_(o.grupoId || o.id, { titulo: o.baseTitulo || o.titulo || o.id, ts: Date.now() });
             // Si la orden tiene grupoId (INT+PORT del mismo libro), quitar también al hermano
             // de una vez — si no, se queda visible hasta el siguiente sync.
             orders = orders.filter(x => x.id !== modalId && !(o && o.grupoId && x.grupoId === o.grupoId));
@@ -4407,7 +4427,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function closeSync() { showSync = false; render(); }
         // Deshace un eliminado por accidente — el siguiente sync la vuelve a traer de Sheets
         // como si nunca la hubieras borrado (no revive nada manual, solo destraba el filtro).
-        function restaurarOculta_(gid) { delete hiddenGroups[gid]; saveBoard(); render(); showToast('♻️ Restaurada — aparecerá en el próximo sync'); }
+        function restaurarOculta_(gid) { removeHiddenGroup_(gid); render(); showToast('♻️ Restaurada — aparecerá en el próximo sync'); }
         function setAutoSync(v) {
             autoSync = v;
             if (_autoSyncInt) { clearInterval(_autoSyncInt); _autoSyncInt = null; }
