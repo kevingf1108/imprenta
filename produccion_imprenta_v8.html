@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.22';
+        const APP_VERSION = 'v9.23';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -894,8 +894,19 @@
                         }
                     });
                     if (_migrated) saveS();
+                    // Desde v9.23, cada entrada nueva se agrega con _ref.child('historial').push()
+                    // (clave propia de Firebase, _fbKey) en vez de reenviar el arreglo completo en
+                    // cada saveS() — mismo motivo que hiddenGroups (v9.22): con varias computadoras
+                    // abiertas a la vez, una pestaña con una copia vieja podía guardar DESPUÉS y
+                    // borrar sin querer entradas que otra pestaña acababa de agregar (esto pudo
+                    // estar corrompiendo Stats/motorErrorDias en silencio, no solo la protección de
+                    // hiddenGroups). Entradas viejas SIN clave propia (formato de antes de v9.23,
+                    // guardadas como arreglo) siguen leyéndose igual, solo no se pueden borrar una
+                    // por una todavía — se van reemplazando solas conforme el historial avanza.
                     const rawH = data.historial;
-                    historial = rawH ? (Array.isArray(rawH) ? rawH : Object.values(rawH)).filter(Boolean) : [];
+                    if (!rawH) historial = [];
+                    else if (Array.isArray(rawH)) historial = rawH.filter(Boolean);
+                    else historial = Object.entries(rawH).filter(([k, v]) => v).map(([k, v]) => ({ ...v, _fbKey: k }));
                     etapaMap = data.etapaMap || {};
                     hiddenGroups = data.hiddenGroups || {};
                     // Restaurar órdenes manuales (union_results) guardadas en Firebase
@@ -921,9 +932,11 @@
             _pendingSaves++;
             // update() en vez de set(): mismo resultado para estas claves, pero dejamos la
             // puerta abierta a saveBoard() para escribir solo una parte sin tocar el resto.
-            // hiddenGroups NO va aquí — se escribe aparte, clave por clave, vía
-            // setHiddenGroup_/removeHiddenGroup_ (ver nota en la declaración de hiddenGroups).
-            const p = _ref.update({ cfg, statsHistory, historial, etapaMap, manualOrders, scanLog, moveLog }).catch(e => {
+            // hiddenGroups e historial NO van aquí — se escriben aparte, clave por clave, vía
+            // setHiddenGroup_/removeHiddenGroup_ y pushHistorial()/trimHistorialByAge_ (ver notas
+            // en sus declaraciones) — así ninguna pestaña con una copia vieja en memoria puede
+            // sobreescribir lo que otra pestaña acaba de agregar.
+            const p = _ref.update({ cfg, statsHistory, etapaMap, manualOrders, scanLog, moveLog }).catch(e => {
                 try { localStorage.setItem('imp_c', JSON.stringify(cfg)); localStorage.setItem('imp_sh', JSON.stringify(statsHistory)); localStorage.setItem('imp_h', JSON.stringify(historial)); } catch { }
             }).finally(() => { _pendingSaves--; });
             pushLiveStatus();
@@ -1013,8 +1026,14 @@
         }
         function pushHistorial(o) {
             if (historial.find(h => h.id === o.id && h.ts && Date.now() - h.ts < 5000)) return;
-            historial.push({ id: o.id, titulo: o.titulo || o.baseTitulo || o.id, cliente: o.cliente || '', cantidad: o.cantidad || 0, tipoEncuadernacion: o.tipoEncuadernacion || '', fechaLimite: o.fechaLimite || '', fechaCreacion: o.fechaCreacion || '', etaPredicha: o.etaPredicha || '', ts: Date.now() });
-            historial = trimByAge(historial, cfg.retencionHistorialMeses);
+            const entry = { id: o.id, titulo: o.titulo || o.baseTitulo || o.id, cliente: o.cliente || '', cantidad: o.cantidad || 0, tipoEncuadernacion: o.tipoEncuadernacion || '', fechaLimite: o.fechaLimite || '', fechaCreacion: o.fechaCreacion || '', etaPredicha: o.etaPredicha || '', ts: Date.now() };
+            // push() en vez de reenviar todo el arreglo (ver nota en loadS()) — cada entrada se
+            // agrega con su propia clave de Firebase, así otra pestaña con historial viejo en
+            // memoria no puede borrarla sin querer al guardar algo suyo después.
+            const childRef = _ref.child('historial').push(entry);
+            childRef.catch(() => { });
+            historial.push({ ...entry, _fbKey: childRef.key });
+            trimHistorialByAge_(cfg.retencionHistorialMeses);
             // Una vez que una orden de Sheets llega a Listo, la limpieza automática del Apps
             // Script (cada 15 min) la saca de Impresion org/Acabado org — pero si esa fila
             // vuelve a aparecer en Sheets más tarde por cualquier motivo (Docket Manager la
@@ -1024,6 +1043,20 @@
             // Kevin puede traerla de vuelta con el mismo botón "♻️ Restaurar" del panel de Sync
             // si de verdad es un reimpreso a propósito.
             if (o._fromSheets) setHiddenGroup_(o.grupoId || o.id, { titulo: o.baseTitulo || o.titulo || o.id, ts: Date.now() });
+        }
+        // Recorta historial por antigüedad borrando clave por clave en Firebase — solo las
+        // entradas con _fbKey propia (agregadas vía push(), desde v9.23) se pueden borrar así;
+        // las del formato viejo (todo el arreglo junto) se quedan hasta reemplazarse solas.
+        function trimHistorialByAge_(months) {
+            if (!months || months <= 0) return;
+            const cutoff = Date.now() - months * 30 * 86400000;
+            const vencidas = historial.filter(h => h._fbKey && h.ts && h.ts < cutoff);
+            if (!vencidas.length) return;
+            const keys = new Set(vencidas.map(h => h._fbKey));
+            historial = historial.filter(h => !keys.has(h._fbKey));
+            const patch = {};
+            vencidas.forEach(h => { patch['historial/' + h._fbKey] = null; });
+            _ref.update(patch).catch(() => { });
         }
 
         // Historial de movimientos por orden — de dónde a dónde, cómo y cuándo.
