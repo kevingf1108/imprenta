@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.20';
+        const APP_VERSION = 'v9.21';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1869,6 +1869,13 @@
                     } else if (etapaMap[o.id] && o.etapa !== 'listo' && !o._listoInSheets) {
                         // No sobreescribir si Sheets ya marcó la orden como listo (avanzó de fase)
                         result = { ...o, etapa: etapaMap[o.id] };
+                        // La hoja sigue sin coincidir con dónde la app ya sabe que está (ej.
+                        // arrastraste o escaneaste la tarjeta y el aviso a la hoja se perdió en
+                        // silencio — fetchOrWarn_ usa 'no-cors', que solo detecta "sin internet",
+                        // nunca un candado ocupado o un error dentro del script). Reintentar avisar
+                        // en cada sync mientras siga sin coincidir, en vez de depender de que el
+                        // aviso original haya llegado una sola vez — se autocorrige solo.
+                        if (o.etapa !== etapaMap[o.id]) callScript(result, etapaMap[o.id], o.etapa);
                     } else if (local && etapaRank(local) > etapaRank(o)) {
                         // No regresar una orden que localmente ya iba más avanzada (ej. recién marcada
                         // Listo) solo porque Sheets todavía no se puso al día — la limpieza automática
