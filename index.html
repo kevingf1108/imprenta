@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.23';
+        const APP_VERSION = 'v9.24';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1514,6 +1514,10 @@
             const papel = col(row, 'papel', 'paper', 'papel/cartulina');
             const tabs = parseInt((col(row, 'tabloides') || '').replace(/[^\d]/g, '')) || 0;
             const cantidad = parseInt(col(row, 'cantidad', 'quantity', 'qty', 'cant')) || 0;
+            // ID DM (2026-10-14): en "P. impresión" la columna viene de Docket Manager como
+            // "DM ID" — se necesita para la futura integración con HubSpot (buscar/actualizar
+            // el registro correspondiente allá).
+            const idDm = col(row, 'id dm', 'dm id');
 
             if (!nombre || !itemNum) return null;
 
@@ -1538,7 +1542,7 @@
                 fechaLimite: parseDMDate(entrega),
                 etapa, urgente: urg.toLowerCase().includes('urgente'),
                 notas: desc.substring(0, 120),
-                _fromSheets: true, _listoInSheets: listo,
+                _fromSheets: true, _listoInSheets: listo, idDm,
                 fechaCreacion: new Date().toISOString().split('T')[0],
             };
         }
@@ -1555,6 +1559,7 @@
             const hojas = parseInt(col(row, 'hojas', 'sheets', 'tabloides', 'tabs')) || 0;
             const status = col(row, 'status', 'estado');
             const po = col(row, 'p_o', 'tipo', 'interior', 'portada');
+            const idDm = col(row, 'id dm', 'dm id');
 
             if (!nombre || !itemNum) return null;
 
@@ -1584,7 +1589,7 @@
                 fechaLimite: parseDMDate(entrega),
                 etapa, urgente: urg.toLowerCase().includes('urgente'),
                 notas: acab.substring(0, 120),
-                _fromSheets: true, _piezaSuelta,
+                _fromSheets: true, _piezaSuelta, idDm,
                 fechaCreacion: new Date().toISOString().split('T')[0],
             };
         }
@@ -1605,6 +1610,7 @@
             // Usar etapa_actual solo si es un valor válido — quitar prefijo "M " si existe
             const statusRaw = col(row, 'etapa_actual', 'etapa actual', 'etapa').replace(/^M\s+/i, '').trim();
             const etapaActual = _ETAPAS_VALIDAS.has(statusRaw) ? statusRaw : '';
+            const idDm = col(row, 'id dm', 'dm id');
 
             if (!nombre || !itemNum) return null;
             if (procesado) return null;
@@ -1625,7 +1631,7 @@
                 urgente: urg.toLowerCase().includes('urgente'),
                 notas: notas.substring(0, 120),
                 _fromSheets: true,
-                _isMuestra: true,
+                _isMuestra: true, idDm,
                 fechaCreacion: new Date().toISOString().split('T')[0],
             };
         }
