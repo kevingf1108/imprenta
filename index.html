@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.25';
+        const APP_VERSION = 'v9.26';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -848,7 +848,8 @@
         let ganttFase = 'todas'; // 'todas' | 'impresion' | 'acabados' | 'empaque' — filtro de fase del Gantt en TV
         let searchQ = '';
         let salidaFecha = null; // ISO yyyy-mm-dd; null = hoy (pestaña 📦 Salida del día)
-        let muestrasPorSemana = null; // null = aún no cargado; { ok, columnaUsada, semanas:[{semana,cantidad}] } — ver cargarMuestrasPorSemana()
+        let muestrasPorSemana = null; // null = aún no cargado; { ok, columnaUsada, semanas:[{semana,cantidad}], dias:[{dia,cantidad}] } — ver cargarMuestrasPorSemana()
+        let muestrasVista = 'semana'; // 'semana' | 'dia' — qué desglose se muestra en la tarjeta de KPIs
         let autoSync = false, _autoSyncInt = null, _syncing = false, _fbReady = false;
 
         // ── Salud de sync (2026-09-10) ──────────────────────────────────────
@@ -4062,9 +4063,14 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // porque sus datos no vienen de `orders` (estado local ya sincronizado) sino de un
         // fetch aparte a Sheets (ver cargarMuestrasPorSemana()), con sus propios estados de
         // carga/error/vacío.
+        function setMuestrasVista_(v) { muestrasVista = v; render(); }
         function muestrasPorSemanaHTML() {
             const m = muestrasPorSemana;
             const btn = (label) => `<button class="btn btn-g btn-sm" onclick="cargarMuestrasPorSemana()">${label}</button>`;
+            const vistaBtns = `<div style="display:flex;gap:4px">
+  <button class="btn btn-sm" style="background:${muestrasVista === 'semana' ? '#3b82f6' : '#0f172a'};color:${muestrasVista === 'semana' ? '#fff' : '#94a3b8'};border:1px solid #334155" onclick="setMuestrasVista_('semana')">Por semana</button>
+  <button class="btn btn-sm" style="background:${muestrasVista === 'dia' ? '#3b82f6' : '#0f172a'};color:${muestrasVista === 'dia' ? '#fff' : '#94a3b8'};border:1px solid #334155" onclick="setMuestrasVista_('dia')">Por día</button>
+</div>`;
             let body;
             if (!m) {
                 body = `<div style="color:#475569;font-size:12px;padding:8px 0">${btn('🔄 Cargar desde Sheets')}</div>`;
@@ -4072,23 +4078,31 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 body = `<div style="color:#475569;font-size:12px;padding:8px 0">Cargando…</div>`;
             } else if (!m.ok) {
                 body = `<div style="color:#ef4444;font-size:12px;padding:8px 0">❌ ${e(m.error || 'Error al cargar')} ${btn('🔄 Reintentar')}</div>`;
-            } else if (!m.semanas || !m.semanas.length) {
-                body = `<div style="color:#475569;font-size:12px;padding:8px 0">Sin muestras con fecha registrada todavía. ${btn('🔄 Refrescar')}</div>`;
             } else {
-                const max = Math.max(...m.semanas.map(s => s.cantidad), 1);
-                const rows = m.semanas.map(s => {
-                    const barW = Math.round(s.cantidad / max * 100);
-                    const fLabel = new Date(s.semana + 'T00:00:00').toLocaleDateString('es', { day: '2-digit', month: 'short' });
-                    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
-  <div style="width:90px;font-size:11px;color:#94a3b8">Sem. ${fLabel}</div>
+                const lista = muestrasVista === 'dia' ? (m.dias || []) : (m.semanas || []);
+                if (!lista.length) {
+                    body = `<div style="color:#475569;font-size:12px;padding:8px 0">Sin muestras con fecha registrada todavía. ${btn('🔄 Refrescar')}</div>`;
+                } else {
+                    const max = Math.max(...lista.map(s => s.cantidad), 1);
+                    const rows = lista.map(s => {
+                        const barW = Math.round(s.cantidad / max * 100);
+                        const fecha = s.dia || s.semana;
+                        const fLabel = new Date(fecha + 'T00:00:00').toLocaleDateString('es', { day: '2-digit', month: 'short', weekday: muestrasVista === 'dia' ? 'short' : undefined });
+                        const prefijo = muestrasVista === 'dia' ? '' : 'Sem. ';
+                        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
+  <div style="width:90px;font-size:11px;color:#94a3b8">${prefijo}${fLabel}</div>
   <div style="flex:1;background:#0f172a;border-radius:4px;height:12px;overflow:hidden"><div style="height:100%;border-radius:4px;width:${barW}%;background:#c084fc"></div></div>
   <div style="width:30px;text-align:right;font-size:12px;color:#c084fc;font-weight:700">${s.cantidad}</div>
 </div>`;
-                }).join('');
-                body = `<div style="font-size:11px;color:#334155;margin-bottom:10px">Columna de fecha usada: "${e(m.columnaUsada)}" · ${m.totalConFecha} de ${m.totalFilas} filas en M emp tienen fecha ${btn('🔄 Refrescar')}</div>${rows}`;
+                    }).join('');
+                    body = `<div style="font-size:11px;color:#334155;margin-bottom:10px">Columna de fecha usada: "${e(m.columnaUsada)}" · ${m.totalConFecha} de ${m.totalFilas} filas tienen fecha ${btn('🔄 Refrescar')}</div>${rows}`;
+                }
             }
             return `<div class="kcard" style="margin-bottom:12px">
-      <div style="font-size:12px;color:#64748b;font-weight:700;margin-bottom:4px">🔬 MUESTRAS COMPLETADAS POR SEMANA <span style="font-weight:400;color:#334155">(llegaron a M emp)</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:4px">
+        <div style="font-size:12px;color:#64748b;font-weight:700">🔬 MUESTRAS COMPLETADAS <span style="font-weight:400;color:#334155">(salieron de M Imp)</span></div>
+        ${m && m.ok ? vistaBtns : ''}
+      </div>
       ${body}
     </div>`;
         }
