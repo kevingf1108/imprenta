@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.24';
+        const APP_VERSION = 'v9.25';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -848,6 +848,7 @@
         let ganttFase = 'todas'; // 'todas' | 'impresion' | 'acabados' | 'empaque' — filtro de fase del Gantt en TV
         let searchQ = '';
         let salidaFecha = null; // ISO yyyy-mm-dd; null = hoy (pestaña 📦 Salida del día)
+        let muestrasPorSemana = null; // null = aún no cargado; { ok, columnaUsada, semanas:[{semana,cantidad}] } — ver cargarMuestrasPorSemana()
         let autoSync = false, _autoSyncInt = null, _syncing = false, _fbReady = false;
 
         // ── Salud de sync (2026-09-10) ──────────────────────────────────────
@@ -2875,6 +2876,24 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             }
         }
 
+        // Muestras completadas por semana (2026-10-21, a pedido de Kevin) — lee directo de
+        // la hoja "M emp" vía Apps Script (acción 'reporteMuestras'), no del estado local
+        // (las muestras ya completadas no viven en `orders`). muestrasPorSemana queda en
+        // null hasta que se pide por primera vez; después se puede refrescar con el mismo botón.
+        async function cargarMuestrasPorSemana() {
+            if (!cfg.scriptUrl) { showToast('⚠️ Configura la URL del script primero'); return; }
+            muestrasPorSemana = { cargando: true };
+            render();
+            try {
+                const r = await fetch(scriptURL('action=reporteMuestras'));
+                const data = await r.json();
+                muestrasPorSemana = data;
+            } catch (err) {
+                muestrasPorSemana = { ok: false, error: err.message };
+            }
+            render();
+        }
+
         function deleteStatRecord(ts, ordId) {
             const i = statsHistory.findIndex(r => r.ts === Number(ts) && r.ordId === ordId);
             if (i >= 0) { statsHistory.splice(i, 1); saveS(); setV('stats'); }
@@ -4035,7 +4054,43 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       <div style="font-size:12px;color:#64748b;font-weight:700;margin-bottom:12px">📍 PARADAS POR ETAPA <span style="font-weight:400;color:#334155">(qué órdenes están detenidas y dónde)</span></div>
       ${stageIdleHTML}
     </div>` : ''}
+    ${muestrasPorSemanaHTML()}
   </div>`;
+        }
+
+        // Tarjeta de "🔬 Muestras completadas por semana" dentro de KPIs — separada de kpiHTML()
+        // porque sus datos no vienen de `orders` (estado local ya sincronizado) sino de un
+        // fetch aparte a Sheets (ver cargarMuestrasPorSemana()), con sus propios estados de
+        // carga/error/vacío.
+        function muestrasPorSemanaHTML() {
+            const m = muestrasPorSemana;
+            const btn = (label) => `<button class="btn btn-g btn-sm" onclick="cargarMuestrasPorSemana()">${label}</button>`;
+            let body;
+            if (!m) {
+                body = `<div style="color:#475569;font-size:12px;padding:8px 0">${btn('🔄 Cargar desde Sheets')}</div>`;
+            } else if (m.cargando) {
+                body = `<div style="color:#475569;font-size:12px;padding:8px 0">Cargando…</div>`;
+            } else if (!m.ok) {
+                body = `<div style="color:#ef4444;font-size:12px;padding:8px 0">❌ ${e(m.error || 'Error al cargar')} ${btn('🔄 Reintentar')}</div>`;
+            } else if (!m.semanas || !m.semanas.length) {
+                body = `<div style="color:#475569;font-size:12px;padding:8px 0">Sin muestras con fecha registrada todavía. ${btn('🔄 Refrescar')}</div>`;
+            } else {
+                const max = Math.max(...m.semanas.map(s => s.cantidad), 1);
+                const rows = m.semanas.map(s => {
+                    const barW = Math.round(s.cantidad / max * 100);
+                    const fLabel = new Date(s.semana + 'T00:00:00').toLocaleDateString('es', { day: '2-digit', month: 'short' });
+                    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
+  <div style="width:90px;font-size:11px;color:#94a3b8">Sem. ${fLabel}</div>
+  <div style="flex:1;background:#0f172a;border-radius:4px;height:12px;overflow:hidden"><div style="height:100%;border-radius:4px;width:${barW}%;background:#c084fc"></div></div>
+  <div style="width:30px;text-align:right;font-size:12px;color:#c084fc;font-weight:700">${s.cantidad}</div>
+</div>`;
+                }).join('');
+                body = `<div style="font-size:11px;color:#334155;margin-bottom:10px">Columna de fecha usada: "${e(m.columnaUsada)}" · ${m.totalConFecha} de ${m.totalFilas} filas en M emp tienen fecha ${btn('🔄 Refrescar')}</div>${rows}`;
+            }
+            return `<div class="kcard" style="margin-bottom:12px">
+      <div style="font-size:12px;color:#64748b;font-weight:700;margin-bottom:4px">🔬 MUESTRAS COMPLETADAS POR SEMANA <span style="font-weight:400;color:#334155">(llegaron a M emp)</span></div>
+      ${body}
+    </div>`;
         }
 
         // ═══════════════════════════════════════════════════
