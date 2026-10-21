@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.26';
+        const APP_VERSION = 'v9.27';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -2564,7 +2564,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     </div>
     <div style="display:flex;align-items:center;gap:6px;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:4px 10px;flex:1;min-width:160px;max-width:260px">
       <span style="color:#475569;font-size:14px">🔍</span>
-      <input id="searchInput" type="text" placeholder="Buscar orden…" value="${e(searchQ)}"
+      <input id="searchInput" type="text" placeholder="Buscar orden o ID DM…" value="${e(searchQ)}"
         oninput="searchQ=this.value;renderBoard()"
         style="background:transparent;border:none;outline:none;color:#f1f5f9;font-size:13px;width:100%;font-family:inherit"
       />
@@ -3308,7 +3308,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             return (o.id || '').toLowerCase().includes(q)
                 || (o.titulo || '').toLowerCase().includes(q)
                 || (o.cliente || '').toLowerCase().includes(q)
-                || (o.notas || '').toLowerCase().includes(q);
+                || (o.notas || '').toLowerCase().includes(q)
+                || (o.idDm || '').toLowerCase().includes(q);
         }
         function getMaqInfo(o) {
             const maq = o.maquina;
@@ -3577,6 +3578,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         <h2 style="font-size:17px;font-weight:700">${isNew ? '+ Nueva Orden' : `✏️ ${e(ord.id || '')} <span style="font-size:13px;color:#64748b">${tipoLabel}</span>`}</h2>
         <button class="bico" onclick="closeModal()" style="font-size:20px;color:#94a3b8">✕</button>
       </div>
+      ${!isNew && ord.idDm ? `<div style="display:flex;align-items:center;gap:6px;margin:-8px 0 14px;font-size:11px;color:#64748b">
+        <span style="background:#1a0040;border:1px solid #5b21b6;color:#c084fc;padding:2px 8px;border-radius:5px;font-weight:600">🔗 ID DM</span>
+        <span style="font-family:monospace;color:#94a3b8">${e(ord.idDm)}</span>
+      </div>` : ''}
       <div class="g2">
         <div><span class="lbl" style="margin-top:0">Cliente *</span><input class="inp" id="f_cli" value="${e(ord.cliente || '')}" oninput="updEst()"></div>
         <div><span class="lbl" style="margin-top:0">Título del libro *</span><input class="inp" id="f_tit" value="${e(ord.baseTitulo || ord.titulo || '')}" oninput="updEst()"></div>
