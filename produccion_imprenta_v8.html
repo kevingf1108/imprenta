@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.30';
+        const APP_VERSION = 'v9.31';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -757,20 +757,33 @@
             { id: 'c1351', label: 'Color 1351', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
             { id: 'c1353', label: 'Color 1353', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
             { id: 'c10010', label: 'Color 10010', steps: ['iic', 'ip'], grupo: '🎨 Impresión Color' },
-            { id: 'plast', label: 'Plastificadora', steps: ['pl'], grupo: '✂️ Acabados' },
-            { id: 'ci1', label: 'Cortadora Ini.1', steps: ['ci', 'cp'], grupo: '✂️ Acabados' },
-            { id: 'ci2', label: 'Cortadora Ini.2', steps: ['ci', 'cp'], grupo: '✂️ Acabados' },
-            { id: 'peg1', label: 'Pegadora 1', steps: ['pg'], grupo: '✂️ Acabados' },
-            { id: 'peg2', label: 'Pegadora 2', steps: ['pg'], grupo: '✂️ Acabados' },
-            { id: 'peg3', label: 'Pegadora 3', steps: ['pg'], grupo: '✂️ Acabados' },
-            { id: 'cf1', label: 'Corte Final 1', steps: ['cf'], grupo: '✂️ Acabados' },
-            { id: 'cf2', label: 'Corte Final 2', steps: ['cf'], grupo: '✂️ Acabados' },
+            // Acabados = máquinas FÍSICAS reales (v9.31) — mismas que los códigos MQ de
+            // MACHINE_SCAN_CODES. "fisica" es el nombre exacto que guarda el escaneo en
+            // statsHistory.maquinaFisica, y con eso factorMaquina_() calibra cada una por separado.
+            // Se conservan los ids viejos donde ya existían (plast, ci1, peg1, cf1, engr, armd, termo).
+            { id: 'plast', label: 'One Ming', fisica: 'One Ming (Plastificado)', steps: ['pl'], grupo: '✂️ Acabados' },
+            { id: 'plast2', label: 'Komfi', fisica: 'Komfi (Plastificado)', steps: ['pl'], grupo: '✂️ Acabados' },
+            { id: 'plast3', label: 'Vansta', fisica: 'Vansta (Plastificado)', steps: ['pl'], grupo: '✂️ Acabados' },
+            { id: 'plast4', label: 'Matrix', fisica: 'Matrix (Plastificado)', steps: ['pl'], grupo: '✂️ Acabados' },
+            { id: 'ci1', label: 'Challenge', fisica: 'Challenge (Corte Inicial)', steps: ['ci', 'cp'], grupo: '✂️ Acabados' },
+            { id: 'ci2', label: 'Guillotina 3', fisica: 'Guillotina 3 (Corte Inicial)', steps: ['ci', 'cp'], grupo: '✂️ Acabados' },
+            { id: 'peg1', label: 'Pegadora 1', fisica: 'Pegadora 1', steps: ['pg'], grupo: '✂️ Acabados' },
+            { id: 'peg2', label: 'Pegadora 2', fisica: 'Pegadora 2', steps: ['pg'], grupo: '✂️ Acabados' },
+            { id: 'peg3', label: 'Pegadora 3', fisica: 'Pegadora 3', steps: ['pg'], grupo: '✂️ Acabados' },
+            { id: 'peg4', label: 'Pegadora 4', fisica: 'Pegadora 4', steps: ['pg'], grupo: '✂️ Acabados' },
+            { id: 'pegch', label: 'Pegadora chica', fisica: 'Pegadora chica', steps: ['pg'], grupo: '✂️ Acabados' },
+            { id: 'cf1', label: 'Guillotina 1', fisica: 'Guillotina 1 (Corte Final)', steps: ['cf'], grupo: '✂️ Acabados' },
+            { id: 'cf2', label: 'Guillotina 2', fisica: 'Guillotina 2 (Corte Final)', steps: ['cf'], grupo: '✂️ Acabados' },
             { id: 'ponch', label: 'Ponchadora', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
-            { id: 'engr', label: 'Engrapadora', steps: ['en'], grupo: '✂️ Acabados' },
+            { id: 'engr', label: 'Engrapadora 1', fisica: 'Engrapadora 1', steps: ['en'], grupo: '✂️ Acabados' },
+            { id: 'engr2', label: 'Engrapadora 2', fisica: 'Engrapadora 2', steps: ['en'], grupo: '✂️ Acabados' },
             { id: 'espir', label: 'Espiraladora', steps: ['es'], grupo: '✂️ Acabados' },
             { id: 'cortC', label: 'Corte Cartón', steps: ['cc'], grupo: '✂️ Acabados' },
-            { id: 'armd', label: 'Armado PD/Mesa', steps: ['ap', 'ms', 'cdc'], grupo: '✂️ Acabados' },
-            { id: 'termo', label: 'Termo Empaque', steps: ['te'], grupo: '📦 Empaque' },
+            { id: 'armd', label: 'Mesa Pasta Dura 1', fisica: 'Mesa de Pasta Dura 1', steps: ['ap', 'ms', 'cdc'], grupo: '✂️ Acabados' },
+            { id: 'armd2', label: 'Mesa Pasta Dura 2', fisica: 'Mesa de Pasta Dura 2', steps: ['ap', 'ms', 'cdc'], grupo: '✂️ Acabados' },
+            { id: 'armd3', label: 'Mesa Pasta Dura 3', fisica: 'Mesa de Pasta Dura 3', steps: ['ap', 'ms', 'cdc'], grupo: '✂️ Acabados' },
+            { id: 'termo', label: 'Termo 1', fisica: 'Termo 1', steps: ['te'], grupo: '📦 Empaque' },
+            { id: 'termo2', label: 'Termo 2', fisica: 'Termo 2', steps: ['te'], grupo: '📦 Empaque' },
         ];
         const ORD_COLORS = ['#3b82f6', '#22c55e', '#f97316', '#a855f7', '#ec4899', '#14b8a6', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#84cc16', '#f43f5e'];
         const MUESTRA_COLORS = ['#93c5fd', '#86efac', '#fdba74', '#d8b4fe', '#f9a8d4', '#5eead4', '#fde68a', '#c4b5fd', '#fca5a5', '#67e8f9', '#d9f99d', '#fda4af'];
@@ -1299,6 +1312,37 @@
         // ═══════════════════════════════════════════════════
         //  SCHEDULER PARA GANTT
         // ═══════════════════════════════════════════════════
+        // ── Velocidad por máquina física (v9.31) ─────────────────────────────────────
+        // cfg.maq calibra por TIPO de paso (todas las pegadoras igual). Esto compara cada
+        // máquina contra las demás del mismo paso: minutos por unidad (hojas en Plastificado/
+        // Corte Inicial, piezas en el resto), mediana de la máquina ÷ mediana del paso. 1.2 =
+        // tarda 20% más que el promedio. Sin suficientes datos de esa máquina → 1 (sin cambio).
+        // Acotado para que unos pocos datos raros no manden la planeación a lo absurdo.
+        const MIN_MUESTRAS_MAQUINA = 5;
+        let _factorMaqCache = { n: -1, map: {} };
+        function mediana_(arr) { const a = [...arr].sort((x, y) => x - y), k = Math.floor(a.length / 2); return !a.length ? null : a.length % 2 ? a[k] : (a[k - 1] + a[k]) / 2; }
+        function factoresMaquina_() {
+            if (_factorMaqCache.n === statsHistory.length) return _factorMaqCache.map;
+            const map = {};
+            const porHojas = new Set(['pl', 'ci', 'cp']);
+            const steps = [...new Set(MAQUINAS.filter(m => m.fisica).flatMap(m => m.steps))];
+            steps.forEach(stepId => {
+                const x = r => porHojas.has(stepId) ? r.hojas : r.cantidad;
+                const recs = statsHistory.filter(r => r.etapa === 'acab_' + stepId && r.mins > 0 && x(r) > 0);
+                const medPaso = mediana_(recs.map(r => r.mins / x(r)));
+                if (!medPaso) return;
+                MAQUINAS.filter(m => m.fisica && m.steps.includes(stepId)).forEach(m => {
+                    const propios = recs.filter(r => r.maquinaFisica === m.fisica).map(r => r.mins / x(r));
+                    if (propios.length < MIN_MUESTRAS_MAQUINA) return;
+                    const f = Math.min(1.6, Math.max(0.6, mediana_(propios) / medPaso));
+                    map[m.id + '|' + stepId] = { factor: Math.round(f * 100) / 100, n: propios.length };
+                });
+            });
+            _factorMaqCache = { n: statsHistory.length, map };
+            return map;
+        }
+        function factorMaquina_(machId, stepId) { const f = factoresMaquina_()[machId + '|' + stepId]; return f ? f.factor : 1; }
+
         function scheduleMachines(ordList, c) {
             const machAvail = {}; MAQUINAS.forEach(m => machAvail[m.id] = 0);
             const ordState = {}, blocks = [], colorMap = {};
@@ -1387,7 +1431,10 @@
                         // Soy el líder: programar normalmente y guardar el slot
                     }
 
-                    const mach = cands.reduce((best, m) => machAvail[m.id] < machAvail[best.id] ? m : best);
+                    // La que TERMINA antes (no solo la que se libera antes): una máquina lenta
+                    // libre puede perder contra una rápida que se desocupa en 10 min.
+                    const durEn = m => step.min * factorMaquina_(m.id, step.id);
+                    const mach = cands.reduce((best, m) => machAvail[m.id] + durEn(m) < machAvail[best.id] + durEn(best) ? m : best);
                     let earliest = machAvail[mach.id];
                     if (INT_IDS.includes(step.id)) earliest = Math.max(earliest, ordState[o.id].intEnd);
                     if (PORT_IDS.includes(step.id)) earliest = Math.max(earliest, ordState[o.id].portEnd);
@@ -1397,7 +1444,7 @@
                     if (JOIN_STEPS.has(step.id) && buddyKey[o.id]) {
                         earliest = Math.max(earliest, groupPreJoinMin[buddyKey[o.id]] || 0);
                     }
-                    const start = earliest, end = start + step.min;
+                    const start = earliest, end = start + Math.round(durEn(mach));
                     machAvail[mach.id] = end;
                     if (INT_IDS.includes(step.id)) ordState[o.id].intEnd = Math.max(ordState[o.id].intEnd, end);
                     if (PORT_IDS.includes(step.id)) ordState[o.id].portEnd = Math.max(ordState[o.id].portEnd, end);
@@ -1416,7 +1463,7 @@
                     blocks.push({
                         ordId: barOrdId, titulo: barTitulo, cliente: o.cliente, tipo: o.tipo || 'normal',
                         stepId: step.id, stepNom: step.nom, machId: mach.id, machLabel: mach.label,
-                        start, end, dur: step.min, color, urgente: o.urgente, fechaLimite: o.fechaLimite,
+                        start, end, dur: end - start, color, urgente: o.urgente, fechaLimite: o.fechaLimite,
                         buddyGroup: buddyKey[o.id] || null,
                         _isMuestra: o._isMuestra || false, _piezaSuelta: o._piezaSuelta || null,
                     });
@@ -2488,7 +2535,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function sideTabs_() {
             return [
                 ['kanban', '📋', 'Tablero'], ['resumen', '🏠', 'Resumen'],
-                ['kpi', '📊', 'KPIs'], ['stats', '⏱', 'Stats'], ['salida', '📦', 'Salida del día'],
+                ['kpi', '📊', 'KPIs'], ['stats', '⏱', 'Stats'], ['personas', '👤', 'Personas y máquinas'], ['salida', '📦', 'Salida del día'],
                 ['tv', '📺', 'TV'], ['scan_log', '🔍', `No encontrados${scanLog.length ? ' (' + scanLog.length + ')' : ''}`],
             ];
         }
@@ -2514,7 +2561,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       <nav class="sidebar">${sidebarHTML()}</nav>
       <div class="main-col">
         <div style="background:#1e293b;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #334155;position:sticky;top:0;z-index:30">${hdrHTML()}</div>
-        <div id="mc">${V === 'resumen' ? resumenDiaHTML() : V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : tableroConFiltroHTML()}</div>
+        <div id="mc">${V === 'resumen' ? resumenDiaHTML() : V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'personas' ? personasHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : tableroConFiltroHTML()}</div>
       </div>
     </div>
     ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}`;
@@ -2935,6 +2982,76 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const n = before - statsHistory.length;
             saveS(); setV('stats');
             showToast(n > 0 ? `🧹 ${n} registros outlier eliminados` : '✅ Sin outliers detectados');
+        }
+
+        // ── Personas y máquinas (v9.31, a pedido de Kevin) ─────────────────────────────
+        // Lo que se va acumulando de cada operador (códigos OP) y de cada máquina física
+        // (códigos MQ). La rapidez se compara SIEMPRE dentro del mismo paso (pegar contra
+        // pegar), en minutos por unidad, contra la mediana de todos en ese paso — así no
+        // castiga a quien le tocan trabajos de un paso más lento. Con pocos datos no se
+        // muestra porcentaje: un par de tiempos raros no deben etiquetar a nadie.
+        const MIN_MUESTRAS_PERSONA = 3;
+        function unidadPaso_(etapa) { return ['impresion', 'acab_pl', 'acab_ci'].includes(etapa) ? 'hojas' : 'cantidad'; }
+        function personasHTML() {
+            const recs = statsHistory.filter(r => r.mins > 0 && r[unidadPaso_(r.etapa)] > 0);
+            const medPaso = {};
+            [...new Set(recs.map(r => r.etapa))].forEach(et => {
+                medPaso[et] = mediana_(recs.filter(r => r.etapa === et).map(r => r.mins / r[unidadPaso_(et)]));
+            });
+            const card = 'background:#1e293b;border-radius:12px;padding:14px 16px;margin-bottom:12px';
+            const pct = (n, rel) => n < MIN_MUESTRAS_PERSONA ? `<span style="color:#64748b">pocos datos</span>`
+                : Math.abs(rel - 1) < 0.05 ? `<span style="color:#94a3b8">en el promedio</span>`
+                : rel > 1 ? `<span style="color:#4ade80">${Math.round((rel - 1) * 100)}% más rápido</span>`
+                : `<span style="color:#f59e0b">${Math.round((1 - rel) * 100)}% más lento</span>`;
+            const hace30 = Date.now() - 30 * 86400000;
+            const nombres = [...new Set([...Object.values(PERSON_SCAN_CODES), ...recs.map(r => r.persona), ...moveLog.map(m => m.persona)].filter(Boolean))];
+            const personas = nombres.map(nombre => {
+                const propios = recs.filter(r => r.persona === nombre);
+                const movs = moveLog.filter(m => m.persona === nombre);
+                const ultimo = Math.max(0, ...propios.map(r => r.ts || 0), ...movs.map(m => m.ts || 0));
+                const porPaso = [...new Set(propios.map(r => r.etapa))].map(et => {
+                    const rs = propios.filter(r => r.etapa === et);
+                    const med = mediana_(rs.map(r => r.mins / r[unidadPaso_(et)]));
+                    return { et, n: rs.length, mins: rs.reduce((t, r) => t + r.mins, 0), rel: med > 0 && medPaso[et] ? medPaso[et] / med : 1 };
+                }).sort((a, b) => b.n - a.n);
+                return { nombre, propios, movs30: movs.filter(m => m.ts >= hace30).length, ultimo, porPaso, horas: propios.reduce((t, r) => t + r.mins, 0) / 60 };
+            }).sort((a, b) => b.ultimo - a.ultimo || a.nombre.localeCompare(b.nombre));
+            const personaCard = p => `<div style="${card}">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px">
+            <div style="font-size:15px;font-weight:700;color:#f1f5f9">👤 ${e(p.nombre)}</div>
+            <div style="font-size:11px;color:#64748b">${p.ultimo ? 'Última actividad: ' + new Date(p.ultimo).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Sin actividad registrada'}</div>
+          </div>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#94a3b8;margin-top:6px">
+            <span><b style="color:#f1f5f9">${p.propios.length}</b> trabajos medidos</span>
+            <span><b style="color:#f1f5f9">${p.horas.toFixed(1)}</b> h medidas</span>
+            <span><b style="color:#f1f5f9">${p.movs30}</b> escaneos (30 días)</span>
+          </div>
+          ${p.porPaso.length ? `<table style="width:100%;font-size:12px;margin-top:8px;border-collapse:collapse">
+            ${p.porPaso.map(x => `<tr style="border-top:1px solid #0f172a">
+              <td style="padding:4px 0;color:#cbd5e1">${e(etOf(x.et).label)}</td>
+              <td style="padding:4px 6px;color:#64748b;text-align:right">${x.n} trabajo${x.n === 1 ? '' : 's'} · ${Math.round(x.mins)} min</td>
+              <td style="padding:4px 0;text-align:right;white-space:nowrap">${pct(x.n, x.rel)}</td>
+            </tr>`).join('')}
+          </table>` : ''}
+        </div>`;
+            const factores = factoresMaquina_();
+            const maqRows = MAQUINAS.filter(m => m.fisica).map(m => {
+                const usos = recs.filter(r => r.maquinaFisica === m.fisica).length;
+                const fs = m.steps.map(st => factores[m.id + '|' + st]).filter(Boolean);
+                const estado = fs.length ? fs.map(f => f.factor > 1.04 ? `<span style="color:#f59e0b">tarda ${Math.round((f.factor - 1) * 100)}% más</span>` : f.factor < 0.96 ? `<span style="color:#4ade80">${Math.round((1 - f.factor) * 100)}% más rápida</span>` : `<span style="color:#94a3b8">en el promedio</span>`).join(', ')
+                    : `<span style="color:#64748b">juntando datos (${usos}/${MIN_MUESTRAS_MAQUINA})</span>`;
+                return `<tr style="border-top:1px solid #0f172a"><td style="padding:5px 0;color:#cbd5e1">🏭 ${e(m.label)}</td><td style="padding:5px 6px;color:#64748b;text-align:right">${usos} medidos</td><td style="padding:5px 0;text-align:right;white-space:nowrap">${estado}</td></tr>`;
+            }).join('');
+            return `<div style="padding:16px;max-width:900px">
+        <div style="font-size:20px;font-weight:800;color:#f1f5f9">👤 Personas y máquinas</div>
+        <div style="font-size:12px;color:#64748b;margin:4px 0 14px">Se llena solo con los escaneos: código de persona (OP…) + código de máquina (MQ…) y después Inicia/Pasa en cada estación. La rapidez compara contra el promedio de ese mismo paso, por unidad (hoja o pieza).</div>
+        <div style="${card}">
+          <div style="font-size:14px;font-weight:700;color:#f1f5f9">🏭 Velocidad por máquina — lo que usa el motor</div>
+          <div style="font-size:11px;color:#64748b;margin-top:3px">Con ${MIN_MUESTRAS_MAQUINA}+ trabajos medidos, el Gantt y la carga por máquina ya usan la velocidad real de esa máquina.</div>
+          <table style="width:100%;font-size:12px;margin-top:8px;border-collapse:collapse">${maqRows}</table>
+        </div>
+        ${personas.map(personaCard).join('')}
+      </div>`;
         }
 
         function statsHTML() {
@@ -3775,7 +3892,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     // mismo criterio "menos ocupada" que usa el scheduler del Gantt — en vez de
                     // fraccionar el minutaje entre varias máquinas que en la práctica no lo corren.
                     const mach = cands.reduce((best, m) => machLoad[m.id].pendMin < machLoad[best.id].pendMin ? m : best);
-                    machLoad[mach.id].pendMin += p.min;
+                    machLoad[mach.id].pendMin += p.min * factorMaquina_(mach.id, p.id);
                     machLoad[mach.id].ords.add(o.id);
                 });
             });
