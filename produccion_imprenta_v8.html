@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.27';
+        const APP_VERSION = 'v9.28';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -3503,6 +3503,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         ${tipoBadge}
         ${timerBadge}
         ${o.urgente ? `<span class="badge" style="background:#ef444433;color:#ef4444">⚡</span>` : ''}
+        ${o.piezasDanadas > 0 ? `<span class="badge" style="background:#7f1d1d;color:#fca5a5" title="Piezas dañadas, necesitan reposición">🔧 ${o.piezasDanadas}</span>` : ''}
+        ${o.esperandoPieza ? `<span class="badge" style="background:#78350f;color:#fcd34d" title="Esperando ${o.esperandoPieza === 'portada' ? 'portada' : 'interior'}">⏳ ${o.esperandoPieza === 'portada' ? 'Portada' : 'Interior'}</span>` : ''}
       </div>
       ${!compact ? `<div style="display:flex;gap:1px">
         ${ei > 0 ? `<button class="bico" onclick="event.stopPropagation();mvOrd('${e(o.id)}',-1)" title="Paso anterior">◀</button>` : ''}
@@ -3581,6 +3583,18 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       ${!isNew && ord.idDm ? `<div style="display:flex;align-items:center;gap:6px;margin:-8px 0 14px;font-size:11px;color:#64748b">
         <span style="background:#1a0040;border:1px solid #5b21b6;color:#c084fc;padding:2px 8px;border-radius:5px;font-weight:600">🔗 ID DM</span>
         <span style="font-family:monospace;color:#94a3b8">${e(ord.idDm)}</span>
+      </div>` : ''}
+      ${!isNew && (ord.piezasDanadas > 0 || ord.esperandoPieza) ? `<div style="margin:-8px 0 14px;display:flex;flex-direction:column;gap:6px">
+        ${ord.piezasDanadas > 0 ? `<div style="display:flex;align-items:center;gap:8px;background:#2d0a0a;border:1px solid #7f1d1d;border-radius:8px;padding:8px 12px">
+          <span style="font-size:13px;color:#fca5a5;font-weight:700">🔧 ${ord.piezasDanadas} pieza${ord.piezasDanadas === 1 ? '' : 's'} dañada${ord.piezasDanadas === 1 ? '' : 's'} — necesita reposición</span>
+          ${ord.piezasDanadasTs ? `<span style="font-size:10px;color:#64748b">${new Date(ord.piezasDanadasTs).toLocaleDateString('es', { day: '2-digit', month: 'short' })}</span>` : ''}
+          <button class="btn btn-g btn-sm" style="margin-left:auto" onclick="resolverReposicion_('${e(ord.id)}')">✓ Resuelto</button>
+        </div>` : ''}
+        ${ord.esperandoPieza ? `<div style="display:flex;align-items:center;gap:8px;background:#2d1a05;border:1px solid #78350f;border-radius:8px;padding:8px 12px">
+          <span style="font-size:13px;color:#fcd34d;font-weight:700">⏳ Esperando ${ord.esperandoPieza === 'portada' ? 'portada' : 'interior'}</span>
+          ${ord.esperandoPiezaTs ? `<span style="font-size:10px;color:#64748b">${new Date(ord.esperandoPiezaTs).toLocaleDateString('es', { day: '2-digit', month: 'short' })}</span>` : ''}
+          <button class="btn btn-g btn-sm" style="margin-left:auto" onclick="resolverEspera_('${e(ord.id)}')">✓ Ya llegó</button>
+        </div>` : ''}
       </div>` : ''}
       <div class="g2">
         <div><span class="lbl" style="margin-top:0">Cliente *</span><input class="inp" id="f_cli" value="${e(ord.cliente || '')}" oninput="updEst()"></div>
@@ -4681,6 +4695,76 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         try { _ordenContandoId = localStorage.getItem('imp_conteo_orden') || null; } catch { }
         function saveContando_() { try { if (_ordenContandoId) localStorage.setItem('imp_conteo_orden', _ordenContandoId); else localStorage.removeItem('imp_conteo_orden'); } catch { } }
 
+        // ── Reposición y "esperando portada/interior" (2026-10-26, a pedido de Kevin) ───
+        // Para saber POR QUÉ se atora una producción: piezas que se dañaron y hay que
+        // rehacer ("reposición", con cantidad), o que está detenida esperando su portada o
+        // interior correspondiente. Mismo patrón que PIEZAS_SCAN_CODES: una hoja física con
+        // estos códigos, de coincidencia EXACTA, que se escanean DESPUÉS del item normal —
+        // se aplican a la última orden escaneada con éxito (cualquier etapa, no solo Empaque).
+        const REP_SCAN_CODES = { 'REP1': 1, 'REP5': 5, 'REP10': 10, 'REP25': 25, 'REP50': 50 };
+        const ESPERA_SCAN_CODES = { 'ESPPORT': 'portada', 'ESPINT': 'interior' };
+
+        // Última orden escaneada con éxito, SIN importar la etapa — a diferencia de
+        // _ordenContandoId (solo Empaque), esta se actualiza en cualquier escaneo exitoso de
+        // un item real. Persistida por dispositivo igual que _ordenContandoId.
+        let _ultimoItemEscaneadoId = null;
+        try { _ultimoItemEscaneadoId = localStorage.getItem('imp_ultimo_item') || null; } catch { }
+        function saveUltimoItem_() { try { if (_ultimoItemEscaneadoId) localStorage.setItem('imp_ultimo_item', _ultimoItemEscaneadoId); else localStorage.removeItem('imp_ultimo_item'); } catch { } }
+
+        function sumarReposicion_(n, silent) {
+            if (!_ultimoItemEscaneadoId) {
+                if (!silent) showToast('❌ Primero escanea el item dañado, luego el código de reposición', 5000);
+                return false;
+            }
+            const idx = orders.findIndex(o => o.id === _ultimoItemEscaneadoId);
+            if (idx < 0) {
+                if (!silent) showToast('❌ La última orden escaneada ya no está en el tablero', 5000);
+                return false;
+            }
+            const o = orders[idx];
+            const nuevoTotal = (+o.piezasDanadas || 0) + n;
+            orders[idx] = { ...o, piezasDanadas: nuevoTotal, piezasDanadasTs: Date.now() };
+            saveBoard();
+            render();
+            if (!silent) showToast('🔧 Reposición: +' + n + ' → ' + nuevoTotal + ' piezas dañadas en "' + o.titulo + '"', 6000);
+            return true;
+        }
+
+        function marcarEspera_(tipo, silent) {
+            if (!_ultimoItemEscaneadoId) {
+                if (!silent) showToast('❌ Primero escanea el item, luego el código de espera', 5000);
+                return false;
+            }
+            const idx = orders.findIndex(o => o.id === _ultimoItemEscaneadoId);
+            if (idx < 0) {
+                if (!silent) showToast('❌ La última orden escaneada ya no está en el tablero', 5000);
+                return false;
+            }
+            const o = orders[idx];
+            orders[idx] = { ...o, esperandoPieza: tipo, esperandoPiezaTs: Date.now() };
+            saveBoard();
+            render();
+            if (!silent) showToast('⏳ "' + o.titulo + '" marcada esperando ' + (tipo === 'portada' ? 'portada' : 'interior'), 6000);
+            return true;
+        }
+
+        function resolverEspera_(ordId) {
+            const idx = orders.findIndex(o => o.id === ordId);
+            if (idx < 0) return;
+            const o = { ...orders[idx] };
+            delete o.esperandoPieza; delete o.esperandoPiezaTs;
+            orders[idx] = o;
+            saveBoard(); render();
+        }
+        function resolverReposicion_(ordId) {
+            const idx = orders.findIndex(o => o.id === ordId);
+            if (idx < 0) return;
+            const o = { ...orders[idx] };
+            delete o.piezasDanadas; delete o.piezasDanadasTs;
+            orders[idx] = o;
+            saveBoard(); render();
+        }
+
         // Suma N piezas a la orden que se está contando actualmente. Solo informa el avance —
         // NUNCA avanza la orden a Listo sola, ni siquiera al llegar exacto a la cantidad total;
         // eso se sigue confirmando aparte (escaneo/arrastre/botón), igual que cualquier otro
@@ -4803,6 +4887,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             if (PIEZAS_SCAN_CODES.hasOwnProperty(raw2)) return sumarPiezasEmpaque_(PIEZAS_SCAN_CODES[raw2], silent);
             // ── -1c. Códigos genéricos de inventario de tóner (coincidencia exacta) ──
             if (TONER_SCAN_CODES.hasOwnProperty(raw2)) { const t = TONER_SCAN_CODES[raw2]; return ajustarToner_(t.key, t.delta, silent); }
+            // ── -1d. Códigos de reposición / esperando portada-interior (coincidencia exacta) ──
+            if (REP_SCAN_CODES.hasOwnProperty(raw2)) return sumarReposicion_(REP_SCAN_CODES[raw2], silent);
+            if (ESPERA_SCAN_CODES.hasOwnProperty(raw2)) return marcarEspera_(ESPERA_SCAN_CODES[raw2], silent);
             // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
             const logPre = SCAN_LOG_PRE.find(p => raw2.startsWith(p));
             if (logPre) { sendScanToSheets(raw2); return true; }
@@ -4891,6 +4978,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             }
 
             const procLabel = proc ? proc.label : (ACAB_STEPS.find(s => s.id === matches[0].etapa)?.label || matches[0].etapa);
+
+            // Marca esta orden como la última escaneada con éxito — los códigos de
+            // reposición/esperando portada-interior (ver arriba) se aplican a ella.
+            _ultimoItemEscaneadoId = matches[0].id;
+            saveUltimoItem_();
 
             // ── 4. INICIA / PAUSA / REANUDA ─────────────────────────────
             if (isInicio) {
