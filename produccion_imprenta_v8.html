@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.29';
+        const APP_VERSION = 'v9.30';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -5048,7 +5048,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     const ex = _scanTimers[timerKey];
                     if (!ex) {
                         // Primera vez: inicia timer y mueve a la etapa
-                        _scanTimers[timerKey] = { start: Date.now(), acc: 0, paused: false };
+                        // Máquina/persona activas al INICIAR — son las que de verdad hicieron el
+                        // trabajo (si alguien cambia de contexto antes del "Pasa", no se pierde).
+                        _scanTimers[timerKey] = { start: Date.now(), acc: 0, paused: false, maquinaFisica: _maquinaActual, persona: _personaActual };
                         if (proc && proc.etapa) {
                             const idx = orders.findIndex(x => x.id === o.id);
                             orders[idx] = { ...orders[idx], etapa: proc.etapa };
@@ -5058,11 +5060,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                         actionLabel = '⏱ Iniciando'; actionColor = '#60a5fa';
                     } else if (!ex.paused) {
                         // Timer corriendo → pausar
-                        _scanTimers[timerKey] = { start: null, acc: ex.acc + (Date.now() - ex.start), paused: true };
+                        _scanTimers[timerKey] = { ...ex, start: null, acc: ex.acc + (Date.now() - ex.start), paused: true };
                         actionLabel = '⏸ Pausado'; actionColor = '#f59e0b';
                     } else {
                         // Timer pausado → reanudar
-                        _scanTimers[timerKey] = { start: Date.now(), acc: ex.acc, paused: false };
+                        _scanTimers[timerKey] = { ...ex, start: Date.now(), acc: ex.acc, paused: false };
                         actionLabel = '▶ Continuando'; actionColor = '#4ade80';
                     }
                     // Conteo de piezas en Empaque: escanear el código de Empaque con "Inicia"
@@ -5113,10 +5115,14 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                         : tm.paused ? tm.acc : tm.acc + (Date.now() - tm.start);
                     const mins = Math.round(totalMs / 60000);
                     const ts = Date.now();
+                    // Máquina física / persona (v9.29) — base para calibrar por máquina individual
+                    // y no solo por tipo de paso. Timers viejos (sin el dato) caen al contexto actual.
+                    const maquinaFisica = (typeof tm === 'object' && tm.maquinaFisica) || _maquinaActual || '';
+                    const persona = (typeof tm === 'object' && tm.persona) || _personaActual || '';
                     const tiempos = [...(oActual.tiemposReales || [])];
-                    tiempos.push({ etapa: fromEtapa, label: procLabel, mins, ts });
+                    tiempos.push({ etapa: fromEtapa, label: procLabel, mins, ts, maquinaFisica, persona });
                     orders[idx] = { ...orders[idx], tiemposReales: tiempos };
-                    statsHistory.push({ ordId: oActual.id, titulo: oActual.titulo || oActual.baseTitulo || oActual.id, etapa: fromEtapa, label: procLabel, mins, cantidad: oActual.cantidad || 0, hojas: oActual.tabloidesSrc || 0, paginas: oActual.paginas || 0, gramaje: oActual.gramaje || '', tipoInteriores: oActual.tipoInteriores || '', tamano: oActual.tamano || '', maquina: oActual.maquina || '', ts });
+                    statsHistory.push({ ordId: oActual.id, titulo: oActual.titulo || oActual.baseTitulo || oActual.id, etapa: fromEtapa, label: procLabel, mins, cantidad: oActual.cantidad || 0, hojas: oActual.tabloidesSrc || 0, paginas: oActual.paginas || 0, gramaje: oActual.gramaje || '', tipoInteriores: oActual.tipoInteriores || '', tamano: oActual.tamano || '', maquina: oActual.maquina || '', maquinaFisica, persona, ts });
                     statsHistory = trimByAge(statsHistory, cfg.retencionStatsMeses);
                     autoCalibrate();
                     delete _scanTimers[timerKey];
