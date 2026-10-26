@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.28';
+        const APP_VERSION = 'v9.29';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1063,9 +1063,9 @@
 
         // Historial de movimientos por orden — de dónde a dónde, cómo y cuándo.
         // Sin "quién" a propósito (evita pedirle nombre a cada persona en cada escaneo).
-        function logMove(o, from, to, mecanismo) {
+        function logMove(o, from, to, mecanismo, extra) {
             if (!from || !to || from === to) return;
-            moveLog.unshift({ ordId: o.id, titulo: o.titulo || o.baseTitulo || o.id, from, to, mecanismo, ts: Date.now() });
+            moveLog.unshift({ ordId: o.id, titulo: o.titulo || o.baseTitulo || o.id, from, to, mecanismo, ts: Date.now(), ...(extra || {}) });
             if (moveLog.length > 3000) moveLog = moveLog.slice(0, 3000);
         }
 
@@ -2584,6 +2584,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
           const listo = tot > 0 && cont >= tot;
           return `<div title="Conteo de piezas en Empaque — escanea los códigos EPZ1/EPZ5.../EPZ10 de la hoja para sumar" style="display:flex;align-items:center;gap:5px;background:${listo ? '#0a1f0a' : '#1e293b'};border:1px solid ${listo ? '#166534' : '#334155'};border-radius:8px;padding:5px 10px;font-size:11px;color:${listo ? '#4ade80' : '#60a5fa'};white-space:nowrap;cursor:default">📦 ${e(oc.titulo.substring(0, 18))}: ${cont}/${tot || '?'}</div>`;
       })()}
+      ${(_maquinaActual || _personaActual) ? `<div title="Máquina/persona activa — se aplica a cada item que escanees hasta que cambies de código. Click para quitar" onclick="limpiarContextoMaqPersona_()" style="display:flex;align-items:center;gap:5px;background:#1a0b2e;border:1px solid #5b21b6;border-radius:8px;padding:5px 10px;font-size:11px;color:#c084fc;white-space:nowrap;cursor:pointer">
+        ${_personaActual ? '👤 ' + e(_personaActual) : ''}${_personaActual && _maquinaActual ? ' · ' : ''}${_maquinaActual ? '🏭 ' + e(_maquinaActual) : ''} ✕
+      </div>` : ''}
       <button class="btn btn-p" onclick="openNew()" style="white-space:nowrap">+ Nueva Orden</button>
     </div>`;
         }
@@ -3673,7 +3676,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             <td style="padding:3px 6px;text-align:right">Cuándo</td>
           </tr>
           ${moves.map(m => `<tr style="border-top:1px solid #0f172a">
-            <td style="padding:4px 6px;color:#94a3b8">${e(etLabel(m.from))} → <b style="color:#f1f5f9">${e(etLabel(m.to))}</b></td>
+            <td style="padding:4px 6px;color:#94a3b8">${e(etLabel(m.from))} → <b style="color:#f1f5f9">${e(etLabel(m.to))}</b>${(m.persona || m.maquina) ? `<div style="font-size:10px;color:#c084fc;margin-top:1px">${m.persona ? '👤 ' + e(m.persona) : ''}${m.persona && m.maquina ? ' · ' : ''}${m.maquina ? '🏭 ' + e(m.maquina) : ''}</div>` : ''}</td>
             <td style="padding:4px 6px;color:#64748b">${mecIcon[m.mecanismo] || ''} ${e(m.mecanismo)}</td>
             <td style="padding:4px 6px;text-align:right;color:#475569;white-space:nowrap">${new Date(m.ts).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
           </tr>`).join('')}
@@ -4765,6 +4768,55 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             saveBoard(); render();
         }
 
+        // ── Máquina y persona activas en Acabados (2026-10-26, a pedido de Kevin) ───────
+        // A diferencia de reposición/espera (que marcan UNA orden), estos códigos quedan
+        // "pegados" como contexto hasta que se escanea otro de su mismo tipo — el operador
+        // escanea su código de persona y el de la máquina UNA vez (al empezar turno o al
+        // cambiar de máquina/estación), y de ahí en adelante cada item que escanee en
+        // cualquier estación lleva ese (máquina, persona) en su historial de movimientos.
+        // Esto permite que varias personas compartan un mismo escáner (ej. 3 en Pegado) o
+        // que una persona use distintas máquinas (ej. Plastificado) sin escanear nada extra
+        // por cada item — solo cuando cambia la persona o la máquina.
+        const MACHINE_SCAN_CODES = {
+            'MQONEMING': 'One Ming (Plastificado)', 'MQKOMFI': 'Komfi (Plastificado)',
+            'MQVANSTA': 'Vansta (Plastificado)', 'MQMATRIX': 'Matrix (Plastificado)',
+            'MQPEG1': 'Pegadora 1', 'MQPEG2': 'Pegadora 2', 'MQPEG3': 'Pegadora 3',
+            'MQPEG4': 'Pegadora 4', 'MQPEGCH': 'Pegadora chica',
+            'MQGUI1': 'Guillotina 1 (Corte Final)', 'MQGUI2': 'Guillotina 2 (Corte Final)',
+            'MQCHALLENGE': 'Challenge (Corte Inicial)', 'MQGUI3': 'Guillotina 3 (Corte Inicial)',
+            'MQTERMO1': 'Termo 1', 'MQTERMO2': 'Termo 2',
+            'MQENG1': 'Engrapadora 1', 'MQENG2': 'Engrapadora 2',
+            'MQMEMP1': 'Mesa de Empaque 1', 'MQMEMP2': 'Mesa de Empaque 2',
+            'MQMPD1': 'Mesa de Pasta Dura 1', 'MQMPD2': 'Mesa de Pasta Dura 2', 'MQMPD3': 'Mesa de Pasta Dura 3',
+        };
+        const PERSON_SCAN_CODES = {
+            'OPCHUY': 'Chuy', 'OPMALY': 'Maly', 'OPDIANA': 'Diana', 'OPVANE': 'Vane', 'OPLAU': 'Lau',
+            'OPVERO': 'Vero', 'OPBELEM': 'Belem', 'OPGABRIEL': 'Gabriel', 'OPFATIMA': 'Fatima',
+            'OPANDREA': 'Andrea', 'OPAISHA': 'Aisha', 'OPFERNANDA': 'Fernanda', 'OPMAYTE': 'Mayte',
+        };
+        let _maquinaActual = null, _personaActual = null;
+        try {
+            _maquinaActual = localStorage.getItem('imp_maquina_activa') || null;
+            _personaActual = localStorage.getItem('imp_persona_activa') || null;
+        } catch { }
+        function saveContexto_() {
+            try {
+                if (_maquinaActual) localStorage.setItem('imp_maquina_activa', _maquinaActual); else localStorage.removeItem('imp_maquina_activa');
+                if (_personaActual) localStorage.setItem('imp_persona_activa', _personaActual); else localStorage.removeItem('imp_persona_activa');
+            } catch { }
+        }
+        function activarMaquina_(nombre, silent) {
+            _maquinaActual = nombre; saveContexto_(); render();
+            if (!silent) showToast('🏭 Máquina activa: ' + nombre, 4000);
+            return true;
+        }
+        function activarPersona_(nombre, silent) {
+            _personaActual = nombre; saveContexto_(); render();
+            if (!silent) showToast('👤 Operador activo: ' + nombre, 4000);
+            return true;
+        }
+        function limpiarContextoMaqPersona_() { _maquinaActual = null; _personaActual = null; saveContexto_(); render(); }
+
         // Suma N piezas a la orden que se está contando actualmente. Solo informa el avance —
         // NUNCA avanza la orden a Listo sola, ni siquiera al llegar exacto a la cantidad total;
         // eso se sigue confirmando aparte (escaneo/arrastre/botón), igual que cualquier otro
@@ -4890,6 +4942,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             // ── -1d. Códigos de reposición / esperando portada-interior (coincidencia exacta) ──
             if (REP_SCAN_CODES.hasOwnProperty(raw2)) return sumarReposicion_(REP_SCAN_CODES[raw2], silent);
             if (ESPERA_SCAN_CODES.hasOwnProperty(raw2)) return marcarEspera_(ESPERA_SCAN_CODES[raw2], silent);
+            // ── -1e. Códigos de máquina / persona activa (coincidencia exacta) ──
+            if (MACHINE_SCAN_CODES.hasOwnProperty(raw2)) return activarMaquina_(MACHINE_SCAN_CODES[raw2], silent);
+            if (PERSON_SCAN_CODES.hasOwnProperty(raw2)) return activarPersona_(PERSON_SCAN_CODES[raw2], silent);
             // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
             const logPre = SCAN_LOG_PRE.find(p => raw2.startsWith(p));
             if (logPre) { sendScanToSheets(raw2); return true; }
@@ -4998,7 +5053,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                             const idx = orders.findIndex(x => x.id === o.id);
                             orders[idx] = { ...orders[idx], etapa: proc.etapa };
                             etapaMap[o.id] = proc.etapa;
-                            logMove(o, o.etapa, proc.etapa, 'escaneo-inicio');
+                            logMove(o, o.etapa, proc.etapa, 'escaneo-inicio', { maquina: _maquinaActual, persona: _personaActual });
                         }
                         actionLabel = '⏱ Iniciando'; actionColor = '#60a5fa';
                     } else if (!ex.paused) {
@@ -5044,7 +5099,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 if (proc && proc.etapa && o.etapa !== proc.etapa) {
                     orders[idx] = { ...orders[idx], etapa: proc.etapa };
                     etapaMap[o.id] = proc.etapa;
-                    logMove(o, o.etapa, proc.etapa, 'escaneo');
+                    logMove(o, o.etapa, proc.etapa, 'escaneo', { maquina: _maquinaActual, persona: _personaActual });
                 }
                 const oActual = orders[idx];
                 const flow = [ETAPAS[0], ...getAcabFlow(oActual).map(sid => ACAB_STEPS.find(s => s.id === sid)).filter(Boolean), ETAPAS[1], ETAPAS[2]];
@@ -5076,7 +5131,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 }
                 orders[idx] = { ...orders[idx], etapa: nextStep.id };
                 etapaMap[o.id] = nextStep.id;
-                logMove(orders[idx], fromEtapa, nextStep.id, 'escaneo');
+                logMove(orders[idx], fromEtapa, nextStep.id, 'escaneo', { maquina: _maquinaActual, persona: _personaActual });
                 if (nextStep.id === 'listo') { delete etapaMap[o.id]; pushHistorial(orders[idx]); _tocoLogsFull = true; }
                 // Conteo de piezas en Empaque: arranca en 0 al entrar por escaneo; si la orden
                 // que se estaba contando avanza a otra etapa (ya se selló/movió), se suelta el
