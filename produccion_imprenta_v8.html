@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.31';
+        const APP_VERSION = 'v9.32';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -761,17 +761,23 @@
             // MACHINE_SCAN_CODES. "fisica" es el nombre exacto que guarda el escaneo en
             // statsHistory.maquinaFisica, y con eso factorMaquina_() calibra cada una por separado.
             // Se conservan los ids viejos donde ya existían (plast, ci1, peg1, cf1, engr, armd, termo).
-            { id: 'plast', label: 'One Ming', fisica: 'One Ming (Plastificado)', steps: ['pl'], grupo: '✂️ Acabados' },
-            { id: 'plast2', label: 'Komfi', fisica: 'Komfi (Plastificado)', steps: ['pl'], grupo: '✂️ Acabados' },
-            { id: 'plast3', label: 'Vansta', fisica: 'Vansta (Plastificado)', steps: ['pl'], grupo: '✂️ Acabados' },
-            { id: 'plast4', label: 'Matrix', fisica: 'Matrix (Plastificado)', steps: ['pl'], grupo: '✂️ Acabados' },
+            // v9.32 (confirmado por Kevin 2026-10-27):
+            // - carril: máquinas que NO corren al mismo tiempo (las 4 plastificadoras) — comparten
+            //   una sola línea de tiempo; el motor elige la más rápida, pero una a la vez.
+            // - soloManual: la Pegadora chica es para cosas que no son libros — el motor nunca
+            //   le manda libros solo, pero sus tiempos medidos sí cuentan en Personas y máquinas.
+            // - Pegadora 4 (la más nueva) hace solapas automáticas → ver candidatas_().
+            { id: 'plast', label: 'One Ming', fisica: 'One Ming (Plastificado)', carril: 'plast', steps: ['pl'], grupo: '✂️ Acabados' },
+            { id: 'plast2', label: 'Komfi', fisica: 'Komfi (Plastificado)', carril: 'plast', steps: ['pl'], grupo: '✂️ Acabados' },
+            { id: 'plast3', label: 'Vansta', fisica: 'Vansta (Plastificado)', carril: 'plast', steps: ['pl'], grupo: '✂️ Acabados' },
+            { id: 'plast4', label: 'Matrix', fisica: 'Matrix (Plastificado)', carril: 'plast', steps: ['pl'], grupo: '✂️ Acabados' },
             { id: 'ci1', label: 'Challenge', fisica: 'Challenge (Corte Inicial)', steps: ['ci', 'cp'], grupo: '✂️ Acabados' },
             { id: 'ci2', label: 'Guillotina 3', fisica: 'Guillotina 3 (Corte Inicial)', steps: ['ci', 'cp'], grupo: '✂️ Acabados' },
             { id: 'peg1', label: 'Pegadora 1', fisica: 'Pegadora 1', steps: ['pg'], grupo: '✂️ Acabados' },
             { id: 'peg2', label: 'Pegadora 2', fisica: 'Pegadora 2', steps: ['pg'], grupo: '✂️ Acabados' },
             { id: 'peg3', label: 'Pegadora 3', fisica: 'Pegadora 3', steps: ['pg'], grupo: '✂️ Acabados' },
             { id: 'peg4', label: 'Pegadora 4', fisica: 'Pegadora 4', steps: ['pg'], grupo: '✂️ Acabados' },
-            { id: 'pegch', label: 'Pegadora chica', fisica: 'Pegadora chica', steps: ['pg'], grupo: '✂️ Acabados' },
+            { id: 'pegch', label: 'Pegadora chica', fisica: 'Pegadora chica', soloManual: true, steps: ['pg'], grupo: '✂️ Acabados' },
             { id: 'cf1', label: 'Guillotina 1', fisica: 'Guillotina 1 (Corte Final)', steps: ['cf'], grupo: '✂️ Acabados' },
             { id: 'cf2', label: 'Guillotina 2', fisica: 'Guillotina 2 (Corte Final)', steps: ['cf'], grupo: '✂️ Acabados' },
             { id: 'ponch', label: 'Ponchadora', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
@@ -838,6 +844,16 @@
         // porque la fila seguía existiendo en la hoja de Google. Clave = grupoId (oculta INT+PORT
         // juntos) o id si no hay grupoId.
         let hiddenGroups = {};
+        // Notas escritas a mano por persona (v9.32, opcionales) — clave por clave en Firebase
+        // para que dos computadoras no se pisen (ver setHiddenGroup_).
+        let notasPersonas = {};
+        function keyPersona_(nombre) { return String(nombre).replace(/[.#$\[\]\/]/g, '_'); }
+        function setNotaPersona_(nombre, texto) {
+            const k = keyPersona_(nombre), v = String(texto || '').trim();
+            if (v) notasPersonas[k] = v; else delete notasPersonas[k];
+            const patch = {}; patch['notasPersonas/' + k] = v || null;
+            _ref.update(patch).catch(() => { });
+        }
         // setHiddenGroup_/removeHiddenGroup_ (2026-10-14): escriben SOLO esa clave en Firebase
         // (ruta "hiddenGroups/<key>"), no todo el objeto. Antes, agregar una orden a hiddenGroups
         // vivía nada más en memoria hasta el siguiente saveS()/saveBoard() — y esas dos funciones
@@ -924,6 +940,7 @@
                     else historial = Object.entries(rawH).filter(([k, v]) => v).map(([k, v]) => ({ ...v, _fbKey: k }));
                     etapaMap = data.etapaMap || {};
                     hiddenGroups = data.hiddenGroups || {};
+                    notasPersonas = data.notasPersonas || {};
                     // Restaurar órdenes manuales (union_results) guardadas en Firebase
                     const rawMO = data.manualOrders;
                     if (rawMO) {
@@ -1025,7 +1042,7 @@
             const machAvail = scheduleMachines(orders.filter(o => o.urgente), cfg).machAvail;
             const stepDisponibilidad = {};
             ESTIMADOR_STEPS.forEach(stepId => {
-                const cands = MAQUINAS.filter(m => m.steps.includes(stepId));
+                const cands = MAQUINAS.filter(m => m.steps.includes(stepId) && !m.soloManual);
                 if (!cands.length) return;
                 stepDisponibilidad[stepId] = Math.min(...cands.map(m => machAvail[m.id] || 0));
             });
@@ -1312,6 +1329,26 @@
         // ═══════════════════════════════════════════════════
         //  SCHEDULER PARA GANTT
         // ═══════════════════════════════════════════════════
+        // Máquinas a las que el motor puede mandar un paso de una orden — compartido entre el
+        // scheduler del Gantt y calcMachLoad_ para que nunca decidan distinto.
+        function tieneSolapas_(o) { return !!o.solapas || /solapa/i.test((o.notas || '') + ' ' + (o.titulo || '')); }
+        function candidatas_(o, stepId) {
+            let cands = MAQUINAS.filter(m => m.steps.includes(stepId) && !m.soloManual);
+            // Máquina asignada a mano (hoy solo impresión, desde el formulario de la orden)
+            if (o.maquina && o.maquina !== 'auto') {
+                const forced = cands.find(m => m.id === o.maquina);
+                if (forced) cands = [forced];
+            }
+            // Libros con solapas → Pegadora 4, que las hace automáticamente
+            if (stepId === 'pg' && tieneSolapas_(o)) {
+                const p4 = cands.find(m => m.id === 'peg4');
+                if (p4) cands = [p4];
+            }
+            return cands;
+        }
+        // Máquinas que comparten línea de tiempo con m (mismo carril), incluida ella misma.
+        function mismoCarril_(m) { return m.carril ? MAQUINAS.filter(x => x.carril === m.carril) : [m]; }
+
         // ── Velocidad por máquina física (v9.31) ─────────────────────────────────────
         // cfg.maq calibra por TIPO de paso (todas las pegadoras igual). Esto compara cada
         // máquina contra las demás del mismo paso: minutos por unidad (hojas en Plastificado/
@@ -1408,15 +1445,9 @@
                 const PORT_IDS = ['ip', 'pl', 'cp', 'cc', 'ap', 'pp'];
                 const JOIN_IDS = ['pg', 'cf', 'ms', 'en', 'es', 'te'];
                 remaining.forEach(step => {
-                    let cands = MAQUINAS.filter(m => m.steps.includes(step.id));
+                    // Respeta máquina asignada a mano, solapas → Pegadora 4, etc. (candidatas_)
+                    const cands = candidatas_(o, step.id);
                     if (!cands.length) return;
-                    // Si la orden ya tiene máquina de impresión asignada (no 'auto'), respetarla:
-                    // antes el scheduler igual la mandaba a la que estuviera menos ocupada entre
-                    // OCE/Titan o entre las 4 de color, aunque Kevin ya hubiera elegido una específica.
-                    if (o.maquina && o.maquina !== 'auto') {
-                        const forced = cands.find(m => m.id === o.maquina);
-                        if (forced) cands = [forced];
-                    }
 
                     // Grupos hermanos en pasos de unión: reutilizar el slot del líder, no crear nueva barra
                     if (JOIN_STEPS.has(step.id) && buddyKey[o.id]) {
@@ -1445,7 +1476,7 @@
                         earliest = Math.max(earliest, groupPreJoinMin[buddyKey[o.id]] || 0);
                     }
                     const start = earliest, end = start + Math.round(durEn(mach));
-                    machAvail[mach.id] = end;
+                    mismoCarril_(mach).forEach(m => { machAvail[m.id] = end; });
                     if (INT_IDS.includes(step.id)) ordState[o.id].intEnd = Math.max(ordState[o.id].intEnd, end);
                     if (PORT_IDS.includes(step.id)) ordState[o.id].portEnd = Math.max(ordState[o.id].portEnd, end);
                     if (JOIN_IDS.includes(step.id) || !INT_IDS.includes(step.id) && !PORT_IDS.includes(step.id)) ordState[o.id].mainEnd = Math.max(ordState[o.id].mainEnd, end);
@@ -1591,6 +1622,7 @@
                 fechaLimite: parseDMDate(entrega),
                 etapa, urgente: urg.toLowerCase().includes('urgente'),
                 notas: desc.substring(0, 120),
+                solapas: /solapa/i.test(desc),
                 _fromSheets: true, _listoInSheets: listo, idDm,
                 fechaCreacion: new Date().toISOString().split('T')[0],
             };
@@ -3033,6 +3065,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
               <td style="padding:4px 0;text-align:right;white-space:nowrap">${pct(x.n, x.rel)}</td>
             </tr>`).join('')}
           </table>` : ''}
+          <textarea class="inp" rows="1" placeholder="Notas (opcional)" style="margin-top:8px;resize:vertical;font-size:12px" onchange="setNotaPersona_('${e(p.nombre).replace(/'/g, "\\'")}', this.value)">${e(notasPersonas[keyPersona_(p.nombre)] || '')}</textarea>
         </div>`;
             const factores = factoresMaquina_();
             const maqRows = MAQUINAS.filter(m => m.fisica).map(m => {
@@ -3877,21 +3910,18 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 // pasos de su flujo completo (calcT trae el flujo entero, no lo ya hecho), así que
                 // una orden ya en Corte Final seguía apareciendo con tiempo pendiente de Pegado.
                 pasosRestantes_(o, calcT(o, cfg)).forEach(p => {
-                    let cands = MAQUINAS.filter(m => m.steps.includes(p.id));
+                    // Si la orden ya tiene máquina asignada (no 'auto'), todo su tiempo va ahí —
+                    // antes se repartía entre TODAS las capaces aunque ya se supiera cuál la iba a
+                    // correr. Misma regla que el Gantt, vía candidatas_().
+                    const cands = candidatas_(o, p.id);
                     if (!cands.length) return;
-                    // Si la orden ya tiene máquina de impresión asignada (no 'auto'), todo su
-                    // tiempo va ahí — antes se repartía a partes iguales entre TODAS las máquinas
-                    // capaces del mismo tipo (ej. entre las 4 de color) aunque ya se supiera cuál
-                    // la iba a correr, lo que inflaba la carga de las otras 3 sin motivo.
-                    if (o.maquina && o.maquina !== 'auto') {
-                        const forced = cands.find(m => m.id === o.maquina);
-                        if (forced) cands = [forced];
-                    }
                     // Entre las candidatas restantes (o cuando no hay máquina fija, ej. acabados),
                     // todo el paso cae en la que tenga MENOS carga acumulada hasta el momento —
                     // mismo criterio "menos ocupada" que usa el scheduler del Gantt — en vez de
                     // fraccionar el minutaje entre varias máquinas que en la práctica no lo corren.
-                    const mach = cands.reduce((best, m) => machLoad[m.id].pendMin < machLoad[best.id].pendMin ? m : best);
+                    // Carril compartido (plastificadoras): la carga que cuenta es la de todo el carril.
+                    const cargaDe = m => mismoCarril_(m).reduce((t, x) => t + machLoad[x.id].pendMin, 0) + p.min * factorMaquina_(m.id, p.id);
+                    const mach = cands.reduce((best, m) => cargaDe(m) < cargaDe(best) ? m : best);
                     machLoad[mach.id].pendMin += p.min * factorMaquina_(mach.id, p.id);
                     machLoad[mach.id].ords.add(o.id);
                 });
@@ -4018,7 +4048,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 return `<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px;letter-spacing:.05em">${grIc} ${grLbl}</div>${rows}</div>`;
             }).join('');
             const totalPendMin = Object.values(machLoad).reduce((s, v) => s + v.pendMin, 0);
-            const totalCapMin = MAQUINAS.length * capDia;
+            const totalCapMin = new Set(MAQUINAS.filter(m => !m.soloManual).map(m => m.carril || m.id)).size * capDia;
             const globalPct = Math.round(totalPendMin / totalCapMin * 100);
             const globalCo = globalPct >= 80 ? '#ef4444' : globalPct >= 50 ? '#f59e0b' : '#22c55e';
 
