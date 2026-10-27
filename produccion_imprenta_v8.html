@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.32';
+        const APP_VERSION = 'v9.33';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -762,15 +762,17 @@
             // statsHistory.maquinaFisica, y con eso factorMaquina_() calibra cada una por separado.
             // Se conservan los ids viejos donde ya existían (plast, ci1, peg1, cf1, engr, armd, termo).
             // v9.32 (confirmado por Kevin 2026-10-27):
-            // - carril: máquinas que NO corren al mismo tiempo (las 4 plastificadoras) — comparten
-            //   una sola línea de tiempo; el motor elige la más rápida, pero una a la vez.
+            // - carril (opcional): máquinas que NO pueden correr al mismo tiempo comparten una
+            //   sola línea de tiempo. Hoy ninguna lo usa — las 4 plastificadoras sí pueden correr
+            //   juntas (corregido por Kevin en v9.33). La Komfi va PRIMERO en la lista: es la
+            //   mejor y la más usada, y en empate (o sin datos) el motor elige la primera.
             // - soloManual: la Pegadora chica es para cosas que no son libros — el motor nunca
             //   le manda libros solo, pero sus tiempos medidos sí cuentan en Personas y máquinas.
             // - Pegadora 4 (la más nueva) hace solapas automáticas → ver candidatas_().
-            { id: 'plast', label: 'One Ming', fisica: 'One Ming (Plastificado)', carril: 'plast', steps: ['pl'], grupo: '✂️ Acabados' },
-            { id: 'plast2', label: 'Komfi', fisica: 'Komfi (Plastificado)', carril: 'plast', steps: ['pl'], grupo: '✂️ Acabados' },
-            { id: 'plast3', label: 'Vansta', fisica: 'Vansta (Plastificado)', carril: 'plast', steps: ['pl'], grupo: '✂️ Acabados' },
-            { id: 'plast4', label: 'Matrix', fisica: 'Matrix (Plastificado)', carril: 'plast', steps: ['pl'], grupo: '✂️ Acabados' },
+            { id: 'plast2', label: 'Komfi', fisica: 'Komfi (Plastificado)', steps: ['pl'], grupo: '✂️ Acabados' },
+            { id: 'plast', label: 'One Ming', fisica: 'One Ming (Plastificado)', steps: ['pl'], grupo: '✂️ Acabados' },
+            { id: 'plast3', label: 'Vansta', fisica: 'Vansta (Plastificado)', steps: ['pl'], grupo: '✂️ Acabados' },
+            { id: 'plast4', label: 'Matrix', fisica: 'Matrix (Plastificado)', steps: ['pl'], grupo: '✂️ Acabados' },
             { id: 'ci1', label: 'Challenge', fisica: 'Challenge (Corte Inicial)', steps: ['ci', 'cp'], grupo: '✂️ Acabados' },
             { id: 'ci2', label: 'Guillotina 3', fisica: 'Guillotina 3 (Corte Inicial)', steps: ['ci', 'cp'], grupo: '✂️ Acabados' },
             { id: 'peg1', label: 'Pegadora 1', fisica: 'Pegadora 1', steps: ['pg'], grupo: '✂️ Acabados' },
