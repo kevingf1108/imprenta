@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.33';
+        const APP_VERSION = 'v9.34';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -3089,9 +3089,65 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       </div>`;
         }
 
+        // ── Stats: lo que hizo cada persona (v9.34, a pedido de Kevin) ─────────────────
+        // Todo movimiento escaneado con un operador activo (código OP, v9.29) queda en moveLog
+        // con persona/máquina — aquí se lista completo, filtrable por persona y por rango. Si
+        // ese movimiento cerró un timer (Inicia → Pasa), se muestra cuánto tardó.
+        let statsPersona = '', statsRangoDias = 7;
+        function setStatsPersona_(v) { statsPersona = v; render(); }
+        function setStatsRango_(d) { statsRangoDias = d; render(); }
+        function actividadPersonasHTML() {
+            const desde = statsRangoDias ? (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() - (statsRangoDias - 1) * 86400000; })() : 0;
+            const todos = moveLog.filter(m => m.persona && (m.ts || 0) >= desde);
+            const personas = [...new Set(todos.map(m => m.persona))].sort();
+            const movs = todos.filter(m => !statsPersona || m.persona === statsPersona).sort((a, b) => b.ts - a.ts);
+            const minsDe = m => {
+                const r = statsHistory.find(r => r.ordId === m.ordId && r.etapa === m.from && Math.abs((r.ts || 0) - m.ts) < 60000);
+                return r ? r.mins : null;
+            };
+            const filas = movs.map(m => ({ ...m, mins: minsDe(m) }));
+            const resumen = personas.filter(p => !statsPersona || p === statsPersona).map(p => {
+                const fs = filas.filter(f => f.persona === p);
+                return { p, n: fs.length, ords: new Set(fs.map(f => f.ordId)).size, mins: fs.reduce((t, f) => t + (f.mins || 0), 0) };
+            });
+            const btn = (on, txt, js) => `<button onclick="${js}" style="padding:5px 12px;border-radius:8px;border:1px solid ${on ? '#7c3aed' : '#334155'};background:${on ? '#2e1065' : '#0f172a'};color:${on ? '#e9d5ff' : '#94a3b8'};font-size:12px;font-weight:600;cursor:pointer">${txt}</button>`;
+            const lbl = id => e(etOf(id).label);
+            const MAX = 300;
+            return `<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:16px">
+          <div style="font-size:15px;font-weight:700;color:#f1f5f9">👤 Lo que hizo cada persona</div>
+          <div style="font-size:11px;color:#64748b;margin:3px 0 10px">Cada escaneo hecho con un código de persona (OP…) activo. El tiempo aparece cuando se escaneó Inicia y luego Pasa.</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+            ${[[1, 'Hoy'], [7, '7 días'], [30, '30 días'], [0, 'Todo']].map(([d, t]) => btn(statsRangoDias === d, t, `setStatsRango_(${d})`)).join('')}
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+            ${btn(!statsPersona, 'Todas', "setStatsPersona_('')")}
+            ${personas.map(p => btn(statsPersona === p, e(p), `setStatsPersona_('${e(p).replace(/'/g, "\\'")}')`)).join('')}
+          </div>
+          ${!filas.length ? `<div style="font-size:13px;color:#475569;padding:14px 0">Sin escaneos con persona en este rango todavía.</div>` : `
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            ${resumen.map(r => `<div style="background:#0f172a;border-radius:8px;padding:8px 12px;font-size:12px;color:#94a3b8"><b style="color:#e9d5ff">${e(r.p)}</b> · ${r.n} escaneo${r.n === 1 ? '' : 's'} · ${r.ords} orden${r.ords === 1 ? '' : 'es'}${r.mins ? ' · ' + mStr(r.mins) + ' medidos' : ''}</div>`).join('')}
+          </div>
+          <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+            <tr style="color:#475569;font-size:11px">
+              <td style="padding:4px 8px">Cuándo</td><td style="padding:4px 8px">Persona</td><td style="padding:4px 8px">Orden</td>
+              <td style="padding:4px 8px">Movimiento</td><td style="padding:4px 8px">Máquina</td><td style="padding:4px 8px;text-align:right">Tiempo</td>
+            </tr>
+            ${filas.slice(0, MAX).map(f => `<tr style="border-top:1px solid #0f172a">
+              <td style="padding:5px 8px;color:#64748b;white-space:nowrap">${new Date(f.ts).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+              <td style="padding:5px 8px;color:#e9d5ff;white-space:nowrap">${e(f.persona)}</td>
+              <td style="padding:5px 8px;color:#f1f5f9;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e(f.titulo)}">${e(String(f.titulo || f.ordId).substring(0, 30))}</td>
+              <td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">${lbl(f.from)} → <b style="color:#f1f5f9">${lbl(f.to)}</b></td>
+              <td style="padding:5px 8px;color:#c084fc;white-space:nowrap">${e(f.maquina || '—')}</td>
+              <td style="padding:5px 8px;text-align:right;color:#60a5fa;white-space:nowrap">${f.mins != null ? f.mins + ' min' : '—'}</td>
+            </tr>`).join('')}
+          </table></div>
+          ${filas.length > MAX ? `<div style="font-size:11px;color:#475569;margin-top:6px">Mostrando los ${MAX} más recientes de ${filas.length} — elige una persona o un rango más corto para ver el resto.</div>` : ''}`}
+        </div>`;
+        }
+
         function statsHTML() {
             const rows = statsHistory.filter(r => r.mins && r.mins > 0);
-            if (!rows.length) return `<div style="padding:60px;text-align:center">
+            if (!rows.length) return `<div style="padding:20px;max-width:1100px;margin:0 auto">${actividadPersonasHTML()}</div><div style="padding:60px;text-align:center">
         <div style="font-size:48px;margin-bottom:16px">⏱</div>
         <div style="font-size:18px;font-weight:700;color:#64748b">Sin datos de escaneo aún</div>
         <div style="font-size:13px;color:#475569;margin-top:8px">Escanea órdenes con <b style="color:#4ade80">I</b> (inicio) y <b style="color:#f59e0b">P</b> (fin) para registrar tiempos reales por estación</div>
@@ -3408,6 +3464,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             return `<div style="padding:20px;max-width:1100px;margin:0 auto">
         <h2 style="font-size:20px;font-weight:800;margin-bottom:4px">⏱ Stats de Producción</h2>
         <div style="font-size:13px;color:#475569;margin-bottom:12px">Rendimiento real por estación — registrado con el escáner</div>
+        ${actividadPersonasHTML()}
         ${metricsBlock}
         ${motorBlock}
         ${calibBar}
