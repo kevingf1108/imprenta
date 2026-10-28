@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.36';
+        const APP_VERSION = 'v9.37';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -798,6 +798,7 @@
         const CFG0 = {
             nombreImprenta: 'Mi Imprenta', horasDia: 10, startHour: 8, pptDefault: 8, portaPptDefault: 2,
             bufferFactor: 1.3, calibRangeMin: 0.5, calibRangeMax: 2.0,
+            diasColchon: 3, // días HÁBILES extra que tiene una orden NO urgente después de su fecha (la fecha es estimada)
             scriptUrl: '', // URL del Google Apps Script Web App para marcar Listo en Sheets
             scriptToken: '', // Clave secreta — debe coincidir con la constante TOKEN dentro del Apps Script
             feriados: [], // Fechas 'YYYY-MM-DD' que no cuentan como día hábil al calcular entregas
@@ -1060,7 +1061,7 @@
         }
         function pushHistorial(o) {
             if (historial.find(h => h.id === o.id && h.ts && Date.now() - h.ts < 5000)) return;
-            const entry = { id: o.id, titulo: o.titulo || o.baseTitulo || o.id, cliente: o.cliente || '', cantidad: o.cantidad || 0, tipoEncuadernacion: o.tipoEncuadernacion || '', fechaLimite: o.fechaLimite || '', fechaCreacion: o.fechaCreacion || '', etaPredicha: o.etaPredicha || '', ts: Date.now() };
+            const entry = { id: o.id, titulo: o.titulo || o.baseTitulo || o.id, cliente: o.cliente || '', cantidad: o.cantidad || 0, tipoEncuadernacion: o.tipoEncuadernacion || '', fechaLimite: o.fechaLimite || '', urgente: !!o.urgente, fechaCreacion: o.fechaCreacion || '', etaPredicha: o.etaPredicha || '', ts: Date.now() };
             // push() en vez de reenviar todo el arreglo (ver nota en loadS()) — cada entrada se
             // agrega con su propia clave de Firebase, así otra pestaña con historial viejo en
             // memoria no puede borrarla sin querer al guardar algo suyo después.
@@ -1144,7 +1145,27 @@
             }
             return dt;
         }
-        function prioSort(a, b) { const fa = a.fechaLimite || 'z', fb = b.fechaLimite || 'z'; if (fa !== fb) return fa < fb ? -1 : 1; if (a.urgente !== b.urgente) return a.urgente ? -1 : 1; return 0; }
+        // Fecha con la que de verdad se mide si una orden va tarde (v9.37, a pedido de Kevin):
+        // en una orden NO urgente la fecha de la hoja es estimada — tiene cfg.diasColchon días
+        // hábiles extra (3 por defecto). Una URGENTE sale el día exacto, sin colchón.
+        // o.fechaLimite NO se toca (sigue siendo la fecha que viene de Sheets/Docket Manager).
+        function fechaCompromiso_(o) {
+            if (!o || !o.fechaLimite) return (o && o.fechaLimite) || '';
+            const dias = cfg.diasColchon ?? 3;
+            if (o.urgente || !(dias > 0)) return o.fechaLimite;
+            return ymdLocal(diaLaboralN_(new Date(o.fechaLimite + 'T12:00:00'), dias));
+        }
+        // Urgente que sale hoy (o ya debió salir): va antes que cualquier no urgente, aunque ésta
+        // ya esté pasada de su colchón — las urgencias tienen que salir ese día.
+        function urgenteDeHoy_(o) { return !!(o.urgente && o.fechaLimite && o.fechaLimite <= ymdLocal(new Date())); }
+        function prioSort(a, b) {
+            const ua = urgenteDeHoy_(a), ub = urgenteDeHoy_(b);
+            if (ua !== ub) return ua ? -1 : 1;
+            const fa = fechaCompromiso_(a) || 'z', fb = fechaCompromiso_(b) || 'z';
+            if (fa !== fb) return fa < fb ? -1 : 1;
+            if (a.urgente !== b.urgente) return a.urgente ? -1 : 1;
+            return 0;
+        }
         // Cuándo entró esta orden a su etapa ACTUAL — el registro más reciente en moveLog con
         // ese destino (moveLog guarda lo más nuevo primero, así que el primer match ya es el
         // correcto). moveLog se sincroniza por Firebase (a diferencia de _scanTimers, que es
@@ -1496,7 +1517,7 @@
                     blocks.push({
                         ordId: barOrdId, titulo: barTitulo, cliente: o.cliente, tipo: o.tipo || 'normal',
                         stepId: step.id, stepNom: step.nom, machId: mach.id, machLabel: mach.label,
-                        start, end, dur: end - start, color, urgente: o.urgente, fechaLimite: o.fechaLimite,
+                        start, end, dur: end - start, color, urgente: o.urgente, fechaLimite: fechaCompromiso_(o),
                         buddyGroup: buddyKey[o.id] || null,
                         _isMuestra: o._isMuestra || false, _piezaSuelta: o._piezaSuelta || null,
                     });
@@ -2850,7 +2871,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 const fechaLimite = h.fechaLimite || null;
                 let onTime = null, diasDiff = null;
                 if (fechaLimite && completedTs) {
-                    diasDiff = Math.round((completedTs - new Date(fechaLimite + 'T23:59:59').getTime()) / 86400000);
+                    // A tiempo = antes de la fecha compromiso (con colchón si no era urgente).
+                    diasDiff = Math.round((completedTs - new Date(fechaCompromiso_(h) + 'T23:59:59').getTime()) / 86400000);
                     onTime = diasDiff <= 0;
                 }
                 // Qué tan acertado fue el motor: compara cuándo dijo que iba a estar lista
@@ -3651,7 +3673,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function soloImpresionHTML() { return vistaFiltradaHTML(o => o.etapa === 'impresion', '🖨️ Nada en Impresión ahorita'); }
         function soloAcabadosHTML() { return vistaFiltradaHTML(o => isAcabEtapa(o.etapa), '✂️ Nada en Acabados ahorita'); }
         function urgentesHTML() { return vistaFiltradaHTML(o => o.urgente, '✅ Sin órdenes urgentes'); }
-        function atrasadasHTML() { return vistaFiltradaHTML(o => isOD(o.fechaLimite), '✅ Nada atrasado ahorita'); }
+        function atrasadasHTML() { return vistaFiltradaHTML(o => isOD(fechaCompromiso_(o)), '✅ Nada atrasado ahorita'); }
         function colHTML(et, ei, etapas, finishMin, srcOrders) {
             srcOrders = srcOrders || orders;
             const allTotal = srcOrders.filter(o => o.etapa === et.id && !o._merged);
@@ -3694,7 +3716,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function cardHTML(o, et, ei, compact = false, etapas, prio, finishMin) {
             const t = calcT(o, cfg);
             const enc = encOf(o.tipoEncuadernacion);
-            const od = isOD(o.fechaLimite), sn = isSoon(o.fechaLimite);
+            const od = isOD(fechaCompromiso_(o)), sn = isSoon(fechaCompromiso_(o));
             const tipo = o.tipo || 'normal';
             const tipoBadge = tipo === 'int_sub' ? `<span class="badge" style="background:#818cf855;color:#818cf8">📄 INT</span>`
                 : tipo === 'port_sub' ? `<span class="badge" style="background:#c084fc55;color:#c084fc">🎨 PORT</span>`
@@ -3734,7 +3756,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     ${(() => {
                     const eta = calcETA(o, finishMin);
                     const etaStr = fDate(eta.toISOString().split('T')[0]);
-                    const late = o.fechaLimite && eta > new Date(o.fechaLimite + 'T23:59:59');
+                    const late = o.fechaLimite && eta > new Date(fechaCompromiso_(o) + 'T23:59:59');
                     const etaColor = late ? '#ef4444' : '#4ade80';
                     const dlColor = od ? '#ef4444' : sn ? '#f59e0b' : '#94a3b8';
                     const dlIcon = o.urgente ? '⚡' : od ? '🔴' : sn ? '🟡' : '📅';
@@ -3751,7 +3773,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:6px;padding-top:6px;border-top:1px solid #1e293b">
         <div style="background:#0f172a;border-radius:6px;padding:5px 8px">
           <div style="font-size:9px;color:#475569;margin-bottom:2px;font-weight:600">ENTREGAR</div>
-          <div style="font-size:12px;color:${dlColor};font-weight:700">${dlIcon} ${o.fechaLimite ? fDate(o.fechaLimite) : '—'}</div>
+          <div style="font-size:12px;color:${dlColor};font-weight:700">${dlIcon} ${o.fechaLimite ? fDate(o.fechaLimite) : '—'}${o.fechaLimite && fechaCompromiso_(o) !== o.fechaLimite ? `<span style="font-size:10px;color:#64748b;font-weight:600"> · hasta ${fDate(fechaCompromiso_(o))}</span>` : ''}</div>
         </div>
         <div style="background:#0f172a;border-radius:6px;padding:5px 8px;cursor:pointer" onclick="event.stopPropagation();showToast('${tip.replace(/'/g, "\\'")}',6000)">
           <div style="font-size:9px;color:#475569;margin-bottom:2px;font-weight:600">LISTO ~ ⓘ</div>
@@ -3991,8 +4013,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // en un solo vistazo al abrir la app. No reemplaza esas pestañas, las resume.
         function resumenDiaHTML() {
             const active = orders.filter(o => o.etapa !== 'listo' && !o._merged);
-            const od = active.filter(o => isOD(o.fechaLimite));
-            const sn = active.filter(o => isSoon(o.fechaLimite));
+            const od = active.filter(o => isOD(fechaCompromiso_(o)));
+            const sn = active.filter(o => isSoon(fechaCompromiso_(o)));
             const urg = active.filter(o => o.urgente);
             const hoy = new Date().toLocaleDateString('es', { weekday: 'long', day: '2-digit', month: 'long' });
 
@@ -4031,7 +4053,23 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const peorCo = peorPct >= 100 ? '#ef4444' : peorPct >= 70 ? '#f59e0b' : '#22c55e';
 
             // Próximas entregas — las 5 fechas límite más cercanas entre las activas.
-            const proximas = active.filter(o => o.fechaLimite).sort((a, b) => a.fechaLimite.localeCompare(b.fechaLimite)).slice(0, 5);
+            const proximas = active.filter(o => o.fechaLimite).sort((a, b) => fechaCompromiso_(a).localeCompare(fechaCompromiso_(b))).slice(0, 5);
+
+            // Urgencias (v9.37): cada urgente activa, con su fecha EXACTA (sin colchón) y si el
+            // motor calcula que llega — para que las urgencias sí salgan el día que tienen que salir.
+            const _fmUrg = urg.length ? scheduleMachines(orders, cfg).finishMin : {};
+            const urgFilas = urg.filter(o => o.fechaLimite).sort((a, b) => a.fechaLimite.localeCompare(b.fechaLimite)).map(o => {
+                const eta = calcETA(o, _fmUrg);
+                return { o, llega: eta <= new Date(o.fechaLimite + 'T23:59:59'), eta };
+            });
+            const urgNoLlegan = urgFilas.filter(f => !f.llega).length;
+            const urgHTML = urgFilas.length ? `<div style="background:${urgNoLlegan ? '#1a0a0a' : '#0f172a'};border:1px solid ${urgNoLlegan ? '#7f1d1d' : '#78350f'};border-radius:10px;padding:14px">
+      <div style="font-size:12px;font-weight:700;color:#fbbf24;margin-bottom:8px">⚡ Urgencias — salen el día exacto${urgNoLlegan ? ` · <span style="color:#f87171">${urgNoLlegan} no llega${urgNoLlegan === 1 ? '' : 'n'} a tiempo</span>` : ' · todas llegan'}</div>
+      ${urgFilas.map(({ o, llega, eta }) => `<div onclick="openOrd('${e(o.id)}')" style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid #1e293b;cursor:pointer;align-items:baseline">
+        <span style="font-size:12.5px;color:#f1f5f9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(o.titulo)} <span style="color:#64748b;font-size:11px">· ${e(etOf(o.etapa).label)}</span></span>
+        <span style="font-size:11.5px;flex:none;white-space:nowrap"><span style="color:#94a3b8">${o.fechaLimite === ymdLocal(new Date()) ? 'HOY' : fDate(o.fechaLimite)}</span> ${llega ? '<span style="color:#4ade80">✅ llega</span>' : `<span style="color:#f87171;font-weight:700">🔴 listo ~${fDate(ymdLocal(eta))}</span>`}</span>
+      </div>`).join('')}
+    </div>` : '';
 
             return `<div style="padding:16px;display:flex;flex-direction:column;gap:22px;max-width:920px">
     <div>
@@ -4040,6 +4078,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     </div>
 
     <div style="display:flex;gap:10px;flex-wrap:wrap">${kpiRow}</div>
+
+    ${urgHTML}
 
     ${(od.length || urg.length) ? `<div style="background:#1a0a0a;border:1px solid #7f1d1d;border-radius:10px;padding:14px">
       <div style="font-size:12px;font-weight:700;color:#f87171;margin-bottom:8px">🔴 Necesitan atención ahora</div>
@@ -4067,7 +4107,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:8px;letter-spacing:.05em">PRÓXIMAS ENTREGAS</div>
       ${proximas.map(o => `<div onclick="openOrd('${e(o.id)}')" style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid #1e293b;cursor:pointer">
         <span style="font-size:12.5px;color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(o.titulo)}</span>
-        <span style="font-size:11.5px;color:${isOD(o.fechaLimite) ? '#ef4444' : isSoon(o.fechaLimite) ? '#f59e0b' : '#94a3b8'};flex:none">${fDate(o.fechaLimite)}</span>
+        <span style="font-size:11.5px;color:${isOD(fechaCompromiso_(o)) ? '#ef4444' : isSoon(fechaCompromiso_(o)) ? '#f59e0b' : '#94a3b8'};flex:none">${fDate(o.fechaLimite)}</span>
       </div>`).join('')}
     </div>` : ''}
   </div>`;
@@ -4075,7 +4115,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function kpiHTML() {
             const active = orders.filter(o => o.etapa !== 'listo' && !o._merged);
             const done = orders.filter(o => o.etapa === 'listo' && !o._merged);
-            const urg = active.filter(o => o.urgente), od = active.filter(o => isOD(o.fechaLimite)), sn = active.filter(o => isSoon(o.fechaLimite));
+            const urg = active.filter(o => o.urgente), od = active.filter(o => isOD(fechaCompromiso_(o))), sn = active.filter(o => isSoon(fechaCompromiso_(o)));
             const totMin = active.reduce((s, o) => s + calcT(o, cfg).paralelo, 0), avg = active.length ? Math.round(totMin / active.length) : 0;
             const cp = Math.min(100, Math.round(totMin / (cfg.horasDia * 60 * 5) * 100)), cc = cp < 60 ? '#22c55e' : cp < 85 ? '#f59e0b' : '#ef4444';
             const _allEt = [...ETAPAS.slice(0, 1), ...ACAB_STEPS, ...ETAPAS.slice(1)];
@@ -4254,7 +4294,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     <div class="kcard" style="margin-bottom:12px"><div style="font-size:12px;color:#64748b;font-weight:700;margin-bottom:12px">📋 POR ETAPA</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">${byEt.map(et => `<div style="flex:1;min-width:80px;background:#0f172a;border-radius:10px;padding:12px;border-top:3px solid ${et.color}"><div style="font-size:26px;font-weight:800;color:${et.color}">${et.cnt}</div><div style="font-size:11px;color:#94a3b8;margin-top:3px">${et.icon} ${et.label}</div></div>`).join('')}</div>
     </div>
-    ${(od.length || sn.length) ? `<div class="kcard" style="margin-bottom:12px;border-left:3px solid #ef4444"><div style="font-size:12px;color:#ef4444;font-weight:700;margin-bottom:10px">🚨 EN RIESGO</div>${[...od, ...sn].map(o => `<div style="display:flex;justify-content:space-between;padding:8px 10px;background:#0f172a;border-radius:8px;margin-bottom:6px;gap:8px"><div><span style="font-weight:700;color:#f1f5f9">${e(o.titulo)}</span><span style="color:#64748b;font-size:12px"> · ${e(o.cliente)} · ${etOf(o.etapa).full}</span></div><span style="color:${isOD(o.fechaLimite) ? '#ef4444' : '#f59e0b'};font-weight:700;font-size:12px;white-space:nowrap">${isOD(o.fechaLimite) ? '🔴 VENCIDA' : '🟡'} ${fDate(o.fechaLimite)}</span></div>`).join('')}</div>` : ''}
+    ${(od.length || sn.length) ? `<div class="kcard" style="margin-bottom:12px;border-left:3px solid #ef4444"><div style="font-size:12px;color:#ef4444;font-weight:700;margin-bottom:10px">🚨 EN RIESGO</div>${[...od, ...sn].map(o => `<div style="display:flex;justify-content:space-between;padding:8px 10px;background:#0f172a;border-radius:8px;margin-bottom:6px;gap:8px"><div><span style="font-weight:700;color:#f1f5f9">${e(o.titulo)}</span><span style="color:#64748b;font-size:12px"> · ${e(o.cliente)} · ${etOf(o.etapa).full}</span></div><span style="color:${isOD(fechaCompromiso_(o)) ? '#ef4444' : '#f59e0b'};font-weight:700;font-size:12px;white-space:nowrap">${isOD(fechaCompromiso_(o)) ? '🔴 VENCIDA' : '🟡'} ${fDate(o.fechaLimite)}</span></div>`).join('')}</div>` : ''}
     <div class="kcard" style="margin-bottom:12px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
         <div style="font-size:12px;color:#64748b;font-weight:700">🏭 CARGA POR MÁQUINA</div>
@@ -4346,7 +4386,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             // Además de la fecha elegida, si estamos viendo "hoy" mostrar aparte lo que ya
             // se venció y sigue en el tablero (nadie lo debe perder de vista aunque no sea
             // técnicamente "de hoy").
-            const vencidas = esHoy ? orders.filter(o => !o._merged && o.fechaLimite && o.fechaLimite < fecha) : [];
+            const vencidas = esHoy ? orders.filter(o => !o._merged && o.fechaLimite && fechaCompromiso_(o) < fecha) : [];
 
             const listaParaSalir = o => o.etapa === 'empaque' || o.etapa === 'listo';
             const row = o => `<tr style="border-top:1px solid #1e293b">
@@ -4503,7 +4543,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 const bars = mb.map((b, bi) => {
                     // Posición = minutos laborales directamente (0 = inicio de jornada)
                     const x = b.start * pxM, w = Math.max(b.dur * pxM, 6);
-                    const brd = isOD(b.fechaLimite) ? 'border:2px solid #ef4444' : isSoon(b.fechaLimite) ? 'border:2px solid #f59e0b' : b._isMuestra ? 'border:2px dashed #94a3b8' : '';
+                    const brd = isOD(fechaCompromiso_(b)) ? 'border:2px solid #ef4444' : isSoon(fechaCompromiso_(b)) ? 'border:2px solid #f59e0b' : b._isMuestra ? 'border:2px dashed #94a3b8' : '';
                     const muestraStyle = b._isMuestra ? 'opacity:0.82;' : '';
                     const tipoBadge = b.tipo === 'muestra' ? '🔬' : b.tipo === 'int_sub' ? 'I·' : b.tipo === 'port_sub' ? 'P·'
                         : b.tipo === 'union_result' ? (b._piezaSuelta === 'int' ? 'I·' : b._piezaSuelta === 'port' ? 'P·' : '🔗') : '';
@@ -4556,7 +4596,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             ${cols.slice(0, 6).map(o => {
                             const enc = encOf(o.tipoEncuadernacion); const tipo = o.tipo || 'normal'; return `
               <div style="background:#1e293b;border-radius:9px;padding:10px 12px;border-left:3px solid ${o.urgente ? '#ef4444' : tipo === 'int_sub' ? '#818cf8' : tipo === 'port_sub' ? '#c084fc' : tipo === 'union_result' ? '#4ade80' : et.color}">
-                <div style="display:flex;justify-content:space-between"><span style="font-size:16px;font-weight:700;color:#f1f5f9">${o.urgente ? '⚡ ' : ''} ${e(o.titulo.substring(0, 25))}</span>${isOD(o.fechaLimite) ? '<span style="color:#ef4444;font-weight:700;font-size:12px">🔴VENC</span>' : isSoon(o.fechaLimite) ? '<span style="color:#f59e0b;font-size:12px">🟡HOY</span>' : ''}</div>
+                <div style="display:flex;justify-content:space-between"><span style="font-size:16px;font-weight:700;color:#f1f5f9">${o.urgente ? '⚡ ' : ''} ${e(o.titulo.substring(0, 25))}</span>${isOD(fechaCompromiso_(o)) ? '<span style="color:#ef4444;font-weight:700;font-size:12px">🔴VENC</span>' : isSoon(fechaCompromiso_(o)) ? '<span style="color:#f59e0b;font-size:12px">🟡HOY</span>' : ''}</div>
                 <div style="font-size:12px;color:#94a3b8;margin-top:3px">${e(o.cliente)} · ${e(o.cantidad)} ejs · ${enc.icon}</div>
               </div>`;
                         }).join('')}
@@ -4622,6 +4662,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         <div style="font-size:12px;color:#4ade80;font-weight:700;letter-spacing:.5px;margin-bottom:4px">🤖 AUTO-CALIBRACIÓN Y ENTREGAS</div>
         <div class="g2">
           <div><div style="font-size:12px;color:#64748b;margin-top:10px">Factor buffer entrega (×)</div><input class="inp" type="number" step="0.05" min="1" max="3" value="${cfg.bufferFactor || 1.3}" oninput="cfg.bufferFactor=+this.value;saveBoard()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">1.3 = 30% extra sobre el tiempo calculado</div></div>
+          <div><div style="font-size:12px;color:#64748b;margin-top:10px">Días de colchón (no urgentes)</div><input class="inp" type="number" step="1" min="0" max="15" value="${cfg.diasColchon ?? 3}" oninput="cfg.diasColchon=+this.value;saveBoard()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">Días hábiles extra después de la fecha de entrega. Las urgentes no tienen colchón</div></div>
           <div></div>
           <div><div style="font-size:12px;color:#64748b;margin-top:10px">Rango mín. calibración (fracción)</div><input class="inp" type="number" step="0.05" min="0.1" max="1" value="${cfg.calibRangeMin || 0.5}" oninput="cfg.calibRangeMin=+this.value;saveBoard()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">0.5 = excluir muestras < 50% de la mediana</div></div>
           <div><div style="font-size:12px;color:#64748b;margin-top:10px">Rango máx. calibración (fracción)</div><input class="inp" type="number" step="0.1" min="1" max="5" value="${cfg.calibRangeMax || 2.0}" oninput="cfg.calibRangeMax=+this.value;saveBoard()" style="margin-top:3px"><div style="font-size:10px;color:#475569;margin-top:2px">2.0 = excluir muestras > 200% de la mediana</div></div>
