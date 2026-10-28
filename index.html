@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.35';
+        const APP_VERSION = 'v9.36';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -5013,12 +5013,12 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         }
         function activarMaquina_(nombre, silent) {
             _maquinaActual = nombre; saveContexto_(); render();
-            if (!silent) showToast('🏭 Máquina activa: ' + nombre, 4000);
+            if (!silent) { showToast('🏭 Máquina activa: ' + nombre, 4000); showScanFlash('🏭 ' + nombre, '✅ Máquina lista' + (_personaActual ? ' · ' + _personaActual : ''), '#a855f7'); }
             return true;
         }
         function activarPersona_(nombre, silent) {
             _personaActual = nombre; saveContexto_(); render();
-            if (!silent) showToast('👤 Operador activo: ' + nombre, 4000);
+            if (!silent) { showToast('👤 Operador activo: ' + nombre, 4000); showScanFlash('👤 ' + nombre, '✅ Ya puedes escanear la máquina', '#a855f7'); }
             return true;
         }
         function limpiarContextoMaqPersona_() { _maquinaActual = null; _personaActual = null; saveContexto_(); render(); }
@@ -5141,16 +5141,23 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
 
         function handleScan(raw, silent) {
             const raw2 = raw.trim().toUpperCase();
-            // ── -1. Códigos genéricos de conteo de piezas en Empaque (coincidencia exacta) ──
-            if (PIEZAS_SCAN_CODES.hasOwnProperty(raw2)) return sumarPiezasEmpaque_(PIEZAS_SCAN_CODES[raw2], silent);
-            // ── -1c. Códigos genéricos de inventario de tóner (coincidencia exacta) ──
-            if (TONER_SCAN_CODES.hasOwnProperty(raw2)) { const t = TONER_SCAN_CODES[raw2]; return ajustarToner_(t.key, t.delta, silent); }
-            // ── -1d. Códigos de reposición / esperando portada-interior (coincidencia exacta) ──
-            if (REP_SCAN_CODES.hasOwnProperty(raw2)) return sumarReposicion_(REP_SCAN_CODES[raw2], silent);
-            if (ESPERA_SCAN_CODES.hasOwnProperty(raw2)) return marcarEspera_(ESPERA_SCAN_CODES[raw2], silent);
-            // ── -1e. Códigos de máquina / persona activa (coincidencia exacta) ──
-            if (MACHINE_SCAN_CODES.hasOwnProperty(raw2)) return activarMaquina_(MACHINE_SCAN_CODES[raw2], silent);
-            if (PERSON_SCAN_CODES.hasOwnProperty(raw2)) return activarPersona_(PERSON_SCAN_CODES[raw2], silent);
+            // Cada escáner antepone la letra de SU estación a todo lo que lee (E en Empaque, L,
+            // H…) — confirmado en el log de No encontrados 2026-10-28: OPCHUY llegaba como
+            // "LOPCHUY". Los códigos genéricos (persona, máquina, reposición…) se reconocen con
+            // o sin esa letra; primero se prueba el código tal cual.
+            const _sinPrefijo = [...SCAN_PROC.map(p => p.pre), 'L'].filter(p => raw2.startsWith(p)).map(p => raw2.slice(p.length));
+            const codigoDe_ = tabla => tabla.hasOwnProperty(raw2) ? raw2 : _sinPrefijo.find(k => tabla.hasOwnProperty(k));
+            let _cod;
+            // ── -1. Códigos genéricos de conteo de piezas en Empaque ──
+            if ((_cod = codigoDe_(PIEZAS_SCAN_CODES))) return sumarPiezasEmpaque_(PIEZAS_SCAN_CODES[_cod], silent);
+            // ── -1c. Códigos genéricos de inventario de tóner ──
+            if ((_cod = codigoDe_(TONER_SCAN_CODES))) { const t = TONER_SCAN_CODES[_cod]; return ajustarToner_(t.key, t.delta, silent); }
+            // ── -1d. Códigos de reposición / esperando portada-interior ──
+            if ((_cod = codigoDe_(REP_SCAN_CODES))) return sumarReposicion_(REP_SCAN_CODES[_cod], silent);
+            if ((_cod = codigoDe_(ESPERA_SCAN_CODES))) return marcarEspera_(ESPERA_SCAN_CODES[_cod], silent);
+            // ── -1e. Códigos de máquina / persona activa ──
+            if ((_cod = codigoDe_(MACHINE_SCAN_CODES))) return activarMaquina_(MACHINE_SCAN_CODES[_cod], silent);
+            if ((_cod = codigoDe_(PERSON_SCAN_CODES))) return activarPersona_(PERSON_SCAN_CODES[_cod], silent);
             // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
             const logPre = SCAN_LOG_PRE.find(p => raw2.startsWith(p));
             if (logPre) { sendScanToSheets(raw2); return true; }
