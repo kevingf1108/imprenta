@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.34';
+        const APP_VERSION = 'v9.35';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -5304,10 +5304,17 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             matches.forEach(o => {
                 const idx = orders.findIndex(x => x.id === o.id);
                 const timerKey = o.id + (proc ? '_' + proc.pre : '');
+                // Quién/dónde: si hubo Inicia, lo que estaba activo EN ESE MOMENTO (v9.35) — con un
+                // escáner compartido (ej. 4 pegadoras) el contexto actual puede ser de otra persona
+                // que escaneó su nombre después. Sin Inicia, lo que esté activo ahora.
+                const tmCtx = _scanTimers[timerKey];
+                const ctxPasa = (tmCtx && typeof tmCtx === 'object' && (tmCtx.maquinaFisica || tmCtx.persona))
+                    ? { maquina: tmCtx.maquinaFisica || null, persona: tmCtx.persona || null }
+                    : { maquina: _maquinaActual, persona: _personaActual };
                 if (proc && proc.etapa && o.etapa !== proc.etapa) {
                     orders[idx] = { ...orders[idx], etapa: proc.etapa };
                     etapaMap[o.id] = proc.etapa;
-                    logMove(o, o.etapa, proc.etapa, 'escaneo', { maquina: _maquinaActual, persona: _personaActual });
+                    logMove(o, o.etapa, proc.etapa, 'escaneo', ctxPasa);
                 }
                 const oActual = orders[idx];
                 const flow = [ETAPAS[0], ...getAcabFlow(oActual).map(sid => ACAB_STEPS.find(s => s.id === sid)).filter(Boolean), ETAPAS[1], ETAPAS[2]];
@@ -5323,8 +5330,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     const ts = Date.now();
                     // Máquina física / persona (v9.29) — base para calibrar por máquina individual
                     // y no solo por tipo de paso. Timers viejos (sin el dato) caen al contexto actual.
-                    const maquinaFisica = (typeof tm === 'object' && tm.maquinaFisica) || _maquinaActual || '';
-                    const persona = (typeof tm === 'object' && tm.persona) || _personaActual || '';
+                    const maquinaFisica = ctxPasa.maquina || '';
+                    const persona = ctxPasa.persona || '';
                     const tiempos = [...(oActual.tiemposReales || [])];
                     tiempos.push({ etapa: fromEtapa, label: procLabel, mins, ts, maquinaFisica, persona });
                     orders[idx] = { ...orders[idx], tiemposReales: tiempos };
@@ -5343,7 +5350,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 }
                 orders[idx] = { ...orders[idx], etapa: nextStep.id };
                 etapaMap[o.id] = nextStep.id;
-                logMove(orders[idx], fromEtapa, nextStep.id, 'escaneo', { maquina: _maquinaActual, persona: _personaActual });
+                logMove(orders[idx], fromEtapa, nextStep.id, 'escaneo', ctxPasa);
                 if (nextStep.id === 'listo') { delete etapaMap[o.id]; pushHistorial(orders[idx]); _tocoLogsFull = true; }
                 // Conteo de piezas en Empaque: arranca en 0 al entrar por escaneo; si la orden
                 // que se estaba contando avanza a otra etapa (ya se selló/movió), se suelta el
