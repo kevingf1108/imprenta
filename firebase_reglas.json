@@ -1,0 +1,25 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "imprenta": {
+      ".read": "(auth != null && auth.token.email_verified == true && (auth.token.email.toLowerCase() == 'kevingroppeflores@gmail.com' || root.child('acceso').child(auth.token.email.toLowerCase().replace('.', ',')).exists()))",
+      ".write": "(auth != null && auth.token.email_verified == true && (auth.token.email.toLowerCase() == 'kevingroppeflores@gmail.com' || root.child('acceso').child(auth.token.email.toLowerCase().replace('.', ',')).exists()))"
+    },
+    "acceso": {
+      ".read": "(auth != null && auth.token.email_verified == true && (auth.token.email.toLowerCase() == 'kevingroppeflores@gmail.com' || root.child('acceso').child(auth.token.email.toLowerCase().replace('.', ',')).child('rol').val() == 'admin'))",
+      ".write": "(auth != null && auth.token.email_verified == true && (auth.token.email.toLowerCase() == 'kevingroppeflores@gmail.com' || root.child('acceso').child(auth.token.email.toLowerCase().replace('.', ',')).child('rol').val() == 'admin'))",
+      "$k": {
+        ".read": "auth != null && auth.token.email_verified == true && auth.token.email.toLowerCase().replace('.', ',') == $k"
+      }
+    },
+    "solicitudes": {
+      ".read": "(auth != null && auth.token.email_verified == true && (auth.token.email.toLowerCase() == 'kevingroppeflores@gmail.com' || root.child('acceso').child(auth.token.email.toLowerCase().replace('.', ',')).child('rol').val() == 'admin'))",
+      ".write": "(auth != null && auth.token.email_verified == true && (auth.token.email.toLowerCase() == 'kevingroppeflores@gmail.com' || root.child('acceso').child(auth.token.email.toLowerCase().replace('.', ',')).child('rol').val() == 'admin'))",
+      "$k": {
+        ".write": "auth != null && auth.token.email_verified == true && auth.token.email.toLowerCase().replace('.', ',') == $k",
+        ".validate": "newData.hasChildren(['email', 'ts'])"
+      }
+    }
+  }
+}

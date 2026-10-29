@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.37';
+        const APP_VERSION = 'v9.38';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -585,7 +585,7 @@
         function tryReload() {
             if (!_pendingReload) return;
             const activeTag = document.activeElement && document.activeElement.tagName;
-            const busy = (typeof modalId !== 'undefined' && modalId !== undefined) || showCfg || showSync || _dragId ||
+            const busy = (typeof modalId !== 'undefined' && modalId !== undefined) || showCfg || showSync || showAccesos || _dragId ||
                 activeTag === 'INPUT' || activeTag === 'TEXTAREA' || _pendingSaves > 0;
             if (busy) return;
             showToast('🔄 Hay una versión nueva — actualizando...', 3000);
@@ -627,11 +627,118 @@
         const _db = firebase.database();
         const _ref = _db.ref('imprenta');
 
-        // ── Login anónimo: se ejecuta solo, sin que el usuario haga nada ──
-        firebase.auth().signInAnonymously().catch(err => {
-            console.error('Error de login anónimo:', err);
-            alert('No se pudo conectar de forma segura. Recarga la página. Si el problema sigue, avisa al administrador.');
-        });
+        // ── Acceso con cuenta de Google (v9.38) ──
+        // Antes todos entraban como "anónimo" y cualquiera con el link podía leer la base
+        // (incluido cfg.scriptToken). Ahora: lista de correos permitidos en /acceso, y las
+        // reglas de Firebase (ver firebase_reglas.json en el repo) solo dejan leer/escribir
+        // /imprenta a esos correos. Mientras las reglas nuevas no se publiquen, el anónimo
+        // sigue funcionando igual — así el piso no se corta durante la transición. Cuando se
+        // publican, el anónimo recibe PERMISSION_DENIED y la app muestra la pantalla de login.
+        const ADMIN_EMAIL = 'kevingroppeflores@gmail.com';
+        const emailKey_ = em => String(em || '').trim().toLowerCase().replace(/\./g, ',');
+        let _usuario = null, _esAdmin = false, showAccesos = false, _accesos = {}, _solicitudes = {};
+        function entrarConGoogle_() {
+            const prov = new firebase.auth.GoogleAuthProvider();
+            prov.setCustomParameters({ prompt: 'select_account' });
+            firebase.auth().signInWithPopup(prov).catch(err => {
+                if (err.code === 'auth/popup-blocked' || err.code === 'auth/operation-not-supported-in-this-environment') return firebase.auth().signInWithRedirect(prov);
+                if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') return;
+                alert('No se pudo entrar con Google: ' + (err.message || err.code));
+            });
+        }
+        function salir_() {
+            if (!confirm('¿Cerrar sesión en esta computadora?')) return;
+            firebase.auth().signOut().then(() => location.reload());
+        }
+        function loginHTML_(sinAcceso) {
+            const u = _usuario;
+            return `
+        <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f172a;padding:16px">
+          <div style="text-align:center;color:#e2e8f0;max-width:380px;background:#1e293b;border:1px solid #334155;border-radius:14px;padding:28px 22px">
+            <div style="font-size:48px;margin-bottom:10px">🔒</div>
+            <div style="font-size:18px;font-weight:700;margin-bottom:6px">Producción · acceso privado</div>
+            ${sinAcceso && u && !u.isAnonymous
+                    ? `<div style="font-size:13px;color:#f59e0b;margin:12px 0">La cuenta <b>${e(u.email || '')}</b> todavía no tiene acceso.</div>
+                       <div style="font-size:12px;color:#94a3b8;margin-bottom:16px">Ya se mandó la solicitud. Pide al administrador que te apruebe en <b>👥 Accesos</b> y luego recarga.</div>
+                       <button class="btn btn-sm" onclick="location.reload()" style="margin-right:6px">🔄 Recargar</button>
+                       <button class="btn btn-g btn-sm" onclick="salir_()">Usar otra cuenta</button>`
+                    : `<div style="font-size:13px;color:#94a3b8;margin:12px 0 18px">Entra con tu cuenta de Google. En esta computadora solo se hace una vez.</div>
+                       <button class="btn btn-p" onclick="entrarConGoogle_()" style="font-size:15px;padding:10px 18px">Entrar con Google</button>`}
+          </div>
+        </div>`;
+        }
+        function sinAcceso_() {
+            const u = _usuario;
+            if (u && !u.isAnonymous && u.email) {
+                _db.ref('solicitudes/' + emailKey_(u.email)).set({ email: u.email.toLowerCase(), nombre: u.displayName || '', ts: Date.now() }).catch(() => { });
+            }
+            document.getElementById('root').innerHTML = loginHTML_(true);
+        }
+        function revisarAdmin_() {
+            const u = _usuario;
+            _esAdmin = false;
+            if (!u || u.isAnonymous || !u.email) return;
+            if (u.email.toLowerCase() === ADMIN_EMAIL) { _esAdmin = true; return; }
+            _db.ref('acceso/' + emailKey_(u.email)).once('value').then(sn => {
+                const a = sn.val();
+                _esAdmin = !!(a && a.rol === 'admin');
+                if (_fbReady) render();
+            }).catch(() => { });
+        }
+        function cargarAccesos_() {
+            return Promise.all([_db.ref('acceso').once('value'), _db.ref('solicitudes').once('value')]).then(([a, s]) => {
+                _accesos = a.val() || {};
+                _solicitudes = s.val() || {};
+                if (showAccesos) render();
+            }).catch(err => showToast('⚠️ No se pudo leer la lista de accesos: ' + (err.code || err.message)));
+        }
+        function openAccesos_() { showAccesos = true; render(); cargarAccesos_(); }
+        function closeAccesos_() { showAccesos = false; render(); }
+        function agregarAcceso_(email, rol) {
+            email = String(email || '').trim().toLowerCase();
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { showToast('⚠️ Escribe un correo válido'); return; }
+            const k = emailKey_(email);
+            Promise.all([
+                _db.ref('acceso/' + k).set({ email, rol: rol === 'admin' ? 'admin' : 'piso', por: (_usuario && _usuario.email) || '', ts: Date.now() }),
+                _db.ref('solicitudes/' + k).remove()
+            ]).then(() => { showToast('✅ Acceso dado a ' + email); cargarAccesos_(); })
+                .catch(err => showToast('⚠️ No se pudo guardar: ' + (err.code || err.message)));
+        }
+        function quitarAcceso_(k) {
+            const a = _accesos[k];
+            if (!a || !confirm('¿Quitar el acceso a ' + a.email + '?')) return;
+            _db.ref('acceso/' + k).remove().then(() => { showToast('Acceso quitado'); cargarAccesos_(); })
+                .catch(err => showToast('⚠️ No se pudo quitar: ' + (err.code || err.message)));
+        }
+        function rechazarSolicitud_(k) {
+            _db.ref('solicitudes/' + k).remove().then(cargarAccesos_).catch(() => { });
+        }
+        function accesosHTML() {
+            const filas = Object.entries(_accesos).sort((a, b) => (a[1].email || '').localeCompare(b[1].email || ''));
+            const sols = Object.entries(_solicitudes).filter(([k]) => !_accesos[k]);
+            return `<div class="overlay" onclick="if(event.target===this)closeAccesos_()">
+    <div class="modal" style="max-width:560px" onclick="event.stopPropagation()">
+      <div style="display:flex;justify-content:space-between;margin-bottom:12px"><h2 style="font-size:17px;font-weight:700">👥 Accesos</h2><button class="bico" onclick="closeAccesos_()" style="font-size:20px;color:#94a3b8">✕</button></div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:12px">Solo estas cuentas de Google pueden abrir la app. <b>Admin</b> además puede dar y quitar accesos. <b>${e(ADMIN_EMAIL)}</b> siempre es admin.</div>
+      ${sols.length ? `<div style="background:#2a1a05;border:1px solid #92400e;border-radius:10px;padding:10px;margin-bottom:12px">
+        <div style="font-size:12px;color:#f59e0b;font-weight:700;margin-bottom:6px">Pidieron acceso</div>
+        ${sols.map(([k, s]) => `<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:13px">
+          <span style="flex:1">${e(s.email || '')}${s.nombre ? ` <span style="color:#64748b">· ${e(s.nombre)}</span>` : ''}</span>
+          <button class="btn btn-sm" onclick="agregarAcceso_('${e(s.email || '')}','piso')" style="background:#0a2e1a;color:#4ade80;border:1px solid #166534">Aprobar</button>
+          <button class="btn btn-g btn-sm" onclick="rechazarSolicitud_('${k}')">✕</button></div>`).join('')}
+      </div>` : ''}
+      <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
+        <input id="nuevoAcceso" class="inp" style="flex:1;min-width:180px;margin-bottom:0" placeholder="correo@gmail.com">
+        <select id="nuevoRol" class="inp" style="width:auto;margin-bottom:0"><option value="piso">Piso</option><option value="admin">Admin</option></select>
+        <button class="btn btn-p btn-sm" onclick="agregarAcceso_(document.getElementById('nuevoAcceso').value, document.getElementById('nuevoRol').value)">Agregar</button>
+      </div>
+      ${filas.length ? filas.map(([k, a]) => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid #1e293b;font-size:13px">
+          <span style="flex:1">${e(a.email || '')}</span>
+          <span style="font-size:11px;font-weight:700;color:${a.rol === 'admin' ? '#c084fc' : '#60a5fa'}">${a.rol === 'admin' ? 'ADMIN' : 'PISO'}</span>
+          <button class="btn btn-g btn-sm" onclick="quitarAcceso_('${k}')">Quitar</button></div>`).join('')
+                    : '<div style="font-size:12px;color:#64748b">Todavía no hay nadie en la lista.</div>'}
+    </div></div>`;
+        }
         // ═══════════════════════════════════════════════════
         //  CONSTANTES
         // ═══════════════════════════════════════════════════
@@ -899,6 +1006,7 @@
         const TRACKING_SHEET_ID = '1eETCQFaBl3Ae4iPhW1uejUsEm6JO8tvMg2Qy3H5UjAc';
 
         function loadS() {
+            _ref.off('value');
             document.getElementById('root').innerHTML = `
         <div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0f172a">
           <div style="text-align:center;color:#60a5fa">
@@ -958,6 +1066,7 @@
                 if (firstLoad) setTimeout(() => setAutoSync(true), 500);
             }, err => {
                 console.error('Firebase error:', err);
+                if (err && /permission/i.test(err.code || err.message || '')) { sinAcceso_(); return; }
                 try { const c = localStorage.getItem('imp_c'), sh = localStorage.getItem('imp_sh'); cfg = c ? JSON.parse(c) : JSON.parse(JSON.stringify(CFG0)); statsHistory = sh ? JSON.parse(sh) : []; } catch { cfg = JSON.parse(JSON.stringify(CFG0)); statsHistory = []; }
                 render();
             });
@@ -2619,7 +2728,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         <div id="mc">${V === 'resumen' ? resumenDiaHTML() : V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'personas' ? personasHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : tableroConFiltroHTML()}</div>
       </div>
     </div>
-    ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}`;
+    ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}${showAccesos ? accesosHTML() : ''}`;
             const _newBoard = document.querySelector('.board');
             if (_newBoard) _newBoard.scrollLeft = _scrollLeft;
         }
@@ -2689,6 +2798,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       ${(_maquinaActual || _personaActual) ? `<div title="Máquina/persona activa — se aplica a cada item que escanees hasta que cambies de código. Click para quitar" onclick="limpiarContextoMaqPersona_()" style="display:flex;align-items:center;gap:5px;background:#1a0b2e;border:1px solid #5b21b6;border-radius:8px;padding:5px 10px;font-size:11px;color:#c084fc;white-space:nowrap;cursor:pointer">
         ${_personaActual ? '👤 ' + e(_personaActual) : ''}${_personaActual && _maquinaActual ? ' · ' : ''}${_maquinaActual ? '🏭 ' + e(_maquinaActual) : ''} ✕
       </div>` : ''}
+      ${_usuario && !_usuario.isAnonymous
+                    ? `${_esAdmin ? `<button class="btn btn-sm" onclick="openAccesos_()" style="background:#1a0b2e;color:#c084fc;border:1px solid #5b21b6;white-space:nowrap">👥 Accesos</button>` : ''}
+      <button onclick="salir_()" title="Sesión: ${e(_usuario.email || '')} — clic para cerrar sesión" style="padding:5px 10px;border-radius:8px;border:1px solid #334155;background:transparent;color:#94a3b8;font-size:11px;cursor:pointer;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis">👤 ${e((_usuario.email || '').split('@')[0])}</button>`
+                    : `<button onclick="entrarConGoogle_()" title="Pronto la app va a pedir cuenta de Google. Entra ya para no quedarte fuera" style="padding:5px 10px;border-radius:8px;border:1px solid #92400e;background:#2a1a05;color:#f59e0b;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">🔒 Entrar con Google</button>`}
       <button class="btn btn-p" onclick="openNew()" style="white-space:nowrap">+ Nueva Orden</button>
     </div>`;
         }
@@ -5480,9 +5593,18 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // ═══════════════════════════════════════════════════
         // Esperar a que el login anónimo termine antes de cargar la app
         firebase.auth().onAuthStateChanged(user => {
+            _usuario = user;
             if (user) {
+                revisarAdmin_();
                 loadS();
+                return;
             }
+            // Sin sesión: mientras las reglas nuevas no estén publicadas, se entra como anónimo
+            // (como antes). Si el anónimo ya está apagado en Firebase, va directo al login.
+            firebase.auth().signInAnonymously().catch(err => {
+                console.error('Login anónimo no disponible:', err);
+                document.getElementById('root').innerHTML = loginHTML_(false);
+            });
         });
     </script>
 </body>
