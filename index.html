@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.38';
+        const APP_VERSION = 'v9.39';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -889,6 +889,7 @@
             { id: 'pegch', label: 'Pegadora chica', fisica: 'Pegadora chica', soloManual: true, steps: ['pg'], grupo: '✂️ Acabados' },
             { id: 'cf1', label: 'Guillotina 1', fisica: 'Guillotina 1 (Corte Final)', steps: ['cf'], grupo: '✂️ Acabados' },
             { id: 'cf2', label: 'Guillotina 2', fisica: 'Guillotina 2 (Corte Final)', steps: ['cf'], grupo: '✂️ Acabados' },
+            { id: 'gui4', label: 'Guillotina 4', fisica: 'Guillotina 4', steps: ['ci', 'cp', 'cf'], grupo: '✂️ Acabados' },
             { id: 'ponch', label: 'Ponchadora', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
             { id: 'engr', label: 'Engrapadora 1', fisica: 'Engrapadora 1', steps: ['en'], grupo: '✂️ Acabados' },
             { id: 'engr2', label: 'Engrapadora 2', fisica: 'Engrapadora 2', steps: ['en'], grupo: '✂️ Acabados' },
@@ -5144,6 +5145,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             'MQPEG4': 'Pegadora 4', 'MQPEGCH': 'Pegadora chica',
             'MQGUI1': 'Guillotina 1 (Corte Final)', 'MQGUI2': 'Guillotina 2 (Corte Final)',
             'MQCHALLENGE': 'Challenge (Corte Inicial)', 'MQGUI3': 'Guillotina 3 (Corte Inicial)',
+            'MQGUI4': 'Guillotina 4',
             'MQTERMO1': 'Termo 1', 'MQTERMO2': 'Termo 2',
             'MQENG1': 'Engrapadora 1', 'MQENG2': 'Engrapadora 2',
             'MQMEMP1': 'Mesa de Empaque 1', 'MQMEMP2': 'Mesa de Empaque 2',
@@ -5153,6 +5155,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             'OPCHUY': 'Chuy', 'OPMALY': 'Maly', 'OPDIANA': 'Diana', 'OPVANE': 'Vane', 'OPLAU': 'Lau',
             'OPVERO': 'Vero', 'OPBELEM': 'Belem', 'OPGABRIEL': 'Gabriel', 'OPFATIMA': 'Fatima',
             'OPANDREA': 'Andrea', 'OPAISHA': 'Aisha', 'OPFERNANDA': 'Fernanda', 'OPMAYTE': 'Mayte',
+            'OPFERNANDO': 'Fernando',
         };
         let _maquinaActual = null, _personaActual = null;
         try {
