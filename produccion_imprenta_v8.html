@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.40';
+        const APP_VERSION = 'v9.41';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1008,6 +1008,7 @@
 
         function loadS() {
             _ref.off('value');
+            escucharHubspot_();
             document.getElementById('root').innerHTML = `
         <div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0f172a">
           <div style="text-align:center;color:#60a5fa">
@@ -1065,6 +1066,7 @@
                 }
                 render();
                 if (firstLoad) setTimeout(() => setAutoSync(true), 500);
+                if (firstLoad) { publicarEstadoApi_(); setInterval(publicarEstadoApi_, 10 * 60 * 1000); }
             }, err => {
                 console.error('Firebase error:', err);
                 if (err && /permission/i.test(err.code || err.message || '')) { sinAcceso_(); return; }
@@ -1161,7 +1163,67 @@
             });
             return { calib, tabPerPagPieza, stepDisponibilidad };
         }
+        // ── API para HubSpot/Zapier (v9.41) ──
+        // La app es la única que sabe calcular ETA/fechas (scheduleMachines), así que publica
+        // un resumen por tarjeta en /api/estado/<id> y el Apps Script "API Producción" solo lo
+        // lee y lo entrega con API key. Va fuera de /imprenta a propósito: así el listener
+        // principal (_ref.on('value')) no descarga esto ni el log de HubSpot en cada cambio.
+        // Solo se escriben las tarjetas que cambiaron (actualizado = cuándo cambió de verdad,
+        // que es lo que usa la consulta ?desde=).
+        const _apiRef = _db.ref('api');
+        let hubspotDeals = {}, _estadoApiEnviado = {}, _estadoApiTimer = null;
+        const llaveApi_ = s => String(s || '').trim().replace(/[.#$\[\]\/]/g, '_');
+        function faseDe_(etapa) { return etapa === 'impresion' ? 'impresion' : isAcabEtapa(etapa) ? 'acabados' : etapa === 'empaque' ? 'empaque' : etapa === 'listo' ? 'listo' : (etapa || ''); }
+        function estadoApiDe_(o, finishMin) {
+            const info = [...ETAPAS, ...ACAB_STEPS].find(x => x.id === o.etapa);
+            const listo = o.etapa === 'listo';
+            const eta = !listo && finishMin && finishMin[o.id] != null ? calcETA(o, finishMin) : null;
+            const etaYmd = eta ? ymdLocal(eta) : '';
+            const comp = fechaCompromiso_(o) || '';
+            return {
+                id: String(o.id), grupo: String(o.grupoId || o.id), idDm: o.idDm || '',
+                titulo: o.titulo || o.baseTitulo || String(o.id), cliente: o.cliente || '', cantidad: +o.cantidad || 0,
+                urgente: !!o.urgente, fase: faseDe_(o.etapa), etapa: o.etapa || '', etapaLabel: info ? info.label : (o.etapa || ''),
+                fechaEntrega: o.fechaLimite || '', fechaCompromiso: comp, etaEstimada: etaYmd,
+                enTiempo: listo ? true : (etaYmd && comp ? etaYmd <= comp : null), listo
+            };
+        }
+        function publicarEstadoApi_() {
+            clearTimeout(_estadoApiTimer);
+            _estadoApiTimer = setTimeout(() => {
+                if (!_fbReady) return;
+                try {
+                    const finishMin = scheduleMachines(orders, cfg).finishMin;
+                    const patch = {};
+                    orders.filter(o => !o._merged && o.id).forEach(o => {
+                        const est = estadoApiDe_(o, finishMin);
+                        const k = llaveApi_(o.id), firma = JSON.stringify(est);
+                        if (_estadoApiEnviado[k] === firma) return;
+                        _estadoApiEnviado[k] = firma;
+                        patch['estado/' + k] = { ...est, actualizado: Date.now() };
+                    });
+                    if (Object.keys(patch).length) _apiRef.update(patch).catch(err => console.warn('estado API:', err));
+                } catch (err) { console.warn('estado API:', err); }
+            }, 15000);
+        }
+        function escucharHubspot_() {
+            _apiRef.child('hubspot').off('value');
+            _apiRef.child('hubspot').on('value', sn => {
+                hubspotDeals = sn.val() || {};
+                if (_fbReady && modalId !== undefined) render();
+            }, () => { });
+            // Lo ya publicado: así una pestaña nueva no reescribe todo con "actualizado = ahora".
+            _apiRef.child('estado').once('value').then(sn => {
+                const v = sn.val() || {};
+                Object.keys(v).forEach(k => { const { actualizado, ...rest } = v[k] || {}; _estadoApiEnviado[k] = JSON.stringify(rest); });
+            }).catch(() => { });
+        }
+        function hubspotDe_(o) {
+            if (!o) return null;
+            return (o.idDm && hubspotDeals[llaveApi_(o.idDm)]) || hubspotDeals[llaveApi_(o.grupoId || o.id)] || hubspotDeals[llaveApi_(o.id)] || null;
+        }
         function pushLiveStatus() {
+            publicarEstadoApi_();
             if (!cfg.scriptUrl) return;
             try {
                 const items = buildLiveStatus();
@@ -3932,6 +3994,15 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         <span style="background:#1a0040;border:1px solid #5b21b6;color:#c084fc;padding:2px 8px;border-radius:5px;font-weight:600">🔗 ID DM</span>
         <span style="font-family:monospace;color:#94a3b8">${e(ord.idDm)}</span>
       </div>` : ''}
+      ${(() => {
+          const hs = !isNew && hubspotDe_(ord);
+          if (!hs) return '';
+          return `<div style="display:flex;align-items:center;gap:6px;margin:-8px 0 14px;font-size:11px;color:#64748b">
+        <span style="background:#2a1205;border:1px solid #c2410c;color:#fb923c;padding:2px 8px;border-radius:5px;font-weight:600">HubSpot</span>
+        <span style="color:#e2e8f0;font-weight:700">${e(hs.etapa || '')}</span>
+        ${hs.recibido ? `<span>· ${new Date(hs.recibido).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>` : ''}
+      </div>`;
+      })()}
       ${!isNew && (ord.piezasDanadas > 0 || ord.esperandoPieza) ? `<div style="margin:-8px 0 14px;display:flex;flex-direction:column;gap:6px">
         ${ord.piezasDanadas > 0 ? `<div style="display:flex;align-items:center;gap:8px;background:#2d0a0a;border:1px solid #7f1d1d;border-radius:8px;padding:8px 12px">
           <span style="font-size:13px;color:#fca5a5;font-weight:700">🔧 ${ord.piezasDanadas} pieza${ord.piezasDanadas === 1 ? '' : 's'} dañada${ord.piezasDanadas === 1 ? '' : 's'} — necesita reposición</span>

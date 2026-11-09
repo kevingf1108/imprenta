@@ -20,6 +20,10 @@
         ".write": "auth != null && auth.token.email_verified == true && auth.token.email.toLowerCase().replace('.', ',') == $k",
         ".validate": "newData.hasChildren(['email', 'ts'])"
       }
+    },
+    "api": {
+      ".read": "(auth != null && auth.token.email_verified == true && (auth.token.email.toLowerCase() == 'kevingroppeflores@gmail.com' || root.child('acceso').child(auth.token.email.toLowerCase().replace('.', ',')).exists()))",
+      ".write": "(auth != null && auth.token.email_verified == true && (auth.token.email.toLowerCase() == 'kevingroppeflores@gmail.com' || root.child('acceso').child(auth.token.email.toLowerCase().replace('.', ',')).exists()))"
     }
   }
 }
