@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.41';
+        const APP_VERSION = 'v9.42';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -959,6 +959,35 @@
         // para que dos computadoras no se pisen (ver setHiddenGroup_).
         let notasPersonas = {};
         function keyPersona_(nombre) { return String(nombre).replace(/[.#$\[\]\/]/g, '_'); }
+        // ── Estado de máquinas y máquina fijada a mano (v9.42) ─────────────────────────
+        // maqEstado/<machId> = { estado: 'mant' | 'fuera', nota, ts, por } — sin entrada = funciona.
+        // Una máquina fuera o en mantenimiento sale de candidatas_(): el motor manda sus órdenes
+        // solo a otra que pueda hacer ese paso, y el aviso de arriba dice cuáles se movieron.
+        // maqAsignada/<orden> = { maq, ts } — máquina de impresión que la compu de impresión fijó
+        // arrastrando la tarjeta. Clave por clave (mismo motivo que hiddenGroups, v9.22).
+        let maqEstado = {}, maqAsignada = {};
+        const IMP_STEPS = new Set(['iib', 'iic', 'ip']);
+        const ESTADOS_MAQ = { mant: { label: 'En mantenimiento', icon: '🔧', color: '#f59e0b' }, fuera: { label: 'Fuera de servicio', icon: '🔴', color: '#ef4444' } };
+        function maqFuera_(machId) { const st = maqEstado[machId]; return !!(st && ESTADOS_MAQ[st.estado]); }
+        function setMaqEstado_(machId, estado, nota) {
+            const v = ESTADOS_MAQ[estado] ? { estado, nota: String(nota || '').trim(), ts: Date.now(), por: (_usuario && _usuario.email) || '' } : null;
+            if (v) maqEstado[machId] = v; else delete maqEstado[machId];
+            const patch = {}; patch['maqEstado/' + machId] = v;
+            _ref.update(patch).catch(() => { });
+        }
+        function setMaqAsignada_(ordId, machId) {
+            const k = keyPersona_(ordId), v = machId ? { maq: machId, ts: Date.now() } : null;
+            if (v) maqAsignada[k] = v; else delete maqAsignada[k];
+            const patch = {}; patch['maqAsignada/' + k] = v;
+            // Limpieza: fijadas de órdenes que ya no están en Impresión y tienen más de 30 días
+            const vivas = new Set(orders.filter(o => o.etapa === 'impresion').map(o => keyPersona_(o.id)));
+            Object.entries(maqAsignada).forEach(([kk, a]) => { if (!vivas.has(kk) && a && a.ts < Date.now() - 30 * 86400000) { delete maqAsignada[kk]; patch['maqAsignada/' + kk] = null; } });
+            _ref.update(patch).catch(() => { });
+        }
+        function maqFijadaDe_(o) { const a = maqAsignada[keyPersona_(o.id)]; return a && a.maq ? a.maq : null; }
+        // Solo UNA computadora (la de impresión) puede cambiar máquinas — se marca por equipo en ⚙️.
+        function esCompuImpresion_() { try { return localStorage.getItem('imp_compu_impresion') === '1'; } catch { return false; } }
+        function setCompuImpresion_(on) { try { if (on) localStorage.setItem('imp_compu_impresion', '1'); else localStorage.removeItem('imp_compu_impresion'); } catch { } render(); }
         function setNotaPersona_(nombre, texto) {
             const k = keyPersona_(nombre), v = String(texto || '').trim();
             if (v) notasPersonas[k] = v; else delete notasPersonas[k];
@@ -1054,6 +1083,8 @@
                     etapaMap = data.etapaMap || {};
                     hiddenGroups = data.hiddenGroups || {};
                     notasPersonas = data.notasPersonas || {};
+                    maqEstado = data.maqEstado || {};
+                    maqAsignada = data.maqAsignada || {};
                     // Restaurar órdenes manuales (union_results) guardadas en Firebase
                     const rawMO = data.manualOrders;
                     if (rawMO) {
@@ -1527,17 +1558,30 @@
         // Máquinas a las que el motor puede mandar un paso de una orden — compartido entre el
         // scheduler del Gantt y calcMachLoad_ para que nunca decidan distinto.
         function tieneSolapas_(o) { return !!o.solapas || /solapa/i.test((o.notas || '') + ' ' + (o.titulo || '')); }
+        // _ignorarEstadoMaq: solo para calcular "a qué máquina iba ANTES de que una se
+        // descompusiera" (aviso de órdenes movidas) — nunca se deja prendido.
+        let _ignorarEstadoMaq = false;
         function candidatas_(o, stepId) {
-            let cands = MAQUINAS.filter(m => m.steps.includes(stepId) && !m.soloManual);
-            // Máquina asignada a mano (hoy solo impresión, desde el formulario de la orden)
-            if (o.maquina && o.maquina !== 'auto') {
-                const forced = cands.find(m => m.id === o.maquina);
+            const delPaso = MAQUINAS.filter(m => m.steps.includes(stepId) && !m.soloManual);
+            let cands = delPaso;
+            // Máquina fijada a mano: arrastrada en la vista Impresión por máquina (v9.42), o la
+            // del formulario de la orden. Solo aplica si esa máquina sí hace este paso.
+            const fijada = (IMP_STEPS.has(stepId) && maqFijadaDe_(o)) || (o.maquina && o.maquina !== 'auto' ? o.maquina : null);
+            if (fijada) {
+                const forced = cands.find(m => m.id === fijada);
                 if (forced) cands = [forced];
             }
             // Libros con solapas → Pegadora 4, que las hace automáticamente
             if (stepId === 'pg' && tieneSolapas_(o)) {
                 const p4 = cands.find(m => m.id === 'peg4');
                 if (p4) cands = [p4];
+            }
+            // Máquina fuera / en mantenimiento → se mueve sola a otra que pueda hacer el paso.
+            // Si TODAS las del paso están fuera, se deja como estaba (no hay a dónde mandarla).
+            if (!_ignorarEstadoMaq) {
+                const disp = cands.filter(m => !maqFuera_(m.id));
+                if (disp.length) cands = disp;
+                else { const otras = delPaso.filter(m => !maqFuera_(m.id)); if (otras.length) cands = otras; }
             }
             return cands;
         }
@@ -3702,7 +3746,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     ${opts.map(([v, ic, l]) => `<button onclick="setV('${v}')" style="padding:6px 13px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-weight:700;background:${V === v ? '#3b82f6' : '#1e293b'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${ic} ${l}</button>`).join('')}
   </div>`;
         }
-        function tableroConFiltroHTML() { return tableroFiltroBarHTML() + (BOARD_VIEWS[V] ? BOARD_VIEWS[V]() : boardHTML()); }
+        function tableroConFiltroHTML() { return tableroFiltroBarHTML() + avisoMaquinasHTML() + (BOARD_VIEWS[V] ? BOARD_VIEWS[V]() : boardHTML()); }
         function renderBoard() {
             const mc = document.getElementById('mc');
             if (!mc || !BOARD_VIEWS[V]) return;
@@ -3846,7 +3890,146 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const finishMin = scheduleMachines(subset, cfg).finishMin;
             return `<div class="board">${etapas.map((et, ei) => colHTML(et, ei, etapas, finishMin, subset)).join('')}</div>`;
         }
-        function soloImpresionHTML() { return vistaFiltradaHTML(o => o.etapa === 'impresion', '🖨️ Nada en Impresión ahorita'); }
+        // ── Impresión por máquina (v9.42) ───────────────────────────────────────────────
+        // Una columna por impresora; cada orden cae en la máquina que propone el motor (o la
+        // que fijó la compu de impresión). Orden dentro de la columna = cola real del motor.
+        function impPorMaquina_(ignorarEstado) {
+            _ignorarEstadoMaq = !!ignorarEstado;
+            let r;
+            try { r = scheduleMachines(orders, cfg); } finally { _ignorarEstadoMaq = false; }
+            const porOrden = {}; // ordId → { machId, start, otros: [{machId, stepNom}] }
+            r.blocks.filter(b => IMP_STEPS.has(b.stepId)).forEach(b => {
+                const cur = porOrden[b.ordId];
+                const esInterior = b.stepId !== 'ip';
+                if (!cur) porOrden[b.ordId] = { machId: b.machId, start: b.start, dur: b.dur, esInterior, otros: [] };
+                else if (esInterior && !cur.esInterior) { cur.otros.push({ machId: cur.machId, stepNom: 'Portada' }); Object.assign(cur, { machId: b.machId, start: b.start, esInterior }); }
+                else cur.otros.push({ machId: b.machId, stepNom: b.stepId === 'ip' ? 'Portada' : 'Interior' });
+            });
+            return { porOrden, blocks: r.blocks, finishMin: r.finishMin };
+        }
+        const MAQ_IMP = () => MAQUINAS.filter(m => m.steps.some(s => IMP_STEPS.has(s)));
+        // Órdenes en Impresión que el motor movió de una máquina fuera a otra, y las que no
+        // tienen a dónde ir (todas las máquinas de su paso están fuera).
+        function impMovidas_() {
+            const fuera = MAQ_IMP().filter(m => maqFuera_(m.id));
+            if (!fuera.length) return { fuera, movidas: [], sinMaquina: [] };
+            const antes = impPorMaquina_(true).porOrden, ahora = impPorMaquina_(false).porOrden;
+            const enImp = orders.filter(o => o.etapa === 'impresion' && !o._merged);
+            const movidas = [], sinMaquina = [];
+            enImp.forEach(o => {
+                const a = antes[o.id], n = ahora[o.id];
+                if (!n) return;
+                if (maqFuera_(n.machId)) { sinMaquina.push({ o, machId: n.machId }); return; }
+                if (a && a.machId !== n.machId && maqFuera_(a.machId)) movidas.push({ o, de: a.machId, a: n.machId, fijada: maqFijadaDe_(o) === a.machId || o.maquina === a.machId });
+            });
+            return { fuera, movidas, sinMaquina };
+        }
+        function maqLabel_(id) { const m = MAQUINAS.find(x => x.id === id); return m ? m.label : id; }
+        function haceCuanto_(ts) { const m = Math.round((Date.now() - ts) / 60000); return m < 1 ? 'ahora' : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `hace ${Math.round(m / 1440)} días`; }
+        // Aviso de arriba (todas las vistas del Tablero, todas las computadoras): máquina fuera
+        // o en mantenimiento + qué órdenes hay que cambiar de máquina.
+        function avisoMaquinasHTML() {
+            const fueraTodas = MAQUINAS.filter(m => maqFuera_(m.id));
+            if (!fueraTodas.length) return '';
+            const { movidas, sinMaquina } = impMovidas_();
+            const compu = esCompuImpresion_();
+            return `<div style="margin:10px 14px 0;background:#2a0a0a;border:2px solid #ef4444;border-radius:10px;padding:10px 14px">
+    ${fueraTodas.map(m => { const st = maqEstado[m.id], E = ESTADOS_MAQ[st.estado];
+        const mov = movidas.filter(x => x.de === m.id), sin = sinMaquina.filter(x => x.machId === m.id);
+        return `<div style="margin:4px 0">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:14px;font-weight:800;color:${E.color}">${E.icon} ${e(m.label)} — ${E.label.toUpperCase()}</span>
+        <span style="font-size:11px;color:#94a3b8">${haceCuanto_(st.ts)}${st.nota ? ' · ' + e(st.nota) : ''}</span>
+        ${compu ? `<button class="btn btn-sm" onclick="setMaqEstado_('${m.id}','');render();showToast('✅ ${e(m.label)} funcionando otra vez')" style="background:#052e16;color:#4ade80;border:1px solid #166534">✅ Ya funciona</button>` : ''}
+      </div>
+      ${mov.length ? `<div style="font-size:12px;color:#fca5a5;margin-top:4px;font-weight:700">⚠️ Hay que cambiar de máquina ${mov.length} orden${mov.length === 1 ? '' : 'es'} — el motor ya las movió:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px">${mov.map(x => `<span onclick="openOrd('${e(x.o.id)}')" style="cursor:pointer;background:#1e293b;border-radius:6px;padding:3px 8px;font-size:11px;color:#e2e8f0">${e(x.o.id)} → <b style="color:#4ade80">${e(maqLabel_(x.a))}</b>${x.fijada ? ' 📌' : ''}</span>`).join('')}</div>` : (m.steps.some(s => IMP_STEPS.has(s)) ? `<div style="font-size:11px;color:#64748b;margin-top:2px">No tenía órdenes de impresión en cola.</div>` : '')}
+      ${sin.length ? `<div style="font-size:12px;color:#ef4444;margin-top:4px;font-weight:800">🚫 ${sin.length} orden${sin.length === 1 ? '' : 'es'} no tiene${sin.length === 1 ? '' : 'n'} otra máquina disponible: ${sin.map(x => e(x.o.id)).join(', ')}</div>` : ''}
+    </div>`; }).join('')}
+  </div>`;
+        }
+        function cambiarEstadoMaq_(machId, estado) {
+            if (!esCompuImpresion_()) { showToast('🔒 Solo la compu de impresión puede cambiar el estado de las máquinas'); render(); return; }
+            const m = MAQUINAS.find(x => x.id === machId); if (!m) return;
+            if (!ESTADOS_MAQ[estado]) { setMaqEstado_(machId, ''); render(); showToast('✅ ' + m.label + ' funcionando'); return; }
+            const nota = prompt(`${ESTADOS_MAQ[estado].icon} ${m.label} — ${ESTADOS_MAQ[estado].label}\n¿Qué le pasó? (opcional)`, '');
+            if (nota === null) { render(); return; }
+            setMaqEstado_(machId, estado, nota);
+            render();
+            const { movidas } = impMovidas_();
+            const n = movidas.filter(x => x.de === machId).length;
+            showToast(`${ESTADOS_MAQ[estado].icon} ${m.label}: ${ESTADOS_MAQ[estado].label}${n ? ` — ${n} orden${n === 1 ? '' : 'es'} se movieron a otra máquina (ver aviso arriba)` : ''}`, 6000);
+        }
+        function onDragOverMaq(ev, machId) {
+            ev.preventDefault();
+            document.querySelectorAll('.col').forEach(c => c.classList.remove('drag-over', 'drag-over-ok'));
+            const col = document.getElementById('colmaq_' + machId);
+            const o = orders.find(x => x.id === _dragId), m = MAQUINAS.find(x => x.id === machId);
+            if (!col || !o || !m) return;
+            const puede = esCompuImpresion_() && pasosImpDe_(o).some(s => m.steps.includes(s));
+            col.classList.add(puede ? 'drag-over-ok' : 'drag-over');
+        }
+        function pasosImpDe_(o) { return calcT(o, cfg).pasos.filter(p => IMP_STEPS.has(p.id)).map(p => p.id); }
+        function onDropMaq(ev, machId) {
+            ev.preventDefault();
+            document.querySelectorAll('.col').forEach(c => c.classList.remove('drag-over', 'drag-over-ok'));
+            const o = orders.find(x => x.id === _dragId); _dragId = null;
+            const m = MAQUINAS.find(x => x.id === machId);
+            if (!o || !m || o.etapa !== 'impresion') return;
+            if (!esCompuImpresion_()) { showToast('🔒 Solo la compu de impresión puede cambiar la máquina de una orden'); return; }
+            if (!pasosImpDe_(o).some(s => m.steps.includes(s))) { showToast(`🚫 ${m.label} no puede imprimir esta orden (${o.tipoInteriores === 'byn' && o.tipo !== 'port_sub' ? 'es B&N' : 'es a color'})`); return; }
+            if (maqFuera_(machId) && !confirm(`${m.label} está ${ESTADOS_MAQ[maqEstado[machId].estado].label.toLowerCase()}. ¿Fijarla ahí de todos modos? (el motor la va a mover a otra mientras siga así)`)) return;
+            setMaqAsignada_(o.id, machId);
+            render();
+            showToast(`📌 ${o.id} → ${m.label}`);
+        }
+        function quitarFijada_(ordId) {
+            if (!esCompuImpresion_()) { showToast('🔒 Solo la compu de impresión puede cambiar la máquina'); return; }
+            setMaqAsignada_(ordId, null); render(); showToast('⚙️ ' + ordId + ': el motor vuelve a elegir la máquina');
+        }
+        function soloImpresionHTML() {
+            const enImp = orders.filter(o => o.etapa === 'impresion' && !o._merged);
+            if (!enImp.length) return `<div style="color:#334155;font-size:13px;text-align:center;padding:40px 0">🖨️ Nada en Impresión ahorita</div>`;
+            const { porOrden, blocks, finishMin } = impPorMaquina_(false);
+            const impEt = ETAPAS[0], etapasAll = allEtapas(orders), compu = esCompuImpresion_();
+            const sinMaq = enImp.filter(o => !porOrden[o.id]);
+            const colMaq = m => {
+                const st = maqEstado[m.id], E = st && ESTADOS_MAQ[st.estado];
+                const items = enImp.filter(o => porOrden[o.id] && porOrden[o.id].machId === m.id).sort((a, b) => porOrden[a.id].start - porOrden[b.id].start);
+                const vis = items.filter(o => matchSearch(o));
+                const carga = blocks.filter(b => b.machId === m.id && IMP_STEPS.has(b.stepId)).reduce((s, b) => s + b.dur, 0);
+                const color = m.grupo.includes('B&N') ? '#94a3b8' : '#fb923c';
+                const sel = `<select onchange="cambiarEstadoMaq_('${m.id}',this.value)" onclick="event.stopPropagation()" style="margin-top:6px;width:100%;background:#0f172a;color:${E ? E.color : '#4ade80'};border:1px solid #334155;border-radius:6px;padding:4px;font-size:11px;font-weight:700">
+          <option value="" ${!E ? 'selected' : ''}>🟢 Funcionando</option>
+          <option value="mant" ${st && st.estado === 'mant' ? 'selected' : ''}>🔧 En mantenimiento</option>
+          <option value="fuera" ${st && st.estado === 'fuera' ? 'selected' : ''}>🔴 Fuera de servicio</option></select>`;
+                const estadoTxt = `<div style="margin-top:6px;font-size:11px;font-weight:700;color:${E ? E.color : '#4ade80'}">${E ? E.icon + ' ' + E.label : '🟢 Funcionando'}</div>`;
+                return `<div class="col" id="colmaq_${m.id}" ondragover="onDragOverMaq(event,'${m.id}')" ondragleave="onDragLeave(event)" ondrop="onDropMaq(event,'${m.id}')" style="${E ? `background:#2a0a0a;border:2px solid ${E.color}` : ''}">
+    <div class="col-hdr" style="border-color:${E ? E.color : color};display:block">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+        <div style="display:flex;align-items:center;gap:6px"><span style="font-size:18px">${m.grupo.includes('B&N') ? '⬛' : '🎨'}</span>
+          <div><div style="font-weight:700;font-size:13px;color:#f1f5f9">${e(m.label)}</div>
+          <div style="font-size:10px;color:#475569">${carga ? '⏱ ' + mStr(carga) + ' en cola' : 'Sin cola'}</div></div>
+        </div>
+        <span class="badge" style="background:${color}33;color:${color}">${searchQ && vis.length !== items.length ? vis.length + '/' + items.length : items.length}</span>
+      </div>
+      ${compu ? sel : estadoTxt}
+      ${E && st.nota ? `<div style="font-size:10px;color:#94a3b8;margin-top:3px">${e(st.nota)}</div>` : ''}
+    </div>
+    ${vis.length ? vis.map(o => {
+                    const info = porOrden[o.id], fij = maqFijadaDe_(o);
+                    const extra = [
+                        fij === m.id ? `<span style="color:#60a5fa">📌 Fijada a mano</span>${compu ? ` · <a href="#" onclick="event.preventDefault();event.stopPropagation();quitarFijada_('${e(o.id)}')" style="color:#94a3b8">↺ que elija el motor</a>` : ''}` : '',
+                        fij && fij !== m.id && maqFuera_(fij) ? `<span style="color:#fca5a5">⚠️ Iba en ${e(maqLabel_(fij))} (fuera) — movida sola</span>` : '',
+                        ...info.otros.map(x => `<span style="color:#c084fc">+ ${x.stepNom} en ${e(maqLabel_(x.machId))}</span>`),
+                    ].filter(Boolean);
+                    return cardHTML(o, impEt, 0, false, etapasAll, items.indexOf(o) + 1, finishMin) + (extra.length ? `<div style="font-size:10px;margin:-4px 2px 8px;line-height:1.5">${extra.join('<br>')}</div>` : '');
+                }).join('') : `<div style="color:#334155;font-size:12px;text-align:center;padding:20px 0;border:2px dashed #1e293b;border-radius:8px;margin:4px 0">${searchQ && items.length ? '🔍 Sin resultados' : compu ? 'Arrastra aquí' : 'Sin órdenes'}</div>`}
+  </div>`;
+            };
+            return `<div style="padding:8px 14px 0;font-size:11px;color:#64748b">${compu ? '🖨️ Esta es la compu de impresión: arrastra una tarjeta a otra máquina para cambiarla, o cambia el estado de una máquina en su columna.' : '🔒 Solo la compu de impresión puede cambiar máquinas (se activa en ⚙️ de esa computadora).'}</div>
+  <div class="board">${MAQ_IMP().map(colMaq).join('')}${sinMaq.length ? colHTML(impEt, 0, etapasAll, finishMin, sinMaq) : ''}</div>`;
+        }
         function soloAcabadosHTML() { return vistaFiltradaHTML(o => isAcabEtapa(o.etapa), '✂️ Nada en Acabados ahorita'); }
         function urgentesHTML() { return vistaFiltradaHTML(o => o.urgente, '✅ Sin órdenes urgentes'); }
         function atrasadasHTML() { return vistaFiltradaHTML(o => isOD(fechaCompromiso_(o)), '✅ Nada atrasado ahorita'); }
@@ -4818,6 +5001,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             return `<div class="overlay" onclick="if(event.target===this)closeCfg()">
     <div class="modal" style="max-width:620px" onclick="event.stopPropagation()">
       <div style="display:flex;justify-content:space-between;margin-bottom:16px"><h2 style="font-size:17px;font-weight:700">⚙️ Configuración de Máquinas</h2><button class="bico" onclick="closeCfg()" style="font-size:20px;color:#94a3b8">✕</button></div>
+      <label style="display:flex;align-items:center;gap:10px;background:#0f172a;border:1px solid ${esCompuImpresion_() ? '#fb923c' : '#334155'};border-radius:10px;padding:10px 12px;margin-bottom:14px;cursor:pointer">
+        <input type="checkbox" ${esCompuImpresion_() ? 'checked' : ''} onchange="setCompuImpresion_(this.checked)" style="width:18px;height:18px">
+        <div><div style="font-size:13px;font-weight:700;color:#fb923c">🖨️ Esta computadora es la de impresión</div>
+        <div style="font-size:11px;color:#64748b">Solo esta podrá cambiar la máquina de una orden y marcar máquinas fuera o en mantenimiento. Se guarda solo en esta computadora.</div></div>
+      </label>
       <span class="lbl" style="margin-top:0">Nombre de la imprenta</span>
       <input class="inp" value="${e(cfg.nombreImprenta)}" oninput="cfg.nombreImprenta=this.value;saveBoard()">
       <div class="g2">
