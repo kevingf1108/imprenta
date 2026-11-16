@@ -199,7 +199,8 @@ async function startNext(id){
   const a=list(G.approved);const x=id?a.find(z=>z.id===id):a[0];if(!x)return;
   if(players().filter(p=>x.target==="T"||p.g===x.target).length<2){flash="No hay suficientes personas para esa categoría.";return render();}
   const s=cfg().seconds,rid="r"+now();
-  await R().update({round:{id:rid,q:x.q,target:x.target,endsAt:now()+s*1000,total:s,stage:"vote"},["approved/"+x.id]:null});
+  const extra=cycle().length>=CYCLE?{cycleStart:now()}:{};
+  await R().update({...extra,round:{id:rid,q:x.q,target:x.target,endsAt:now()+s*1000,total:s,stage:"vote"},["approved/"+x.id]:null});
 }
 
 // ---------- tick (reloj + cierre automático) ----------
@@ -255,7 +256,7 @@ function proposeHTML(){
 }
 function playHTML(){
   const r=G.round;
-  if(!r)return `<h1>Pregunta #${list(G.history).length+1}</h1><p class="sub">Esperando a que Kevin lance la siguiente pregunta…</p>${proposeHTML()}`;
+  if(!r)return `<h1>Pregunta ${cycleInfo(null).pos} de ${CYCLE} 🥃</h1><p class="sub">Esperando a que Kevin lance la siguiente pregunta…</p>${proposeHTML()}`;
   if(r.stage==="vote"){
     const v=roundVotes(),mine=v[me],left=Math.max(0,Math.ceil((r.endsAt-now())/1000));
     const cands=players().filter(p=>(r.target==="T"||p.g===r.target)&&(cfg().selfVote||p.id!==me));
@@ -268,15 +269,29 @@ function playHTML(){
   }
   return resultsHTML(r)+proposeHTML();
 }
+const CYCLE=3;
+function cycle(){return list(G.history).filter(h=>(h.at||0)>(G.cycleStart||0));}
+function cycleInfo(r){
+  const c=cycle(),inC=r&&c.some(h=>h.id===r.id);
+  const pos=r?(inC?c.findIndex(h=>h.id===r.id)+1:c.length+1):c.length+1;
+  const isShot=!!(r&&r.stage==="results"&&inC&&c.length>=CYCLE);
+  const tot={};if(isShot)c.forEach(h=>(h.drinkers||[]).forEach(d=>tot[d]=(tot[d]||0)+1));
+  const list_=Object.entries(tot).map(([id,n])=>({id,n})).sort((x,y)=>y.n-x.n||P(x.id).name.localeCompare(P(y.id).name));
+  return {pos:Math.min(pos,CYCLE),isShot,tot,list:list_};
+}
+function shotListHTML(ci,big){
+  if(!ci.list.length)return big?`🙌 ¡Se salvaron todos!<small>Todos le atinaron al 1er lugar en las ${CYCLE} preguntas</small>`:`<h2>🙌 ¡Se salvaron todos!</h2><div>Todos le atinaron al 1er lugar en las ${CYCLE} preguntas.</div>`;
+  const rows=ci.list.map(x=>`${esc(P(x.id).name)} ${"🥃".repeat(x.n)}`).join(big?" · ":"<br>");
+  return big?`🥃 ¡HORA DEL SHOT!<small style="font-size:.55em;margin-top:1vh">${rows}</small>`:`<h2>🥃 ¡HORA DEL SHOT!</h2><div style="opacity:.9;margin-bottom:6px">Un shot por cada vez que no votaron por el 1er lugar:</div><div class="names" style="line-height:1.5">${rows}</div>`;
+}
 function resultsHTML(r){
-  const t=tally(r,(G.votes||{})[r.id]||{});
-  const iDrink=me&&t.drinkers.includes(me);
-  const shot=!t.total?`<div class="shot"><h2>Nadie votó 😐</h2></div>`
-    :!t.drinkers.length?`<div class="shot"><h2>🙌 ¡Se salvaron todos!</h2><div>Todos votaron por ${names(t.first)}.</div></div>`
-    :`<div class="shot"><h2>🥃 ¡SHOT!${me?(iDrink?" Te toca 😈":" Te salvaste 😎"):""}</h2><div style="opacity:.9;margin-bottom:6px">Toman todos los que no votaron por ${names(t.first)}:</div><div class="names">${names(t.drinkers)}</div></div>`;
-  return `<div class="card"><span class="tag ${r.target}">Resultados · ${t.total} votos</span><div class="q">${esc(r.q)}</div></div>${shot}
+  const t=tally(r,(G.votes||{})[r.id]||{}),ci=cycleInfo(r);
+  const mine=me?(ci.tot[me]||0):0;
+  const box=ci.isShot?`<div class="shot">${me?`<div style="font-size:20px;font-weight:800;margin-bottom:8px">${mine?`Te ${mine>1?"tocan":"toca"} ${mine} ${"🥃".repeat(mine)} 😈`:"Te salvaste 😎"}</div>`:""}${shotListHTML(ci)}</div>`
+    :`<p class="sub">🥃 Pregunta ${ci.pos} de ${CYCLE}. El shot llega en la pregunta ${CYCLE}.</p>`;
+  return `<div class="card"><span class="tag ${r.target}">Resultados · ${t.total} votos · Pregunta ${ci.pos} de ${CYCLE}</span><div class="q">${esc(r.q)}</div></div>${box}
   <div class="card">${t.rows.map((x,i)=>`<div class="res ${t.first.includes(x.id)?"first":""}"><div class="pos">${x.n?i+1:"–"}</div><div class="nm">${t.first.includes(x.id)?"👑 ":""}${esc(P(x.id).name)}</div><div class="ct">${x.n}</div></div>`).join("")}</div>
-  <p class="sub">🔒 Los votos son anónimos; solo se ve quién toma.</p>`;
+  <p class="sub">🔒 Los votos son anónimos.</p>`;
 }
 function shotsHTML(){
   const c={};players().forEach(p=>c[p.id]={s:0,w:0});
@@ -316,7 +331,7 @@ function tvHTML(){
     const c={};players().forEach(p=>c[p.id]=0);list(G.history).forEach(x=>(x.drinkers||[]).forEach(d=>c[d]!=null&&c[d]++));
     const top=players().map(p=>({p,n:c[p.id]})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n).slice(0,7),max=Math.max(1,...top.map(x=>x.n));
     const online=Object.keys(G.claims||{}).length;
-    return `<span class="ttag">Pregunta #${list(G.history).length+1}</span><div class="tq">¿Quién es más probable…? 🥃</div>
+    return `<span class="ttag">Pregunta ${cycleInfo(null).pos} de ${CYCLE} · luego shot 🥃</span><div class="tq">¿Quién es más probable…? 🥃</div>
     <div style="font-size:clamp(18px,2.4vw,40px);color:var(--mute)">${online} conectados · ${list(G.approved).length} preguntas listas · ${list(G.pending).length} esperando a Kevin</div>
     <div style="font-size:clamp(16px,2vw,34px);margin-top:2vh">Entra desde tu cel: <b>${esc(location.host+location.pathname)}</b></div>
     ${top.length?`<div style="margin-top:4vh"><div class="ttag" style="margin-bottom:1vh">Marcador de shots</div>${top.map(x=>`<div class="trow"><div class="tn">${esc(x.p.name)}</div><div class="tb"><i style="width:${x.n/max*100}%;background:linear-gradient(90deg,var(--acc),#ff8a4f)"></i></div><div>${x.n} 🥃</div></div>`).join("")}</div>`:""}`;
@@ -326,8 +341,8 @@ function tvHTML(){
     <div class="ttimer js-timer ${left<=10?"low":""}">${left?fmt(left):"¡Tiempo!"}</div>
     <div style="text-align:center;font-size:clamp(16px,2vw,34px);color:var(--mute);margin:1vh 0">${Object.keys(v).length} de ${players().length} ya votaron</div>
     <div class="tgrid">${players().map(p=>`<div class="tchip ${v[p.id]?"done":""}">${esc(p.name)}</div>`).join("")}</div>`;}
-  const t=tally(r,(G.votes||{})[r.id]||{}),max=Math.max(1,...t.rows.map(x=>x.n));
-  const shot=!t.total?`Nadie votó 😐`:!t.drinkers.length?`🙌 ¡Se salvaron todos!<small>Todos votaron por ${names(t.first)}</small>`:`🥃 ¡SHOT! ${names(t.drinkers)}<small>Se salvan solo los que votaron por ${names(t.first)}</small>`;
+  const t=tally(r,(G.votes||{})[r.id]||{}),max=Math.max(1,...t.rows.map(x=>x.n)),ci=cycleInfo(r);
+  const shot=ci.isShot?shotListHTML(ci,true):`👑 ${names(t.first)}<small>Pregunta ${ci.pos} de ${CYCLE} · el shot llega en la ${CYCLE}</small>`;
   return `<div><span class="ttag ${r.target}">Resultados · ${t.total} votos</span></div><div class="tq" style="font-size:clamp(26px,3.6vw,64px)">${esc(r.q)}</div><div class="tshot">${shot}</div>
   ${t.rows.filter(x=>x.n>0).map(x=>`<div class="trow ${t.first.includes(x.id)?"first":""}"><div class="tn">${t.first.includes(x.id)?"👑 ":""}${esc(P(x.id).name)}</div><div class="tb"><i style="width:${x.n/max*100}%"></i></div><div>${x.n}</div></div>`).join("")}`;
 }
@@ -363,7 +378,7 @@ function bind(){
   on("[data-del]",b=>R("approved/"+b.dataset.del).remove());
   on("#more",()=>{const r=G.round;R("round").update({endsAt:r.endsAt+15000,total:r.total+15});});
   on("#endnow",()=>confirmBox("¿Terminar la votación ya?",finalize));
-  on("#clear",()=>R("round").remove());
+  on("#clear",()=>{const u={round:null};if(cycle().length>=CYCLE)u.cycleStart=now();R().update(u);});
   document.querySelectorAll("[data-pn]").forEach(i=>i.onchange=()=>{const v=i.value.trim();if(v)R("players/"+i.dataset.pn+"/name").set(v);});
   on("[data-pg]",b=>R("players/"+b.dataset.pg+"/g").set(P(b.dataset.pg).g==="H"?"M":"H"));
   on("[data-px]",b=>confirmBox(`¿Quitar a ${esc(P(b.dataset.px).name)}?`,()=>R().update({["players/"+b.dataset.px]:null,["claims/"+b.dataset.px]:null})));
