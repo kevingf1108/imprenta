@@ -237,8 +237,8 @@ function joinHTML(){
   const cl=G.claims||{};
   return `<h1>¿Quién eres? 🍻</h1><p class="sub">Elige tu nombre. Solo un cel por persona.</p>
   ${flash?`<div class="err">${flash}</div>`:""}
-  <div class="grid">${players().map(p=>{const taken=cl[p.id]&&cl[p.id]!==DEVICE;return `<div class="chip ${p.g} ${taken?"done":""}" data-join="${p.id}">${esc(p.name)}</div>`}).join("")}</div>
-  <p class="sub" style="margin-top:14px">Los tachados ya los eligió alguien. Si es un error, Kevin los puede liberar.</p>`;
+  <div class="grid">${players().map(p=>{const taken=cl[p.id]&&cl[p.id]!==DEVICE;return `<div class="chip ${p.g} ${taken?"done":""}" data-join="${p.id}" data-taken="${taken?1:""}">${esc(p.name)}</div>`}).join("")}</div>
+  <p class="sub" style="margin-top:14px">Los tachados ya los eligió alguien. Si alguien se metió con tu nombre, Kevin te lo regresa desde 👑.</p>`;
 }
 function proposeHTML(){
   const d=dupCheck(draft.q);
@@ -299,8 +299,8 @@ function adminHTML(){
     <button class="btn pri" id="next" style="margin-top:12px" ${appr.length?"":"disabled style='opacity:.4;margin-top:12px'"}>Lanzar siguiente pregunta ⏱️</button></div>`:""}
   <div class="card"><label class="lbl" style="margin-top:0">Por aprobar (${pend.length})</label>${pend.length?pend.map(x=>item(x,"p")).join(""):`<p class="sub">Nada pendiente.</p>`}</div>
   <div class="card"><label class="lbl" style="margin-top:0">Aprobadas, en orden (${appr.length})</label>${appr.length?appr.map(x=>item(x,"a")).join(""):`<p class="sub">Ninguna.</p>`}</div>
-  <div class="card"><label class="lbl" style="margin-top:0">Jugadores · toca H/M para cambiar</label>
-    ${players().map(p=>`<div class="pl"><input type="text" value="${esc(p.name)}" data-pn="${p.id}"><button class="g ${p.g}" data-pg="${p.id}">${p.g}</button><button class="x" data-px="${p.id}">✕</button></div>`).join("")}
+  <div class="card"><label class="lbl" style="margin-top:0">Jugadores · H/M cambia · 🔓 libera el nombre</label>
+    ${players().map(p=>`<div class="pl"><input type="text" value="${esc(p.name)}" data-pn="${p.id}"><button class="g ${p.g}" data-pg="${p.id}">${p.g}</button>${(G.claims||{})[p.id]?`<button class="x" data-pr="${p.id}" title="Liberar nombre">🔓</button>`:""}<button class="x" data-px="${p.id}">✕</button></div>`).join("")}
     <button class="ghost" id="addp" style="width:100%">+ Agregar persona</button>
     <label class="lbl">¿Se vale votar por uno mismo?</label><div class="seg"><button data-sv="0" class="${!c.selfVote?"on":""}">No</button><button data-sv="1" class="${c.selfVote?"on":""}">Sí</button></div></div>
   <div class="card"><label class="lbl" style="margin-top:0">Links</label>
@@ -342,7 +342,9 @@ function bind(){
   on("#nav button",b=>{view=b.dataset.v;flash="";render();window.scrollTo(0,0);});
   on("#chg",()=>confirmBox("¿Cambiar de nombre?",()=>{release();render();}));
   on("#adm",()=>{view="admin";flash="";render();});
-  on("[data-join]",el=>claim(el.dataset.join));
+  on("[data-join]",el=>{
+    if(el.dataset.taken&&isAdmin)return confirmBox(`¿Quitarle “${esc(P(el.dataset.join).name)}” al otro cel y tomarlo aquí?`,async()=>{await R("claims/"+el.dataset.join).set(DEVICE);if(me&&me!==el.dataset.join)release();me=el.dataset.join;LS.set("enc-me",me);render();});
+    claim(el.dataset.join);});
   const qt=$("#qt");
   if(qt){qt.oninput=()=>{draft.q=qt.value;const d=dupCheck(qt.value);$("#dup").innerHTML=d.exact?`<div class="err">🚫 Ya existe: “${esc(d.match)}”</div>`:d.match?`<div class="warn">⚠️ Se parece a: “${esc(d.match)}”</div>`:"";};}
   on("[data-tg]",b=>{draft.target=b.dataset.tg;render();});
@@ -365,6 +367,7 @@ function bind(){
   document.querySelectorAll("[data-pn]").forEach(i=>i.onchange=()=>{const v=i.value.trim();if(v)R("players/"+i.dataset.pn+"/name").set(v);});
   on("[data-pg]",b=>R("players/"+b.dataset.pg+"/g").set(P(b.dataset.pg).g==="H"?"M":"H"));
   on("[data-px]",b=>confirmBox(`¿Quitar a ${esc(P(b.dataset.px).name)}?`,()=>R().update({["players/"+b.dataset.px]:null,["claims/"+b.dataset.px]:null})));
+  on("[data-pr]",b=>confirmBox(`¿Liberar el nombre de ${esc(P(b.dataset.pr).name)}? El cel que lo tenga tendrá que elegir otra vez.`,()=>R("claims/"+b.dataset.pr).remove()));
   on("#addp",()=>R("players/p"+now()).set({name:"Nuevo",g:"H",o:players().length}));
   on("#freeclaims",()=>confirmBox("¿Liberar todos los nombres? Cada quien tendrá que elegir otra vez.",()=>R("claims").remove()));
   on("#reset",()=>confirmBox("¿Borrar todas las preguntas, votos y shots?",()=>R().update({pending:null,approved:null,round:null,votes:null,history:null})));
