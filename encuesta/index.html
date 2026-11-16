@@ -270,6 +270,7 @@ function playHTML(){
   return resultsHTML(r)+proposeHTML();
 }
 const CYCLE=3;
+function scored(){return list(G.history).filter(h=>(h.at||0)>(G.scoreStart||0));}
 function cycle(){return list(G.history).filter(h=>(h.at||0)>(G.cycleStart||0));}
 function cycleInfo(r){
   const c=cycle(),inC=r&&c.some(h=>h.id===r.id);
@@ -295,7 +296,7 @@ function resultsHTML(r){
 }
 function shotsHTML(){
   const c={};players().forEach(p=>c[p.id]={s:0,w:0});
-  list(G.history).forEach(h=>{(h.drinkers||[]).forEach(d=>c[d]&&c[d].s++);(h.first||[]).forEach(f=>c[f]&&c[f].w++);});
+  scored().forEach(h=>{(h.drinkers||[]).forEach(d=>c[d]&&c[d].s++);(h.first||[]).forEach(f=>c[f]&&c[f].w++);});
   const rows=players().map(p=>({p,...c[p.id]})).sort((a,b)=>b.s-a.s||b.w-a.w);
   const hist=list(G.history).reverse();
   return `<h1>Marcador 🥃</h1><div class="card">${rows.map(x=>`<div class="res"><div class="nm">${esc(x.p.name)}<small>👑 ${x.w} veces 1er lugar</small></div><div class="ct">${x.s} 🥃</div></div>`).join("")}</div>
@@ -321,6 +322,7 @@ function adminHTML(){
   <div class="card"><label class="lbl" style="margin-top:0">Links</label>
     <p class="sub" style="margin:0 0 6px">Para todos:</p><input type="text" readonly value="${esc(location.origin+location.pathname)}">
     <p class="sub" style="margin:10px 0 6px">Para la tele:</p><input type="text" readonly value="${esc(location.origin+location.pathname+"?tv")}"></div>
+  <button class="ghost" id="resetscore" style="width:100%;margin-bottom:10px">🥃 Borrar marcador de shots (deja las preguntas)</button>
   <button class="ghost" id="freeclaims" style="width:100%;margin-bottom:10px">Liberar todos los nombres</button>
   <button class="ghost" id="reset" style="width:100%;margin-bottom:10px">Borrar TODO (preguntas, votos, shots)</button>
   <button class="ghost" id="logout" style="width:100%">Salir del modo Kevin</button>`;
@@ -328,7 +330,7 @@ function adminHTML(){
 function tvHTML(){
   const r=G.round;
   if(!r){
-    const c={};players().forEach(p=>c[p.id]=0);list(G.history).forEach(x=>(x.drinkers||[]).forEach(d=>c[d]!=null&&c[d]++));
+    const c={};players().forEach(p=>c[p.id]=0);scored().forEach(x=>(x.drinkers||[]).forEach(d=>c[d]!=null&&c[d]++));
     const top=players().map(p=>({p,n:c[p.id]})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n).slice(0,7),max=Math.max(1,...top.map(x=>x.n));
     const online=Object.keys(G.claims||{}).length;
     return `<span class="ttag">Pregunta ${cycleInfo(null).pos} de ${CYCLE} · luego shot 🥃</span><div class="tq">¿Quién es más probable…? 🥃</div>
@@ -384,8 +386,9 @@ function bind(){
   on("[data-px]",b=>confirmBox(`¿Quitar a ${esc(P(b.dataset.px).name)}?`,()=>R().update({["players/"+b.dataset.px]:null,["claims/"+b.dataset.px]:null})));
   on("[data-pr]",b=>confirmBox(`¿Liberar el nombre de ${esc(P(b.dataset.pr).name)}? El cel que lo tenga tendrá que elegir otra vez.`,()=>R("claims/"+b.dataset.pr).remove()));
   on("#addp",()=>R("players/p"+now()).set({name:"Nuevo",g:"H",o:players().length}));
+  on("#resetscore",()=>confirmBox("¿Borrar el marcador de shots? Todos regresan a 0 y empieza otra vez la pregunta 1 de 3.",()=>{const t=now();R().update({scoreStart:t,cycleStart:t});}));
   on("#freeclaims",()=>confirmBox("¿Liberar todos los nombres? Cada quien tendrá que elegir otra vez.",()=>R("claims").remove()));
-  on("#reset",()=>confirmBox("¿Borrar todas las preguntas, votos y shots?",()=>R().update({pending:null,approved:null,round:null,votes:null,history:null})));
+  on("#reset",()=>confirmBox("¿Borrar todas las preguntas, votos y shots?",()=>R().update({pending:null,approved:null,round:null,votes:null,history:null,scoreStart:null,cycleStart:null})));
   on("#logout",()=>{isAdmin=false;LS.set("enc-admin",null);view="play";render();});
 }
 render();
