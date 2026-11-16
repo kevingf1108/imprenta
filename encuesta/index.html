@@ -386,7 +386,7 @@ function bind(){
   on("[data-px]",b=>confirmBox(`¿Quitar a ${esc(P(b.dataset.px).name)}?`,()=>R().update({["players/"+b.dataset.px]:null,["claims/"+b.dataset.px]:null})));
   on("[data-pr]",b=>confirmBox(`¿Liberar el nombre de ${esc(P(b.dataset.pr).name)}? El cel que lo tenga tendrá que elegir otra vez.`,()=>R("claims/"+b.dataset.pr).remove()));
   on("#addp",()=>R("players/p"+now()).set({name:"Nuevo",g:"H",o:players().length}));
-  on("#resetscore",()=>confirmBox("¿Borrar el marcador de shots? Todos regresan a 0 y empieza otra vez la pregunta 1 de 3.",()=>{const t=now();R().update({scoreStart:t,cycleStart:t});}));
+  on("#resetscore",()=>confirmBox("¿Borrar el marcador de shots? Todos regresan a 0 y empieza otra vez la pregunta 1 de 6.",()=>{const t=now();R().update({scoreStart:t,cycleStart:t});}));
   on("#freeclaims",()=>confirmBox("¿Liberar todos los nombres? Cada quien tendrá que elegir otra vez.",()=>R("claims").remove()));
   on("#reset",()=>confirmBox("¿Borrar todas las preguntas, votos y shots?",()=>R().update({pending:null,approved:null,round:null,votes:null,history:null,scoreStart:null,cycleStart:null})));
   on("#logout",()=>{isAdmin=false;LS.set("enc-admin",null);view="play";render();});
