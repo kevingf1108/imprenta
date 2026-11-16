@@ -269,7 +269,7 @@ function playHTML(){
   }
   return resultsHTML(r)+proposeHTML();
 }
-const CYCLE=3;
+const CYCLE=6;
 function scored(){return list(G.history).filter(h=>(h.at||0)>(G.scoreStart||0));}
 function cycle(){return list(G.history).filter(h=>(h.at||0)>(G.cycleStart||0));}
 function cycleInfo(r){
