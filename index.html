@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.42';
+        const APP_VERSION = 'v9.43';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1083,7 +1083,9 @@
                     etapaMap = data.etapaMap || {};
                     hiddenGroups = data.hiddenGroups || {};
                     notasPersonas = data.notasPersonas || {};
+                    const _maqAntes = maqEstado;
                     maqEstado = data.maqEstado || {};
+                    if (!firstLoad) MAQUINAS.forEach(m => { if (_maqAntes[m.id] && !maqEstado[m.id]) showToast('✅ ' + m.label + ' ya funciona otra vez', 6000); });
                     maqAsignada = data.maqAsignada || {};
                     // Restaurar órdenes manuales (union_results) guardadas en Firebase
                     const rawMO = data.manualOrders;
@@ -1096,6 +1098,7 @@
                     }
                 }
                 render();
+                revisarAvisoMaq_();
                 if (firstLoad) setTimeout(() => setAutoSync(true), 500);
                 if (firstLoad) { publicarEstadoApi_(); setInterval(publicarEstadoApi_, 10 * 60 * 1000); }
             }, err => {
@@ -2822,7 +2825,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function render() {
             if (tvTimer) { clearInterval(tvTimer); tvTimer = null; }
             const root = document.getElementById('root');
-            if (V === 'tv') { root.innerHTML = tvHTML(); startTV(); return; }
+            if (V === 'tv') { root.innerHTML = avisoMaquinasHTML() + tvHTML() + avisoMaqModalHTML(); startTV(); return; }
             // root.innerHTML destruye y recrea el .board (scroll horizontal) — sin esto,
             // cada movimiento de orden regresaba la vista al extremo del tablero.
             const _oldBoard = document.querySelector('.board');
@@ -2832,10 +2835,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       <nav class="sidebar">${sidebarHTML()}</nav>
       <div class="main-col">
         <div style="background:#1e293b;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #334155;position:sticky;top:0;z-index:30">${hdrHTML()}</div>
+        ${avisoMaquinasHTML()}
         <div id="mc">${V === 'resumen' ? resumenDiaHTML() : V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'personas' ? personasHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : tableroConFiltroHTML()}</div>
       </div>
     </div>
-    ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}${showAccesos ? accesosHTML() : ''}`;
+    ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}${showAccesos ? accesosHTML() : ''}${avisoMaqModalHTML()}`;
             const _newBoard = document.querySelector('.board');
             if (_newBoard) _newBoard.scrollLeft = _scrollLeft;
         }
@@ -3746,7 +3750,57 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     ${opts.map(([v, ic, l]) => `<button onclick="setV('${v}')" style="padding:6px 13px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-weight:700;background:${V === v ? '#3b82f6' : '#1e293b'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${ic} ${l}</button>`).join('')}
   </div>`;
         }
-        function tableroConFiltroHTML() { return tableroFiltroBarHTML() + avisoMaquinasHTML() + (BOARD_VIEWS[V] ? BOARD_VIEWS[V]() : boardHTML()); }
+        function tableroConFiltroHTML() { return tableroFiltroBarHTML() + (BOARD_VIEWS[V] ? BOARD_VIEWS[V]() : boardHTML()); }
+        // ── Ventana de aviso (v9.43) ─────────────────────────────────────────────────────
+        // Cuando una máquina pasa a fuera/mantenimiento, en CADA computadora sale una ventana
+        // (con sonido) hasta que alguien de esa compu pica "Entendido". Se recuerda por equipo
+        // (máquina + hora del cambio), así no vuelve a salir por la misma descompostura.
+        let _avisoMaqAbierto = null; // machId
+        function avisosVistos_() { try { return JSON.parse(localStorage.getItem('imp_avisos_maq') || '{}'); } catch { return {}; } }
+        function revisarAvisoMaq_() {
+            if (_avisoMaqAbierto && maqFuera_(_avisoMaqAbierto)) return;
+            const vistos = avisosVistos_();
+            const nueva = MAQUINAS.find(m => maqFuera_(m.id) && !vistos[m.id + '|' + maqEstado[m.id].ts]);
+            const antes = _avisoMaqAbierto;
+            _avisoMaqAbierto = nueva ? nueva.id : null;
+            if (_avisoMaqAbierto !== antes) { render(); if (_avisoMaqAbierto) sonarAviso_(); }
+        }
+        function cerrarAvisoMaq_() {
+            if (_avisoMaqAbierto && maqEstado[_avisoMaqAbierto]) {
+                const vistos = avisosVistos_(), lim = Date.now() - 30 * 86400000;
+                vistos[_avisoMaqAbierto + '|' + maqEstado[_avisoMaqAbierto].ts] = Date.now();
+                Object.keys(vistos).forEach(k => { if (vistos[k] < lim) delete vistos[k]; });
+                try { localStorage.setItem('imp_avisos_maq', JSON.stringify(vistos)); } catch { }
+            }
+            _avisoMaqAbierto = null; render(); revisarAvisoMaq_();
+        }
+        function sonarAviso_() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                [0, 0.35, 0.7].forEach(t => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = 880; o.connect(g); g.connect(ctx.destination); g.gain.setValueAtTime(0.25, ctx.currentTime + t); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.25); o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.26); });
+            } catch { }
+        }
+        function avisoMaqModalHTML() {
+            const id = _avisoMaqAbierto; if (!id || !maqFuera_(id)) return '';
+            const m = MAQUINAS.find(x => x.id === id), st = maqEstado[id], E = ESTADOS_MAQ[st.estado];
+            const { movidas, sinMaquina } = impMovidas_();
+            const mov = movidas.filter(x => x.de === id), sin = sinMaquina.filter(x => x.machId === id);
+            return `<div class="overlay" style="z-index:200">
+    <div class="modal" style="max-width:480px;border:3px solid ${E.color};text-align:center" onclick="event.stopPropagation()">
+      <div style="font-size:54px;line-height:1">${E.icon}</div>
+      <div style="font-size:22px;font-weight:900;color:${E.color};margin-top:8px">${e(m.label)}</div>
+      <div style="font-size:16px;font-weight:800;color:#f1f5f9;margin-top:2px">${E.label.toUpperCase()}</div>
+      ${st.nota ? `<div style="font-size:13px;color:#94a3b8;margin-top:6px">Motivo: ${e(st.nota)}</div>` : ''}
+      <div style="font-size:11px;color:#64748b;margin-top:4px">${haceCuanto_(st.ts)}</div>
+      ${mov.length ? `<div style="text-align:left;background:#0f172a;border-radius:10px;padding:10px 12px;margin-top:14px">
+        <div style="font-size:13px;font-weight:800;color:#fca5a5;margin-bottom:6px">⚠️ Hay que cambiar de máquina ${mov.length} orden${mov.length === 1 ? '' : 'es'}:</div>
+        ${mov.map(x => `<div style="font-size:13px;color:#e2e8f0;padding:2px 0"><b>${e(x.o.id)}</b> → <b style="color:#4ade80">${e(maqLabel_(x.a))}</b></div>`).join('')}
+      </div>` : m.steps.some(s => IMP_STEPS.has(s)) ? `<div style="font-size:13px;color:#64748b;margin-top:14px">No tenía órdenes en cola.</div>` : ''}
+      ${sin.length ? `<div style="font-size:13px;color:#ef4444;font-weight:800;margin-top:10px">🚫 Sin otra máquina disponible: ${sin.map(x => e(x.o.id)).join(', ')}</div>` : ''}
+      <button class="btn btn-p" onclick="cerrarAvisoMaq_()" style="margin-top:16px;width:100%;padding:12px;font-size:15px">Entendido</button>
+    </div>
+  </div>`;
+        }
         function renderBoard() {
             const mc = document.getElementById('mc');
             if (!mc || !BOARD_VIEWS[V]) return;
@@ -3955,6 +4009,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const nota = prompt(`${ESTADOS_MAQ[estado].icon} ${m.label} — ${ESTADOS_MAQ[estado].label}\n¿Qué le pasó? (opcional)`, '');
             if (nota === null) { render(); return; }
             setMaqEstado_(machId, estado, nota);
+            try { const v = avisosVistos_(); v[machId + '|' + maqEstado[machId].ts] = Date.now(); localStorage.setItem('imp_avisos_maq', JSON.stringify(v)); } catch { }
             render();
             const { movidas } = impMovidas_();
             const n = movidas.filter(x => x.de === machId).length;
