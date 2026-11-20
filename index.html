@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.45';
+        const APP_VERSION = 'v9.46';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1102,7 +1102,7 @@
                 }
                 render();
                 revisarAvisoMaq_();
-                if (firstLoad) { setTimeout(revisarAvisoHoy_, 4000); setInterval(revisarAvisoHoy_, 60000); } // espera al sync de las hojas; cada minuto revisa si ya cambió el día
+                if (firstLoad) { setTimeout(revisarAvisoHoy_, 4000); setInterval(() => { if (_diaRender !== ymdLocal(new Date())) { _diaRender = ymdLocal(new Date()); render(); } revisarAvisoHoy_(); revisarAvisoMaq_(); }, 60000); } // espera al sync de las hojas; cada minuto revisa si ya cambió el día
                 if (firstLoad) setTimeout(() => setAutoSync(true), 500);
                 if (firstLoad) { publicarEstadoApi_(); setInterval(publicarEstadoApi_, 10 * 60 * 1000); }
             }, err => {
@@ -1585,6 +1585,10 @@
             }
             // Máquina fuera / en mantenimiento → se mueve sola a otra que pueda hacer el paso.
             // Si TODAS las del paso están fuera, se deja como estaba (no hay a dónde mandarla).
+            // v9.46 (a pedido de Kevin): en IMPRESIÓN solo se mueve lo que hay que imprimir hoy
+            // (o ya va tarde) — lo demás se queda esperando en su máquina; cada día que siga
+            // descompuesta, se mueve solo lo que ese día ya toca (limiteImpresion_ <= hoy).
+            if (!_ignorarEstadoMaq && cands.some(m => maqFuera_(m.id)) && IMP_STEPS.has(stepId) && !tocaImprimirHoy_(o)) return cands;
             if (!_ignorarEstadoMaq) {
                 const disp = cands.filter(m => !maqFuera_(m.id));
                 if (disp.length) cands = disp;
@@ -3761,10 +3765,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // (máquina + hora del cambio), así no vuelve a salir por la misma descompostura.
         let _avisoMaqAbierto = null; // machId
         function avisosVistos_() { try { return JSON.parse(localStorage.getItem('imp_avisos_maq') || '{}'); } catch { return {}; } }
+        function claveAvisoMaq_(machId) { return machId + '|' + maqEstado[machId].ts + '|' + ymdLocal(hoyLaboral_()); }
         function revisarAvisoMaq_() {
             if (_avisoMaqAbierto && maqFuera_(_avisoMaqAbierto)) return;
             const vistos = avisosVistos_();
-            const nueva = MAQUINAS.find(m => maqFuera_(m.id) && !vistos[m.id + '|' + maqEstado[m.id].ts]);
+            const nueva = MAQUINAS.find(m => maqFuera_(m.id) && !vistos[claveAvisoMaq_(m.id)]);
             const antes = _avisoMaqAbierto;
             _avisoMaqAbierto = nueva ? nueva.id : null;
             if (_avisoMaqAbierto !== antes) { render(); if (_avisoMaqAbierto) sonarAviso_(); }
@@ -3772,7 +3777,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function cerrarAvisoMaq_() {
             if (_avisoMaqAbierto && maqEstado[_avisoMaqAbierto]) {
                 const vistos = avisosVistos_(), lim = Date.now() - 30 * 86400000;
-                vistos[_avisoMaqAbierto + '|' + maqEstado[_avisoMaqAbierto].ts] = Date.now();
+                vistos[claveAvisoMaq_(_avisoMaqAbierto)] = Date.now();
                 Object.keys(vistos).forEach(k => { if (vistos[k] < lim) delete vistos[k]; });
                 try { localStorage.setItem('imp_avisos_maq', JSON.stringify(vistos)); } catch { }
             }
@@ -3787,8 +3792,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function avisoMaqModalHTML() {
             const id = _avisoMaqAbierto; if (!id || !maqFuera_(id)) return '';
             const m = MAQUINAS.find(x => x.id === id), st = maqEstado[id], E = ESTADOS_MAQ[st.estado];
-            const { movidas, sinMaquina } = impMovidas_();
-            const mov = movidas.filter(x => x.de === id), sin = sinMaquina.filter(x => x.machId === id);
+            const { movidas, sinMaquina, esperando } = impMovidas_();
+            const mov = movidas.filter(x => x.de === id), sin = sinMaquina.filter(x => x.machId === id), esp = esperando.filter(x => x.machId === id);
             return `<div class="overlay" style="z-index:200">
     <div class="modal" style="max-width:480px;border:3px solid ${E.color};text-align:center" onclick="event.stopPropagation()">
       <div style="font-size:54px;line-height:1">${E.icon}</div>
@@ -3797,9 +3802,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       ${st.nota ? `<div style="font-size:13px;color:#94a3b8;margin-top:6px">Motivo: ${e(st.nota)}</div>` : ''}
       <div style="font-size:11px;color:#64748b;margin-top:4px">${haceCuanto_(st.ts)}</div>
       ${mov.length ? `<div style="text-align:left;background:#0f172a;border-radius:10px;padding:10px 12px;margin-top:14px">
-        <div style="font-size:13px;font-weight:800;color:#fca5a5;margin-bottom:6px">⚠️ Hay que cambiar de máquina ${mov.length} orden${mov.length === 1 ? '' : 'es'}:</div>
+        <div style="font-size:13px;font-weight:800;color:#fca5a5;margin-bottom:6px">⚠️ Hoy hay que imprimir en otra máquina ${mov.length} orden${mov.length === 1 ? '' : 'es'}:</div>
         ${mov.map(x => `<div style="font-size:13px;color:#e2e8f0;padding:2px 0"><b>${e(x.o.id)}</b> → <b style="color:#4ade80">${e(maqLabel_(x.a))}</b></div>`).join('')}
-      </div>` : m.steps.some(s => IMP_STEPS.has(s)) ? `<div style="font-size:13px;color:#64748b;margin-top:14px">No tenía órdenes en cola.</div>` : ''}
+      </div>` : m.steps.some(s => IMP_STEPS.has(s)) ? `<div style="font-size:13px;color:#64748b;margin-top:14px">Nada de lo que tiene que imprimirse hoy estaba en esta máquina.</div>` : ''}
+      ${esp.length ? `<div style="font-size:12px;color:#94a3b8;margin-top:10px">⏸️ ${esp.length} orden${esp.length === 1 ? '' : 'es'} más se queda${esp.length === 1 ? '' : 'n'} esperando a que se arregle. Si sigue descompuesta, se mueven solas el día que les toque.</div>` : ''}
       ${sin.length ? `<div style="font-size:13px;color:#ef4444;font-weight:800;margin-top:10px">🚫 Sin otra máquina disponible: ${sin.map(x => e(x.o.id)).join(', ')}</div>` : ''}
       <button class="btn btn-p" onclick="cerrarAvisoMaq_()" style="margin-top:16px;width:100%;padding:12px;font-size:15px">Entendido</button>
     </div>
@@ -3970,17 +3976,18 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // tienen a dónde ir (todas las máquinas de su paso están fuera).
         function impMovidas_() {
             const fuera = MAQ_IMP().filter(m => maqFuera_(m.id));
-            if (!fuera.length) return { fuera, movidas: [], sinMaquina: [] };
+            if (!fuera.length) return { fuera, movidas: [], sinMaquina: [], esperando: [] };
             const antes = impPorMaquina_(true).porOrden, ahora = impPorMaquina_(false).porOrden;
             const enImp = orders.filter(o => o.etapa === 'impresion' && !o._merged);
-            const movidas = [], sinMaquina = [];
+            const movidas = [], sinMaquina = [], esperando = [];
             enImp.forEach(o => {
                 const a = antes[o.id], n = ahora[o.id];
                 if (!n) return;
-                if (maqFuera_(n.machId)) { sinMaquina.push({ o, machId: n.machId }); return; }
+                if (maqFuera_(n.machId)) { (tocaImprimirHoy_(o) ? sinMaquina : esperando).push({ o, machId: n.machId, lim: limiteImpresion_(o) }); return; }
                 if (a && a.machId !== n.machId && maqFuera_(a.machId)) movidas.push({ o, de: a.machId, a: n.machId, fijada: maqFijadaDe_(o) === a.machId || o.maquina === a.machId });
             });
-            return { fuera, movidas, sinMaquina };
+            esperando.sort((x, y) => (x.lim || 'z').localeCompare(y.lim || 'z'));
+            return { fuera, movidas, sinMaquina, esperando };
         }
         function maqLabel_(id) { const m = MAQUINAS.find(x => x.id === id); return m ? m.label : id; }
         function haceCuanto_(ts) { const m = Math.round((Date.now() - ts) / 60000); return m < 1 ? 'ahora' : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `hace ${Math.round(m / 1440)} días`; }
@@ -3989,19 +3996,20 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function avisoMaquinasHTML() {
             const fueraTodas = MAQUINAS.filter(m => maqFuera_(m.id));
             if (!fueraTodas.length) return '';
-            const { movidas, sinMaquina } = impMovidas_();
+            const { movidas, sinMaquina, esperando } = impMovidas_();
             const compu = puedeCambiarMaq_();
             return `<div style="margin:10px 14px 0;background:#2a0a0a;border:2px solid #ef4444;border-radius:10px;padding:10px 14px">
     ${fueraTodas.map(m => { const st = maqEstado[m.id], E = ESTADOS_MAQ[st.estado];
-        const mov = movidas.filter(x => x.de === m.id), sin = sinMaquina.filter(x => x.machId === m.id);
+        const mov = movidas.filter(x => x.de === m.id), sin = sinMaquina.filter(x => x.machId === m.id), esp = esperando.filter(x => x.machId === m.id);
         return `<div style="margin:4px 0">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-size:14px;font-weight:800;color:${E.color}">${E.icon} ${e(m.label)} — ${E.label.toUpperCase()}</span>
         <span style="font-size:11px;color:#94a3b8">${haceCuanto_(st.ts)}${st.nota ? ' · ' + e(st.nota) : ''}</span>
         ${compu ? `<button class="btn btn-sm" onclick="setMaqEstado_('${m.id}','');render();showToast('✅ ${e(m.label)} funcionando otra vez')" style="background:#052e16;color:#4ade80;border:1px solid #166534">✅ Ya funciona</button>` : ''}
       </div>
-      ${mov.length ? `<div style="font-size:12px;color:#fca5a5;margin-top:4px;font-weight:700">⚠️ Hay que cambiar de máquina ${mov.length} orden${mov.length === 1 ? '' : 'es'} — el motor ya las movió:</div>
-      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px">${mov.map(x => `<span onclick="openOrd('${e(x.o.id)}')" style="cursor:pointer;background:#1e293b;border-radius:6px;padding:3px 8px;font-size:11px;color:#e2e8f0">${e(x.o.id)} → <b style="color:#4ade80">${e(maqLabel_(x.a))}</b>${x.fijada ? ' 📌' : ''}</span>`).join('')}</div>` : (m.steps.some(s => IMP_STEPS.has(s)) ? `<div style="font-size:11px;color:#64748b;margin-top:2px">No tenía órdenes de impresión en cola.</div>` : '')}
+      ${mov.length ? `<div style="font-size:12px;color:#fca5a5;margin-top:4px;font-weight:700">⚠️ Hay que imprimir hoy en otra máquina ${mov.length} orden${mov.length === 1 ? '' : 'es'} — el motor ya las movió:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px">${mov.map(x => `<span onclick="openOrd('${e(x.o.id)}')" style="cursor:pointer;background:#1e293b;border-radius:6px;padding:3px 8px;font-size:11px;color:#e2e8f0">${e(x.o.id)} → <b style="color:#4ade80">${e(maqLabel_(x.a))}</b>${x.fijada ? ' 📌' : ''}</span>`).join('')}</div>` : (m.steps.some(s => IMP_STEPS.has(s)) ? `<div style="font-size:11px;color:#64748b;margin-top:2px">Nada de lo que tiene que imprimirse hoy estaba en esta máquina.</div>` : '')}
+      ${esp.length ? `<div style="font-size:11px;color:#94a3b8;margin-top:4px">⏸️ ${esp.length} orden${esp.length === 1 ? '' : 'es'} se queda${esp.length === 1 ? '' : 'n'} esperando a que se arregle (se mueven solas el día que les toque): ${esp.map(x => `${e(x.o.id)}${x.lim ? ' <span style="color:#64748b">(' + fDate(x.lim) + ')</span>' : ''}`).join(', ')}</div>` : ''}
       ${sin.length ? `<div style="font-size:12px;color:#ef4444;margin-top:4px;font-weight:800">🚫 ${sin.length} orden${sin.length === 1 ? '' : 'es'} no tiene${sin.length === 1 ? '' : 'n'} otra máquina disponible: ${sin.map(x => e(x.o.id)).join(', ')}</div>` : ''}
     </div>`; }).join('')}
   </div>`;
@@ -4013,7 +4021,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const nota = prompt(`${ESTADOS_MAQ[estado].icon} ${m.label} — ${ESTADOS_MAQ[estado].label}\n¿Qué le pasó? (opcional)`, '');
             if (nota === null) { render(); return; }
             setMaqEstado_(machId, estado, nota);
-            try { const v = avisosVistos_(); v[machId + '|' + maqEstado[machId].ts] = Date.now(); localStorage.setItem('imp_avisos_maq', JSON.stringify(v)); } catch { }
+            try { const v = avisosVistos_(); v[claveAvisoMaq_(machId)] = Date.now(); localStorage.setItem('imp_avisos_maq', JSON.stringify(v)); } catch { }
             render();
             const { movidas } = impMovidas_();
             const n = movidas.filter(x => x.de === machId).length;
@@ -4051,6 +4059,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // (acabados + empaque, con bufferFactor; mínimo 1 día) → contando hacia atrás desde su
         // fecha compromiso sale el ÚLTIMO día en que se puede imprimir sin que se atrase.
         // Si ese día es hoy (o ya pasó) → va en la lista de hoy, agrupada por la máquina del motor.
+        function tocaImprimirHoy_(o) { const lim = limiteImpresion_(o); return !!lim && lim <= ymdLocal(hoyLaboral_()); }
         function esLaborable_(d) { return d.getDay() > 0 && d.getDay() < 6 && !new Set(cfg.feriados || []).has(ymdLocal(d)); }
         function diaLaboralAtras_(base, n) {
             const dt = new Date(base); let c = 0;
@@ -4149,7 +4158,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         }
         // En la compu de impresión, la primera vez que se abre la app cada día laboral sale un
         // aviso con cuántas órdenes hay que imprimir hoy (botón para ver la lista).
-        let _avisoHoyAbierto = false;
+        let _avisoHoyAbierto = false, _diaRender = ymdLocal(new Date());
         function revisarAvisoHoy_() {
             if (!esCompuImpresion_() || !orders.length) return;
             const hoy = ymdLocal(hoyLaboral_());
