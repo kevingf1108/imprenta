@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.43';
+        const APP_VERSION = 'v9.44';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -987,6 +987,9 @@
         function maqFijadaDe_(o) { const a = maqAsignada[keyPersona_(o.id)]; return a && a.maq ? a.maq : null; }
         // Solo UNA computadora (la de impresión) puede cambiar máquinas — se marca por equipo en ⚙️.
         function esCompuImpresion_() { try { return localStorage.getItem('imp_compu_impresion') === '1'; } catch { return false; } }
+        // v9.44: además de la compu de impresión, un ADMIN (Kevin, entrando con Google) puede
+        // cambiar máquinas desde cualquier computadora.
+        function puedeCambiarMaq_() { return esCompuImpresion_() || !!_esAdmin; }
         function setCompuImpresion_(on) { try { if (on) localStorage.setItem('imp_compu_impresion', '1'); else localStorage.removeItem('imp_compu_impresion'); } catch { } render(); }
         function setNotaPersona_(nombre, texto) {
             const k = keyPersona_(nombre), v = String(texto || '').trim();
@@ -3986,7 +3989,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const fueraTodas = MAQUINAS.filter(m => maqFuera_(m.id));
             if (!fueraTodas.length) return '';
             const { movidas, sinMaquina } = impMovidas_();
-            const compu = esCompuImpresion_();
+            const compu = puedeCambiarMaq_();
             return `<div style="margin:10px 14px 0;background:#2a0a0a;border:2px solid #ef4444;border-radius:10px;padding:10px 14px">
     ${fueraTodas.map(m => { const st = maqEstado[m.id], E = ESTADOS_MAQ[st.estado];
         const mov = movidas.filter(x => x.de === m.id), sin = sinMaquina.filter(x => x.machId === m.id);
@@ -4003,7 +4006,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
   </div>`;
         }
         function cambiarEstadoMaq_(machId, estado) {
-            if (!esCompuImpresion_()) { showToast('🔒 Solo la compu de impresión puede cambiar el estado de las máquinas'); render(); return; }
+            if (!puedeCambiarMaq_()) { showToast('🔒 Solo la compu de impresión (o un admin con Google) puede cambiar el estado de las máquinas'); render(); return; }
             const m = MAQUINAS.find(x => x.id === machId); if (!m) return;
             if (!ESTADOS_MAQ[estado]) { setMaqEstado_(machId, ''); render(); showToast('✅ ' + m.label + ' funcionando'); return; }
             const nota = prompt(`${ESTADOS_MAQ[estado].icon} ${m.label} — ${ESTADOS_MAQ[estado].label}\n¿Qué le pasó? (opcional)`, '');
@@ -4021,7 +4024,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const col = document.getElementById('colmaq_' + machId);
             const o = orders.find(x => x.id === _dragId), m = MAQUINAS.find(x => x.id === machId);
             if (!col || !o || !m) return;
-            const puede = esCompuImpresion_() && pasosImpDe_(o).some(s => m.steps.includes(s));
+            const puede = puedeCambiarMaq_() && pasosImpDe_(o).some(s => m.steps.includes(s));
             col.classList.add(puede ? 'drag-over-ok' : 'drag-over');
         }
         function pasosImpDe_(o) { return calcT(o, cfg).pasos.filter(p => IMP_STEPS.has(p.id)).map(p => p.id); }
@@ -4031,7 +4034,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const o = orders.find(x => x.id === _dragId); _dragId = null;
             const m = MAQUINAS.find(x => x.id === machId);
             if (!o || !m || o.etapa !== 'impresion') return;
-            if (!esCompuImpresion_()) { showToast('🔒 Solo la compu de impresión puede cambiar la máquina de una orden'); return; }
+            if (!puedeCambiarMaq_()) { showToast('🔒 Solo la compu de impresión (o un admin con Google) puede cambiar la máquina de una orden'); return; }
             if (!pasosImpDe_(o).some(s => m.steps.includes(s))) { showToast(`🚫 ${m.label} no puede imprimir esta orden (${o.tipoInteriores === 'byn' && o.tipo !== 'port_sub' ? 'es B&N' : 'es a color'})`); return; }
             if (maqFuera_(machId) && !confirm(`${m.label} está ${ESTADOS_MAQ[maqEstado[machId].estado].label.toLowerCase()}. ¿Fijarla ahí de todos modos? (el motor la va a mover a otra mientras siga así)`)) return;
             setMaqAsignada_(o.id, machId);
@@ -4039,14 +4042,14 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             showToast(`📌 ${o.id} → ${m.label}`);
         }
         function quitarFijada_(ordId) {
-            if (!esCompuImpresion_()) { showToast('🔒 Solo la compu de impresión puede cambiar la máquina'); return; }
+            if (!puedeCambiarMaq_()) { showToast('🔒 Solo la compu de impresión (o un admin con Google) puede cambiar la máquina'); return; }
             setMaqAsignada_(ordId, null); render(); showToast('⚙️ ' + ordId + ': el motor vuelve a elegir la máquina');
         }
         function soloImpresionHTML() {
             const enImp = orders.filter(o => o.etapa === 'impresion' && !o._merged);
             if (!enImp.length) return `<div style="color:#334155;font-size:13px;text-align:center;padding:40px 0">🖨️ Nada en Impresión ahorita</div>`;
             const { porOrden, blocks, finishMin } = impPorMaquina_(false);
-            const impEt = ETAPAS[0], etapasAll = allEtapas(orders), compu = esCompuImpresion_();
+            const impEt = ETAPAS[0], etapasAll = allEtapas(orders), compu = puedeCambiarMaq_();
             const sinMaq = enImp.filter(o => !porOrden[o.id]);
             const colMaq = m => {
                 const st = maqEstado[m.id], E = st && ESTADOS_MAQ[st.estado];
@@ -4082,7 +4085,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 }).join('') : `<div style="color:#334155;font-size:12px;text-align:center;padding:20px 0;border:2px dashed #1e293b;border-radius:8px;margin:4px 0">${searchQ && items.length ? '🔍 Sin resultados' : compu ? 'Arrastra aquí' : 'Sin órdenes'}</div>`}
   </div>`;
             };
-            return `<div style="padding:8px 14px 0;font-size:11px;color:#64748b">${compu ? '🖨️ Esta es la compu de impresión: arrastra una tarjeta a otra máquina para cambiarla, o cambia el estado de una máquina en su columna.' : '🔒 Solo la compu de impresión puede cambiar máquinas (se activa en ⚙️ de esa computadora).'}</div>
+            return `<div style="padding:8px 14px 0;font-size:11px;color:#64748b">${compu ? (esCompuImpresion_() ? '🖨️ Esta es la compu de impresión: ' : '👑 Entraste como admin: ') + 'arrastra una tarjeta a otra máquina para cambiarla, o cambia el estado de una máquina en su columna.' : '🔒 Solo la compu de impresión puede cambiar máquinas (se activa en ⚙️ de esa computadora) — o entra con Google como admin.'}</div>
   <div class="board">${MAQ_IMP().map(colMaq).join('')}${sinMaq.length ? colHTML(impEt, 0, etapasAll, finishMin, sinMaq) : ''}</div>`;
         }
         function soloAcabadosHTML() { return vistaFiltradaHTML(o => isAcabEtapa(o.etapa), '✂️ Nada en Acabados ahorita'); }
