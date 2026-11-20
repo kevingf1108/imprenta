@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.46';
+        const APP_VERSION = 'v9.47';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1588,7 +1588,8 @@
             // v9.46 (a pedido de Kevin): en IMPRESIÓN solo se mueve lo que hay que imprimir hoy
             // (o ya va tarde) — lo demás se queda esperando en su máquina; cada día que siga
             // descompuesta, se mueve solo lo que ese día ya toca (limiteImpresion_ <= hoy).
-            if (!_ignorarEstadoMaq && cands.some(m => maqFuera_(m.id)) && IMP_STEPS.has(stepId) && !tocaImprimirHoy_(o)) return cands;
+            // v9.47: acabados igual que impresión (a pedido de Kevin).
+            if (!_ignorarEstadoMaq && cands.some(m => maqFuera_(m.id)) && !tocaPasoHoy_(o, stepId)) return cands;
             if (!_ignorarEstadoMaq) {
                 const disp = cands.filter(m => !maqFuera_(m.id));
                 if (disp.length) cands = disp;
@@ -3802,11 +3803,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       ${st.nota ? `<div style="font-size:13px;color:#94a3b8;margin-top:6px">Motivo: ${e(st.nota)}</div>` : ''}
       <div style="font-size:11px;color:#64748b;margin-top:4px">${haceCuanto_(st.ts)}</div>
       ${mov.length ? `<div style="text-align:left;background:#0f172a;border-radius:10px;padding:10px 12px;margin-top:14px">
-        <div style="font-size:13px;font-weight:800;color:#fca5a5;margin-bottom:6px">⚠️ Hoy hay que imprimir en otra máquina ${mov.length} orden${mov.length === 1 ? '' : 'es'}:</div>
-        ${mov.map(x => `<div style="font-size:13px;color:#e2e8f0;padding:2px 0"><b>${e(x.o.id)}</b> → <b style="color:#4ade80">${e(maqLabel_(x.a))}</b></div>`).join('')}
-      </div>` : m.steps.some(s => IMP_STEPS.has(s)) ? `<div style="font-size:13px;color:#64748b;margin-top:14px">Nada de lo que tiene que imprimirse hoy estaba en esta máquina.</div>` : ''}
+        <div style="font-size:13px;font-weight:800;color:#fca5a5;margin-bottom:6px">⚠️ Hoy hay que hacer en otra máquina ${mov.length} orden${mov.length === 1 ? '' : 'es'}:</div>
+        ${mov.map(x => `<div style="font-size:13px;color:#e2e8f0;padding:2px 0"><b>${e(x.id)}</b> → <b style="color:#4ade80">${e(maqLabel_(x.a))}</b></div>`).join('')}
+      </div>` : `<div style="font-size:13px;color:#64748b;margin-top:14px">Nada de lo que urge hoy estaba en esta máquina.</div>`}
       ${esp.length ? `<div style="font-size:12px;color:#94a3b8;margin-top:10px">⏸️ ${esp.length} orden${esp.length === 1 ? '' : 'es'} más se queda${esp.length === 1 ? '' : 'n'} esperando a que se arregle. Si sigue descompuesta, se mueven solas el día que les toque.</div>` : ''}
-      ${sin.length ? `<div style="font-size:13px;color:#ef4444;font-weight:800;margin-top:10px">🚫 Sin otra máquina disponible: ${sin.map(x => e(x.o.id)).join(', ')}</div>` : ''}
+      ${sin.length ? `<div style="font-size:13px;color:#ef4444;font-weight:800;margin-top:10px">🚫 Sin otra máquina disponible: ${sin.map(x => e(x.id)).join(', ')}</div>` : ''}
       <button class="btn btn-p" onclick="cerrarAvisoMaq_()" style="margin-top:16px;width:100%;padding:12px;font-size:15px">Entendido</button>
     </div>
   </div>`;
@@ -3974,17 +3975,29 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         const MAQ_IMP = () => MAQUINAS.filter(m => m.steps.some(s => IMP_STEPS.has(s)));
         // Órdenes en Impresión que el motor movió de una máquina fuera a otra, y las que no
         // tienen a dónde ir (todas las máquinas de su paso están fuera).
+        // v9.47: revisa TODAS las máquinas (impresión y acabados), paso por paso. Compara el plan
+        // del motor como si nada estuviera descompuesto contra el plan real.
         function impMovidas_() {
-            const fuera = MAQ_IMP().filter(m => maqFuera_(m.id));
+            const fuera = MAQUINAS.filter(m => maqFuera_(m.id));
             if (!fuera.length) return { fuera, movidas: [], sinMaquina: [], esperando: [] };
-            const antes = impPorMaquina_(true).porOrden, ahora = impPorMaquina_(false).porOrden;
-            const enImp = orders.filter(o => o.etapa === 'impresion' && !o._merged);
-            const movidas = [], sinMaquina = [], esperando = [];
-            enImp.forEach(o => {
-                const a = antes[o.id], n = ahora[o.id];
-                if (!n) return;
-                if (maqFuera_(n.machId)) { (tocaImprimirHoy_(o) ? sinMaquina : esperando).push({ o, machId: n.machId, lim: limiteImpresion_(o) }); return; }
-                if (a && a.machId !== n.machId && maqFuera_(a.machId)) movidas.push({ o, de: a.machId, a: n.machId, fijada: maqFijadaDe_(o) === a.machId || o.maquina === a.machId });
+            const k = b => b.ordId + '|' + b.stepId, antes = {};
+            _ignorarEstadoMaq = true;
+            try { scheduleMachines(orders, cfg).blocks.forEach(b => { antes[k(b)] = b; }); } finally { _ignorarEstadoMaq = false; }
+            const movidas = [], sinMaquina = [], esperando = [], vistos = new Set();
+            scheduleMachines(orders, cfg).blocks.forEach(b => {
+                // Bloques de grupo hermano (ordId = 5 dígitos) → la orden líder del grupo
+                const o = orders.find(x => x.id === b.ordId) || orders.find(x => String(x.id).replace(/\D/g, '').startsWith(b.ordId));
+                if (!o) return;
+                const a = antes[k(b)];
+                if (maqFuera_(b.machId)) {
+                    const key = b.ordId + '|' + b.machId; if (vistos.has(key)) return; vistos.add(key);
+                    (tocaPasoHoy_(o, b.stepId) ? sinMaquina : esperando).push({ o, id: b.ordId, machId: b.machId, lim: limitePaso_(o, b.stepId), stepNom: b.stepNom });
+                    return;
+                }
+                if (a && a.machId !== b.machId && maqFuera_(a.machId)) {
+                    const key = b.ordId + '|' + a.machId + '>' + b.machId; if (vistos.has(key)) return; vistos.add(key);
+                    movidas.push({ o, id: b.ordId, de: a.machId, a: b.machId, stepNom: b.stepNom, fijada: maqFijadaDe_(o) === a.machId || o.maquina === a.machId });
+                }
             });
             esperando.sort((x, y) => (x.lim || 'z').localeCompare(y.lim || 'z'));
             return { fuera, movidas, sinMaquina, esperando };
@@ -4007,10 +4020,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         <span style="font-size:11px;color:#94a3b8">${haceCuanto_(st.ts)}${st.nota ? ' · ' + e(st.nota) : ''}</span>
         ${compu ? `<button class="btn btn-sm" onclick="setMaqEstado_('${m.id}','');render();showToast('✅ ${e(m.label)} funcionando otra vez')" style="background:#052e16;color:#4ade80;border:1px solid #166534">✅ Ya funciona</button>` : ''}
       </div>
-      ${mov.length ? `<div style="font-size:12px;color:#fca5a5;margin-top:4px;font-weight:700">⚠️ Hay que imprimir hoy en otra máquina ${mov.length} orden${mov.length === 1 ? '' : 'es'} — el motor ya las movió:</div>
-      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px">${mov.map(x => `<span onclick="openOrd('${e(x.o.id)}')" style="cursor:pointer;background:#1e293b;border-radius:6px;padding:3px 8px;font-size:11px;color:#e2e8f0">${e(x.o.id)} → <b style="color:#4ade80">${e(maqLabel_(x.a))}</b>${x.fijada ? ' 📌' : ''}</span>`).join('')}</div>` : (m.steps.some(s => IMP_STEPS.has(s)) ? `<div style="font-size:11px;color:#64748b;margin-top:2px">Nada de lo que tiene que imprimirse hoy estaba en esta máquina.</div>` : '')}
-      ${esp.length ? `<div style="font-size:11px;color:#94a3b8;margin-top:4px">⏸️ ${esp.length} orden${esp.length === 1 ? '' : 'es'} se queda${esp.length === 1 ? '' : 'n'} esperando a que se arregle (se mueven solas el día que les toque): ${esp.map(x => `${e(x.o.id)}${x.lim ? ' <span style="color:#64748b">(' + fDate(x.lim) + ')</span>' : ''}`).join(', ')}</div>` : ''}
-      ${sin.length ? `<div style="font-size:12px;color:#ef4444;margin-top:4px;font-weight:800">🚫 ${sin.length} orden${sin.length === 1 ? '' : 'es'} no tiene${sin.length === 1 ? '' : 'n'} otra máquina disponible: ${sin.map(x => e(x.o.id)).join(', ')}</div>` : ''}
+      ${mov.length ? `<div style="font-size:12px;color:#fca5a5;margin-top:4px;font-weight:700">⚠️ Hoy hay que hacer en otra máquina ${mov.length} orden${mov.length === 1 ? '' : 'es'} — el motor ya las movió:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px">${mov.map(x => `<span onclick="openOrd('${e(x.o.id)}')" style="cursor:pointer;background:#1e293b;border-radius:6px;padding:3px 8px;font-size:11px;color:#e2e8f0">${e(x.id)} → <b style="color:#4ade80">${e(maqLabel_(x.a))}</b>${x.fijada ? ' 📌' : ''}</span>`).join('')}</div>` : `<div style="font-size:11px;color:#64748b;margin-top:2px">Nada de lo que urge hoy estaba en esta máquina.</div>`}
+      ${esp.length ? `<div style="font-size:11px;color:#94a3b8;margin-top:4px">⏸️ ${esp.length} orden${esp.length === 1 ? '' : 'es'} se queda${esp.length === 1 ? '' : 'n'} esperando a que se arregle (se mueven solas el día que les toque): ${esp.map(x => `${e(x.id)}${x.lim ? ' <span style="color:#64748b">(' + fDate(x.lim) + ')</span>' : ''}`).join(', ')}</div>` : ''}
+      ${sin.length ? `<div style="font-size:12px;color:#ef4444;margin-top:4px;font-weight:800">🚫 ${sin.length} orden${sin.length === 1 ? '' : 'es'} no tiene${sin.length === 1 ? '' : 'n'} otra máquina disponible: ${sin.map(x => e(x.id)).join(', ')}</div>` : ''}
     </div>`; }).join('')}
   </div>`;
         }
@@ -4059,6 +4072,20 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // (acabados + empaque, con bufferFactor; mínimo 1 día) → contando hacia atrás desde su
         // fecha compromiso sale el ÚLTIMO día en que se puede imprimir sin que se atrase.
         // Si ese día es hoy (o ya pasó) → va en la lista de hoy, agrupada por la máquina del motor.
+        // Último día para hacer un paso de ACABADOS sin atrasar la entrega: fecha compromiso
+        // menos los días de los pasos que van DESPUÉS de él en el flujo del libro (+ empaque).
+        function limitePaso_(o, stepId) {
+            if (IMP_STEPS.has(stepId)) return limiteImpresion_(o);
+            const comp = fechaCompromiso_(o); if (!comp) return null;
+            const base = baseLibro_(o), libro = { ...base, tipo: 'normal' };
+            const flow = getAcabFlow(libro), pos = id => flow.indexOf('acab_' + (id === 'cp' ? 'ci' : id));
+            const i = pos(stepId);
+            const despues = calcT(libro, cfg).pasos.filter(p => p.fase === 'emp' || (p.fase === 'acab' && i >= 0 && pos(p.id) > i)).reduce((s2, p) => s2 + p.min, 0) * (cfg.bufferFactor || 1);
+            const dias = Math.ceil(despues / ((cfg.horasDia || 10) * 60));
+            return ymdLocal(diaLaboralAtras_(new Date(comp + 'T12:00:00'), dias));
+        }
+        function tocaPasoHoy_(o, stepId) { const lim = limitePaso_(o, stepId); return !!lim && lim <= ymdLocal(hoyLaboral_()); }
+        function baseLibro_(o) { return (o.tipo === 'port_sub' && orders.find(x => x.grupoId && x.grupoId === o.grupoId && x.tipo === 'int_sub')) || o; }
         function tocaImprimirHoy_(o) { const lim = limiteImpresion_(o); return !!lim && lim <= ymdLocal(hoyLaboral_()); }
         function esLaborable_(d) { return d.getDay() > 0 && d.getDay() < 6 && !new Set(cfg.feriados || []).has(ymdLocal(d)); }
         function diaLaboralAtras_(base, n) {
@@ -4070,8 +4097,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function minPostImpresion_(o) {
             // Interior y Portada se calculan como el libro completo (calcT no da los pasos de unión
             // a una sub-orden). Para la portada se usa el interior hermano si existe (sus páginas).
-            const base = (o.tipo === 'port_sub' && orders.find(x => x.grupoId && x.grupoId === o.grupoId && x.tipo === 'int_sub')) || o;
-            const t = calcT({ ...base, tipo: 'normal' }, cfg);
+            const t = calcT({ ...baseLibro_(o), tipo: 'normal' }, cfg);
             return t.pasos.filter(p => p.fase === 'acab' || p.fase === 'emp').reduce((s, p) => s + p.min, 0) * (cfg.bufferFactor || 1);
         }
         function limiteImpresion_(o) {
