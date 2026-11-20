@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.44';
+        const APP_VERSION = 'v9.45';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1102,6 +1102,7 @@
                 }
                 render();
                 revisarAvisoMaq_();
+                if (firstLoad) { setTimeout(revisarAvisoHoy_, 4000); setInterval(revisarAvisoHoy_, 60000); } // espera al sync de las hojas; cada minuto revisa si ya cambió el día
                 if (firstLoad) setTimeout(() => setAutoSync(true), 500);
                 if (firstLoad) { publicarEstadoApi_(); setInterval(publicarEstadoApi_, 10 * 60 * 1000); }
             }, err => {
@@ -2842,7 +2843,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         <div id="mc">${V === 'resumen' ? resumenDiaHTML() : V === 'kpi' ? kpiHTML() : V === 'stats' ? statsHTML() : V === 'personas' ? personasHTML() : V === 'scan_log' ? scanLogHTML() : V === 'salida' ? salidaHTML() : tableroConFiltroHTML()}</div>
       </div>
     </div>
-    ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}${showAccesos ? accesosHTML() : ''}${avisoMaqModalHTML()}`;
+    ${modalId !== undefined ? modalHTML() : ''}${showCfg ? cfgHTML() : ''}${showSync ? syncHTML() : ''}${showAccesos ? accesosHTML() : ''}${avisoMaqModalHTML()}${avisoHoyModalHTML()}`;
             const _newBoard = document.querySelector('.board');
             if (_newBoard) _newBoard.scrollLeft = _scrollLeft;
         }
@@ -3737,7 +3738,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         const BOARD_VIEWS = {
             kanban: boardHTML, muestras: muestrasHTML,
             pegado: () => etapaSolaHTML('acab_pg'), faltapg: () => faltanPorHTML('pg'),
-            imp_solo: soloImpresionHTML, acab_solo: soloAcabadosHTML,
+            imp_solo: soloImpresionHTML, imp_hoy: imprimirHoyHTML, acab_solo: soloAcabadosHTML,
             urgentes: urgentesHTML, atrasadas: atrasadasHTML,
         };
         // Barra de filtros arriba del Tablero — mismo patrón que el filtro de fase del Gantt en
@@ -3745,7 +3746,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // qué se ve, en vez de una entrada de menú aparte por cada filtro.
         function tableroFiltroBarHTML() {
             const opts = [
-                ['kanban', '📋', 'Todas'], ['imp_solo', '🖨️', 'Impresión'], ['acab_solo', '✂️', 'Acabados'],
+                ['kanban', '📋', 'Todas'], ['imp_solo', '🖨️', 'Impresión'], ['imp_hoy', '📅', 'Imprimir hoy'], ['acab_solo', '✂️', 'Acabados'],
                 ['urgentes', '⚡', 'Urgentes'], ['muestras', '🔬', 'Muestras'], ['atrasadas', '🔴', 'Atrasadas'],
                 ['pegado', '🔥', 'Pegado'], ['faltapg', '⏳', 'Faltan por pegar'],
             ];
@@ -4044,6 +4045,133 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         function quitarFijada_(ordId) {
             if (!puedeCambiarMaq_()) { showToast('🔒 Solo la compu de impresión (o un admin con Google) puede cambiar la máquina'); return; }
             setMaqAsignada_(ordId, null); render(); showToast('⚙️ ' + ordId + ': el motor vuelve a elegir la máquina');
+        }
+        // ── Imprimir hoy (v9.45) ─────────────────────────────────────────────────────────
+        // Para cada orden en Impresión: cuántos días hábiles le faltan DESPUÉS de imprimir
+        // (acabados + empaque, con bufferFactor; mínimo 1 día) → contando hacia atrás desde su
+        // fecha compromiso sale el ÚLTIMO día en que se puede imprimir sin que se atrase.
+        // Si ese día es hoy (o ya pasó) → va en la lista de hoy, agrupada por la máquina del motor.
+        function esLaborable_(d) { return d.getDay() > 0 && d.getDay() < 6 && !new Set(cfg.feriados || []).has(ymdLocal(d)); }
+        function diaLaboralAtras_(base, n) {
+            const dt = new Date(base); let c = 0;
+            while (c < n) { dt.setDate(dt.getDate() - 1); if (esLaborable_(dt)) c++; }
+            return dt;
+        }
+        function hoyLaboral_() { const d = new Date(); d.setHours(12, 0, 0, 0); while (!esLaborable_(d)) d.setDate(d.getDate() + 1); return d; }
+        function minPostImpresion_(o) {
+            // Interior y Portada se calculan como el libro completo (calcT no da los pasos de unión
+            // a una sub-orden). Para la portada se usa el interior hermano si existe (sus páginas).
+            const base = (o.tipo === 'port_sub' && orders.find(x => x.grupoId && x.grupoId === o.grupoId && x.tipo === 'int_sub')) || o;
+            const t = calcT({ ...base, tipo: 'normal' }, cfg);
+            return t.pasos.filter(p => p.fase === 'acab' || p.fase === 'emp').reduce((s, p) => s + p.min, 0) * (cfg.bufferFactor || 1);
+        }
+        function limiteImpresion_(o) {
+            const comp = fechaCompromiso_(o); if (!comp) return null;
+            const dias = Math.max(1, Math.ceil(minPostImpresion_(o) / ((cfg.horasDia || 10) * 60)));
+            return ymdLocal(diaLaboralAtras_(new Date(comp + 'T12:00:00'), dias));
+        }
+        function imprimirHoyData_() {
+            const hoy = ymdLocal(hoyLaboral_()), manana = ymdLocal(diaLaboralN_(hoyLaboral_(), 1));
+            const { porOrden, blocks } = impPorMaquina_(false);
+            const enImp = orders.filter(o => o.etapa === 'impresion' && !o._merged);
+            const filas = enImp.map(o => {
+                const lim = limiteImpresion_(o);
+                const durImp = blocks.filter(b => b.ordId === o.id && IMP_STEPS.has(b.stepId)).reduce((s, b) => s + b.dur, 0);
+                return { o, lim, machId: porOrden[o.id] ? porOrden[o.id].machId : null, start: porOrden[o.id] ? porOrden[o.id].start : 1e12, durImp };
+            });
+            const hoyL = filas.filter(f => f.lim && f.lim <= hoy).sort((a, b) => a.lim.localeCompare(b.lim) || prioSort(a.o, b.o));
+            const mananaL = filas.filter(f => f.lim === manana).sort((a, b) => prioSort(a.o, b.o));
+            // Minutos de trabajo que le quedan a hoy (si hoy no es laborable, el día completo)
+            const now = new Date(), fin = new Date(); fin.setHours((cfg.startHour || 8) + (cfg.horasDia || 10), 0, 0, 0);
+            const ini = new Date(); ini.setHours(cfg.startHour || 8, 0, 0, 0);
+            const esHoy = ymdLocal(now) === hoy;
+            const quedan = !esHoy ? (cfg.horasDia || 10) * 60 : Math.max(0, (fin - Math.max(now, ini)) / 60000);
+            return { hoy, manana, hoyL, mananaL, quedan, esHoy };
+        }
+        function imprimirHoyHTML() {
+            const { hoy, manana, hoyL, mananaL, quedan, esHoy } = imprimirHoyData_();
+            const tituloDia = esHoy ? 'hoy' : fDate(hoy);
+            const fila = (f, i) => {
+                const atr = f.lim < hoy;
+                return `<tr onclick="openOrd('${e(f.o.id)}')" style="cursor:pointer;border-top:1px solid #1e293b">
+        <td style="padding:6px 8px;color:#60a5fa;font-weight:800">${i + 1}</td>
+        <td style="padding:6px 8px;white-space:nowrap"><b style="color:#f1f5f9">${e(f.o.id)}</b>${f.o.urgente ? ' <span style="color:#ef4444">⚡</span>' : ''}</td>
+        <td style="padding:6px 8px;color:#cbd5e1;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(f.o.titulo)}</td>
+        <td style="padding:6px 8px;color:#94a3b8;text-align:right">${e(f.o.cantidad)}</td>
+        <td style="padding:6px 8px;color:#94a3b8;text-align:right">${e(f.o.tabloidesSrc || '—')}</td>
+        <td style="padding:6px 8px;color:#94a3b8;white-space:nowrap">${f.durImp ? mStr(f.durImp) : '—'}</td>
+        <td style="padding:6px 8px;white-space:nowrap;color:#94a3b8">${fDate(fechaCompromiso_(f.o))}</td>
+        <td style="padding:6px 8px;white-space:nowrap;font-weight:700;color:${atr ? '#ef4444' : '#f59e0b'}">${atr ? '🔴 debió ser ' + fDate(f.lim) : '🟡 hoy'}</td>
+      </tr>`;
+            };
+            const tabla = rows => `<table style="width:100%;border-collapse:collapse;font-size:12px">
+      <tr style="color:#64748b;font-size:10px;text-align:left"><th style="padding:4px 8px">#</th><th style="padding:4px 8px">Orden</th><th style="padding:4px 8px">Título</th><th style="padding:4px 8px;text-align:right">Cant.</th><th style="padding:4px 8px;text-align:right">Tabs</th><th style="padding:4px 8px">Tiempo</th><th style="padding:4px 8px">Entrega</th><th style="padding:4px 8px">Imprimir a más tardar</th></tr>
+      ${rows}</table>`;
+            const grupos = [...MAQ_IMP(), { id: null, label: 'Sin máquina asignada', grupo: '' }].map(m => {
+                const items = hoyL.filter(f => f.machId === m.id);
+                if (!items.length) return '';
+                const tot = items.reduce((s, f) => s + f.durImp, 0);
+                const noAlcanza = tot > quedan + 1;
+                const st = m.id && maqEstado[m.id];
+                return `<div style="background:#1e293b;border-radius:12px;padding:12px;margin-bottom:12px;${noAlcanza ? 'border:2px solid #ef4444' : ''}">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+        <div style="font-size:15px;font-weight:800;color:#f1f5f9">${m.grupo.includes('B&N') ? '⬛' : m.id ? '🎨' : '❔'} ${e(m.label)} <span style="font-size:12px;color:#64748b;font-weight:600">· ${items.length} orden${items.length === 1 ? '' : 'es'} · ${mStr(tot)}</span>${st ? ` <span style="font-size:12px;color:${ESTADOS_MAQ[st.estado].color}">${ESTADOS_MAQ[st.estado].icon} ${ESTADOS_MAQ[st.estado].label}</span>` : ''}</div>
+        ${noAlcanza ? `<div style="font-size:12px;font-weight:800;color:#ef4444">⚠️ No alcanza: le quedan ${mStr(quedan)} ${esHoy ? 'hoy' : 'ese día'} y necesita ${mStr(tot)} — mueve algo a otra máquina</div>` : `<div style="font-size:12px;color:#4ade80;font-weight:700">✅ Alcanza (${mStr(quedan)} disponibles)</div>`}
+      </div>
+      ${tabla(items.map(fila).join(''))}
+    </div>`;
+            }).join('');
+            return `<div style="padding:14px;max-width:1100px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-size:28px">📅</span>
+        <div><div style="font-size:22px;font-weight:800;color:#fb923c">${hoyL.length} orden${hoyL.length === 1 ? '' : 'es'} hay que imprimir ${tituloDia}</div>
+        <div style="font-size:12px;color:#64748b">para que salgan a tiempo · ${hoyL.filter(f => f.lim < hoy).length ? `<b style="color:#ef4444">${hoyL.filter(f => f.lim < hoy).length} ya van tarde</b> · ` : ''}cuenta los días de acabados y empaque que faltan después de imprimir</div></div>
+      </div>
+      <button class="btn btn-p" onclick="imprimirHojaHoy_()">🖨️ Imprimir la lista</button>
+    </div>
+    ${hoyL.length ? grupos : `<div style="color:#4ade80;font-size:14px;text-align:center;padding:30px 0">✅ Nada tiene que imprimirse forzosamente ${tituloDia}</div>`}
+    ${mananaL.length ? `<div style="margin-top:18px;font-size:13px;font-weight:800;color:#94a3b8">⏭️ Si sobra tiempo, adelanta lo de ${fDate(manana)} (${mananaL.length})</div>
+    <div style="background:#1e293b;border-radius:12px;padding:8px 12px;margin-top:6px">${tabla(mananaL.map((f, i) => fila(f, i).replace(/🟡 hoy/, '⏭️ ' + fDate(manana)).replace('color:#f59e0b', 'color:#94a3b8')).join(''))}</div>` : ''}
+  </div>`;
+        }
+        // Hoja para imprimir en papel (ventana aparte, blanco y negro)
+        function imprimirHojaHoy_() {
+            const { hoy, hoyL } = imprimirHoyData_();
+            const w = window.open('', '_blank'); if (!w) { showToast('Permite ventanas emergentes para imprimir la lista'); return; }
+            const grupos = [...MAQ_IMP(), { id: null, label: 'Sin máquina asignada' }].map(m => {
+                const items = hoyL.filter(f => f.machId === m.id); if (!items.length) return '';
+                return `<h2>${e(m.label)} — ${items.length} orden(es), ${mStr(items.reduce((s, f) => s + f.durImp, 0))}</h2><table><tr><th>✓</th><th>#</th><th>Orden</th><th>Título</th><th>Cant.</th><th>Tabs</th><th>Tiempo</th><th>Entrega</th><th>Imprimir a más tardar</th></tr>
+        ${items.map((f, i) => `<tr><td>☐</td><td>${i + 1}</td><td><b>${e(f.o.id)}</b>${f.o.urgente ? ' ⚡' : ''}</td><td>${e(f.o.titulo)}</td><td>${e(f.o.cantidad)}</td><td>${e(f.o.tabloidesSrc || '')}</td><td>${f.durImp ? mStr(f.durImp) : ''}</td><td>${fDate(fechaCompromiso_(f.o))}</td><td>${f.lim < hoy ? 'TARDE (' + fDate(f.lim) + ')' : 'hoy'}</td></tr>`).join('')}</table>`;
+            }).join('');
+            w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Imprimir hoy ${hoy}</title><style>body{font-family:Arial,sans-serif;margin:20px;color:#000}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:18px 0 6px;border-bottom:2px solid #000}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #999;padding:4px 6px;text-align:left}th{background:#eee}</style></head><body>
+      <h1>📅 Imprimir hoy — ${fDate(hoy)}</h1><div style="font-size:12px">${hoyL.length} órdenes · generado ${new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</div>${grupos || '<p>Nada que imprimir forzosamente hoy.</p>'}</body></html>`);
+            w.document.close(); setTimeout(() => w.print(), 300);
+        }
+        // En la compu de impresión, la primera vez que se abre la app cada día laboral sale un
+        // aviso con cuántas órdenes hay que imprimir hoy (botón para ver la lista).
+        let _avisoHoyAbierto = false;
+        function revisarAvisoHoy_() {
+            if (!esCompuImpresion_() || !orders.length) return;
+            const hoy = ymdLocal(hoyLaboral_());
+            let visto = null; try { visto = localStorage.getItem('imp_aviso_hoy'); } catch { }
+            if (visto === hoy) return;
+            try { localStorage.setItem('imp_aviso_hoy', hoy); } catch { }
+            if (!imprimirHoyData_().hoyL.length) return;
+            _avisoHoyAbierto = true; render();
+        }
+        function avisoHoyModalHTML() {
+            if (!_avisoHoyAbierto || _avisoMaqAbierto) return '';
+            const { hoyL, hoy } = imprimirHoyData_();
+            const tarde = hoyL.filter(f => f.lim < hoy).length;
+            return `<div class="overlay" style="z-index:150" onclick="if(event.target===this){_avisoHoyAbierto=false;render()}">
+    <div class="modal" style="max-width:440px;text-align:center;border:3px solid #fb923c" onclick="event.stopPropagation()">
+      <div style="font-size:48px">📅</div>
+      <div style="font-size:20px;font-weight:900;color:#fb923c;margin-top:6px">Hoy hay que imprimir ${hoyL.length} orden${hoyL.length === 1 ? '' : 'es'}</div>
+      <div style="font-size:13px;color:#94a3b8;margin-top:4px">para que salgan el día que se necesitan${tarde ? ` · <b style="color:#ef4444">${tarde} ya van tarde</b>` : ''}</div>
+      <button class="btn btn-p" onclick="_avisoHoyAbierto=false;setV('imp_hoy')" style="margin-top:16px;width:100%;padding:12px;font-size:15px">Ver la lista</button>
+      <button class="btn btn-g" onclick="_avisoHoyAbierto=false;render()" style="margin-top:8px;width:100%">Después</button>
+    </div>
+  </div>`;
         }
         function soloImpresionHTML() {
             const enImp = orders.filter(o => o.etapa === 'impresion' && !o._merged);
