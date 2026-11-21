@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.47';
+        const APP_VERSION = 'v9.48';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -890,10 +890,21 @@
             { id: 'cf1', label: 'Guillotina 1', fisica: 'Guillotina 1 (Corte Final)', steps: ['cf'], grupo: '✂️ Acabados' },
             { id: 'cf2', label: 'Guillotina 2', fisica: 'Guillotina 2 (Corte Final)', steps: ['cf'], grupo: '✂️ Acabados' },
             { id: 'gui4', label: 'Guillotina 4', fisica: 'Guillotina 4', steps: ['ci', 'cp', 'cf'], grupo: '✂️ Acabados' },
-            { id: 'ponch', label: 'Ponchadora', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
+            // Ponchado (v9.48, Kevin 2026-11-21) — reglas en candidatas_():
+            //   media luna → Rhinotuff grande · calendario → Renz 1/2 o Rhinotuff 1/2 ·
+            //   agenda y libros normales → solo Rhinotuff 1/2 · 3 hoyos: manual por ahora.
+            { id: 'renz1', label: 'Renz 1', fisica: 'Renz 1 (Ponchado)', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
+            { id: 'renz2', label: 'Renz 2', fisica: 'Renz 2 (Ponchado)', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
+            { id: 'rhino1', label: 'Rhinotuff 1', fisica: 'Rhinotuff 1 (Ponchado)', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
+            { id: 'rhino2', label: 'Rhinotuff 2', fisica: 'Rhinotuff 2 (Ponchado)', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
+            { id: 'rhinoG', label: 'Rhinotuff grande', fisica: 'Rhinotuff grande (Ponchado)', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
+            { id: 'ponch3h1', label: 'Ponchadora 3 hoyos 1', fisica: 'Ponchadora 3 hoyos 1', soloManual: true, steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
+            { id: 'ponch3h2', label: 'Ponchadora 3 hoyos 2', fisica: 'Ponchadora 3 hoyos 2', soloManual: true, steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
             { id: 'engr', label: 'Engrapadora 1', fisica: 'Engrapadora 1', steps: ['en'], grupo: '✂️ Acabados' },
             { id: 'engr2', label: 'Engrapadora 2', fisica: 'Engrapadora 2', steps: ['en'], grupo: '✂️ Acabados' },
-            { id: 'espir', label: 'Espiraladora', steps: ['es'], grupo: '✂️ Acabados' },
+            // La "Espiraladora" eran en realidad estas dos cerradoras (v9.48)
+            { id: 'wire1', label: 'Cerradora wire-o 1', fisica: 'Cerradora wire-o 1', steps: ['es'], grupo: '✂️ Acabados' },
+            { id: 'wire2', label: 'Cerradora wire-o 2', fisica: 'Cerradora wire-o 2', steps: ['es'], grupo: '✂️ Acabados' },
             { id: 'cortC', label: 'Corte Cartón', steps: ['cc'], grupo: '✂️ Acabados' },
             { id: 'armd', label: 'Mesa Pasta Dura 1', fisica: 'Mesa de Pasta Dura 1', steps: ['ap', 'ms', 'cdc'], grupo: '✂️ Acabados' },
             { id: 'armd2', label: 'Mesa Pasta Dura 2', fisica: 'Mesa de Pasta Dura 2', steps: ['ap', 'ms', 'cdc'], grupo: '✂️ Acabados' },
@@ -1462,7 +1473,7 @@
                 }
                 if (enc === 'pasta_dura') add('ms', 'Pegado portada a libro', Q / m.mesa_trabajo, 'Mesa trabajo', 'acab');
                 if (enc === 'engrapado') add('en', 'Engrapado', Q / m.engrapadora, 'Engrapadora', 'acab');
-                if (enc === 'espiral' || enc === 'espiral_pd') add('es', 'Espiralado / Wire', Q / m.espiralado, 'Espiraladora', 'acab');
+                if (enc === 'espiral' || enc === 'espiral_pd') add('es', 'Espiralado / Wire', Q / m.espiralado, 'Cerradora wire-o', 'acab');
                 add('te', 'Termo empaque', Q / m.termo, 'Termo empaque', 'emp');
             }
             else {
@@ -1482,7 +1493,7 @@
                     add('pi', 'Ponchado — interiores', Q * Math.ceil(P / 2) / m.ponchadora, 'Ponchadora', 'acab');
                     add('pp', 'Ponchado — portada', Q / m.ponchadora, 'Ponchadora', 'acab');
                     if (enc === 'espiral_pd') { add('cc', 'Corte de cartón', Q / m.corte_carton, 'Cortadora cartón', 'acab'); add('ap', 'Armado portada pasta dura', Q / m.armado_pd, 'Manual', 'acab'); }
-                    add('es', 'Espiralado / Wire', Q / m.espiralado, 'Espiraladora', 'acab');
+                    add('es', 'Espiralado / Wire', Q / m.espiralado, 'Cerradora wire-o', 'acab');
                 }
                 add('te', 'Termo empaque', Q / m.termo, 'Termo empaque', 'emp');
                 // Paralelo: máx(camino int, camino port) + acabados post-unión
@@ -1568,6 +1579,14 @@
         // _ignorarEstadoMaq: solo para calcular "a qué máquina iba ANTES de que una se
         // descompusiera" (aviso de órdenes movidas) — nunca se deja prendido.
         let _ignorarEstadoMaq = false;
+        function detectProducto_(txt) {
+            const t = String(txt || '').toLowerCase();
+            if (/media\s*luna/.test(t)) return 'medialuna';
+            if (/calendario/.test(t)) return 'calendario';
+            if (/agenda/.test(t)) return 'agenda';
+            return '';
+        }
+        function tipoProducto_(o) { return o.tipoProducto || detectProducto_([o.notas, o.titulo, o.baseTitulo].join(' ')); }
         function candidatas_(o, stepId) {
             const delPaso = MAQUINAS.filter(m => m.steps.includes(stepId) && !m.soloManual);
             let cands = delPaso;
@@ -1577,6 +1596,13 @@
             if (fijada) {
                 const forced = cands.find(m => m.id === fijada);
                 if (forced) cands = [forced];
+            }
+            // Ponchado según el producto (v9.48)
+            if (stepId === 'pi' || stepId === 'pp') {
+                const tp = tipoProducto_(o);
+                const ids = tp === 'medialuna' ? ['rhinoG'] : tp === 'calendario' ? ['renz1', 'renz2', 'rhino1', 'rhino2'] : ['rhino1', 'rhino2'];
+                const sel = cands.filter(m => ids.includes(m.id));
+                if (sel.length) cands = sel;
             }
             // Libros con solapas → Pegadora 4, que las hace automáticamente
             if (stepId === 'pg' && tieneSolapas_(o)) {
@@ -1873,7 +1899,7 @@
                 fechaLimite: parseDMDate(entrega),
                 etapa, urgente: urg.toLowerCase().includes('urgente'),
                 notas: desc.substring(0, 120),
-                solapas: /solapa/i.test(desc),
+                solapas: /solapa/i.test(desc), tipoProducto: detectProducto_(desc + ' ' + nombre),
                 _fromSheets: true, _listoInSheets: listo, idDm,
                 fechaCreacion: new Date().toISOString().split('T')[0],
             };
@@ -1920,7 +1946,7 @@
                 tipoEncuadernacion: enc,
                 fechaLimite: parseDMDate(entrega),
                 etapa, urgente: urg.toLowerCase().includes('urgente'),
-                notas: acab.substring(0, 120),
+                notas: acab.substring(0, 120), tipoProducto: detectProducto_(acab + ' ' + nombre + ' ' + col(row, 'description', 'descripcion', 'desc')),
                 _fromSheets: true, _piezaSuelta, idDm,
                 fechaCreacion: new Date().toISOString().split('T')[0],
             };
@@ -5630,6 +5656,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             'MQENG1': 'Engrapadora 1', 'MQENG2': 'Engrapadora 2',
             'MQMEMP1': 'Mesa de Empaque 1', 'MQMEMP2': 'Mesa de Empaque 2',
             'MQMPD1': 'Mesa de Pasta Dura 1', 'MQMPD2': 'Mesa de Pasta Dura 2', 'MQMPD3': 'Mesa de Pasta Dura 3',
+            'MQRENZ1': 'Renz 1 (Ponchado)', 'MQRENZ2': 'Renz 2 (Ponchado)',
+            'MQRHINO1': 'Rhinotuff 1 (Ponchado)', 'MQRHINO2': 'Rhinotuff 2 (Ponchado)', 'MQRHINOG': 'Rhinotuff grande (Ponchado)',
+            'MQPONCH3H1': 'Ponchadora 3 hoyos 1', 'MQPONCH3H2': 'Ponchadora 3 hoyos 2',
+            'MQWIRE1': 'Cerradora wire-o 1', 'MQWIRE2': 'Cerradora wire-o 2',
         };
         const PERSON_SCAN_CODES = {
             'OPCHUY': 'Chuy', 'OPMALY': 'Maly', 'OPDIANA': 'Diana', 'OPVANE': 'Vane', 'OPLAU': 'Lau',
