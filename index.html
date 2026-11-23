@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.50';
+        const APP_VERSION = 'v9.51';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -777,6 +777,7 @@
             { id: 'acab_pp', label: 'Ponchado Port', icon: '🔩', color: '#22d3ee' },
             { id: 'acab_en', label: 'Engrapado', icon: '📌', color: '#facc15' },
             { id: 'acab_es', label: 'Espiralado', icon: '🌀', color: '#2dd4bf' },
+            { id: 'acab_pf', label: 'Perforado', icon: '🕳️', color: '#94a3b8' }, // v9.51: perforado de 1 a 3 hoyos (calendarios…)
             { id: 'acab_te', label: 'Termo', icon: '🌡️', color: '#14b8a6' },
         ];
 
@@ -793,7 +794,25 @@
         }
 
         // Devuelve la secuencia exacta de pasos para una orden según tipo y encuadernación
+        // v9.51: órdenes cuyo acabado dice "Perforado" (ej. "g08 | Perforado 1 hoyo - calendario")
+        // llevan el paso Perforado antes del Termo. Si UNA pieza del grupo (ej. la portada) lo
+        // trae, lo lleva todo el grupo — Interior y Portada recorren juntos los pasos de unión.
+        let _perfCache = { ref: null, n: -1, set: new Set() };
+        function llevaPerforado_(o) {
+            if (!o) return false;
+            if (o.perforado) return true;
+            if (_perfCache.ref !== orders || _perfCache.n !== orders.length) {
+                _perfCache = { ref: orders, n: orders.length, set: new Set(orders.filter(x => x.perforado && x.grupoId).map(x => String(x.grupoId))) };
+            }
+            return !!o.grupoId && _perfCache.set.has(String(o.grupoId));
+        }
         function getAcabFlow(o) {
+            const f = getAcabFlowBase_(o);
+            if (!llevaPerforado_(o) || f.includes('acab_pf')) return f;
+            const i = f.indexOf('acab_te');
+            return i >= 0 ? [...f.slice(0, i), 'acab_pf', ...f.slice(i)] : [...f, 'acab_pf'];
+        }
+        function getAcabFlowBase_(o) {
             const enc = o.tipoEncuadernacion || 'normal';
             const tipo = o.tipo || 'normal';
             const isInt = tipo === 'int_sub';
@@ -898,9 +917,10 @@
             { id: 'rhino1', label: 'Rhinotuff 1', fisica: 'Rhinotuff 1 (Ponchado)', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
             { id: 'rhino2', label: 'Rhinotuff 2', fisica: 'Rhinotuff 2 (Ponchado)', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
             { id: 'rhinoG', label: 'Rhinotuff grande', fisica: 'Rhinotuff grande (Ponchado)', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
-            { id: 'ponch3h1', label: 'Ponchadora 3 hoyos 1', fisica: 'Ponchadora 3 hoyos 1', soloManual: true, steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
-            { id: 'ponch3h2', label: 'Ponchadora 3 hoyos 2', fisica: 'Ponchadora 3 hoyos 2', soloManual: true, steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
-            { id: 'ponchMan', label: 'Ponchadora manual (hoyo centro)', fisica: 'Ponchadora manual (hoyo del centro)', soloManual: true, steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
+            // v9.51: las "Ponchadoras de 3 hoyos" y la "manual de hoyo del centro" eran las mismas 2
+            // perforadoras iguales (una más nueva) — hacen de 1 a 3 hoyos. Paso Perforado (pf).
+            { id: 'perf1', label: 'Perforadora de hoyos manual 1', fisica: 'Perforadora de hoyos manual 1', steps: ['pf'], grupo: '✂️ Acabados' },
+            { id: 'perf2', label: 'Perforadora de hoyos manual 2', fisica: 'Perforadora de hoyos manual 2', steps: ['pf'], grupo: '✂️ Acabados' },
             { id: 'engr', label: 'Engrapadora 1', fisica: 'Engrapadora 1', steps: ['en'], grupo: '✂️ Acabados' },
             { id: 'engr2', label: 'Engrapadora 2', fisica: 'Engrapadora 2', steps: ['en'], grupo: '✂️ Acabados' },
             // La "Espiraladora" eran en realidad estas dos cerradoras (v9.48)
@@ -928,7 +948,7 @@
                 byn_fast: 150, byn_slow: 80, color_normal: 50, color_grueso: 25, color_slow_n: 40, color_slow_g: 20,
                 corteInicial: 200, plast_vel: 5, plast_hoja: 0.475,
                 pegado_150: 2, pegado_500: 1, cf_150: 6, cf_500: 3,
-                ponchadora: 200, engrapadora: 2, corte_carton: 10, armado_pd: 0.33, mesa_trabajo: 0.5, espiralado: 2, termo: 10
+                ponchadora: 200, perforado: 4, engrapadora: 2, corte_carton: 10, armado_pd: 0.33, mesa_trabajo: 0.5, espiralado: 2, termo: 10
             },
             setup: { byn: 4, color: 7, plastificado: 3, pegado: 15, corteFinal: 5, corteInicial: 0, termo: 0 },
             // Inventario de tóner (2026-08-26, ampliado 2026-08-28) — se controla escaneando
@@ -1414,6 +1434,15 @@
         //  CÁLCULO DE TIEMPOS — consciente del tipo de orden
         // ═══════════════════════════════════════════════════
         function calcT(o, c) {
+            const t = calcTBase_(o, c);
+            if (!llevaPerforado_(o) || !t.pasos.length || t.pasos.some(p => p.id === 'pf')) return t;
+            const min = Math.round(((+o.cantidad || 0) / ((c.maq && c.maq.perforado) || 4)) * 10) / 10;
+            const pf = { id: 'pf', nom: 'Perforado', min, maq: 'Perforadora manual', fase: 'acab' };
+            const i = t.pasos.findIndex(p => p.id === 'te');
+            const pasos = i >= 0 ? [...t.pasos.slice(0, i), pf, ...t.pasos.slice(i)] : [...t.pasos, pf];
+            return { ...t, pasos, total: (t.total || 0) + min, paralelo: (t.paralelo || 0) + min };
+        }
+        function calcTBase_(o, c) {
             const Q = +o.cantidad || 0;
             const tipo = o.tipo || 'normal', enc = o.tipoEncuadernacion || 'normal';
             const m = c.maq, s = c.setup, ps = [];
@@ -1900,6 +1929,7 @@
             const entrega = col(row, 'entrega', 'delivery', 'fecha entrega', 'f. entrega');
             const listo = col(row, 'listo', 'done', 'ready').toLowerCase() === 'true';
             const desc = col(row, 'description', 'descripcion', 'desc');
+            const acabImp = col(row, 'acabados', 'acabados con tiempo');
             // _listoInSheets: evita que etapaMap sobreescriba cuando Sheets ya avanzó la orden
             const colorBn = col(row, 'color_bn', 'color', 'tipo color');
             const papel = col(row, 'papel', 'paper', 'papel/cartulina');
@@ -1933,7 +1963,7 @@
                 fechaLimite: parseDMDate(entrega),
                 etapa, urgente: urg.toLowerCase().includes('urgente'),
                 notas: desc.substring(0, 120),
-                solapas: /solapa/i.test(desc), tipoProducto: detectProducto_(desc + ' ' + nombre),
+                solapas: /solapa/i.test(desc), tipoProducto: detectProducto_(desc + ' ' + nombre), perforado: /perforad/i.test(acabImp + ' ' + desc),
                 _fromSheets: true, _listoInSheets: listo, idDm,
                 fechaCreacion: new Date().toISOString().split('T')[0],
             };
@@ -1980,14 +2010,14 @@
                 tipoEncuadernacion: enc,
                 fechaLimite: parseDMDate(entrega),
                 etapa, urgente: urg.toLowerCase().includes('urgente'),
-                notas: acab.substring(0, 120), tipoProducto: detectProducto_(acab + ' ' + nombre + ' ' + col(row, 'description', 'descripcion', 'desc')),
+                notas: acab.substring(0, 120), perforado: /perforad/i.test(acab), tipoProducto: detectProducto_(acab + ' ' + nombre + ' ' + col(row, 'description', 'descripcion', 'desc')),
                 _fromSheets: true, _piezaSuelta, idDm,
                 fechaCreacion: new Date().toISOString().split('T')[0],
             };
         }
 
         // Mapea una fila de la hoja de MUESTRAS a una orden
-        const _ETAPAS_VALIDAS = new Set(['impresion', 'empaque', 'listo', 'acab_pl', 'acab_ci', 'acab_pg', 'acab_cf', 'acab_cdc', 'acab_cc', 'acab_ap', 'acab_ms', 'acab_pi', 'acab_pp', 'acab_en', 'acab_es', 'acab_te']);
+        const _ETAPAS_VALIDAS = new Set(['impresion', 'empaque', 'listo', 'acab_pl', 'acab_ci', 'acab_pg', 'acab_cf', 'acab_cdc', 'acab_cc', 'acab_ap', 'acab_ms', 'acab_pi', 'acab_pp', 'acab_en', 'acab_es', 'acab_pf', 'acab_te']);
         function mapMuestraRow(row) {
             const nombre = col(row, 'group name', 'nombre', 'name', 'titulo');
             const itemNum = col(row, '# item', '#item', '# item', '#order', 'item');
@@ -2021,7 +2051,7 @@
                 fechaLimite: parseMDYDate(entrega),
                 etapa: etapaActual || 'impresion',
                 urgente: urg.toLowerCase().includes('urgente'),
-                notas: notas.substring(0, 120),
+                notas: notas.substring(0, 120), perforado: /perforad/i.test(acab),
                 _fromSheets: true,
                 _isMuestra: true, idDm,
                 fechaCreacion: new Date().toISOString().split('T')[0],
@@ -3042,6 +3072,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         const CALIB_MAP = [
             { etapa: 'acab_ci', key: 'corteInicial', speed: r => r.hojas > 0 && r.mins > 0 ? (r.hojas / r.mins) * 4 : null },
             { etapa: 'acab_es', key: 'espiralado', speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
+            { etapa: 'acab_pf', key: 'perforado', speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
             { etapa: 'acab_en', key: 'engrapadora', speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
             { etapa: 'acab_ms', key: 'mesa_trabajo', speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
             { etapa: 'acab_cc', key: 'corte_carton', speed: r => r.cantidad > 0 && r.mins > 0 ? r.cantidad / r.mins : null },
@@ -4091,7 +4122,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         const GRUPOS_PANEL = [
             ['🖨️ Impresión B&N', ['iib']], ['🎨 Impresión color', ['iic', 'ip']], ['🎞️ Plastificado', ['pl']],
             ['🔪 Corte inicial', ['ci', 'cp']], ['🔥 Pegado (Hotmelt)', ['pg']], ['✂️ Corte final', ['cf']],
-            ['🔩 Ponchado', ['pi', 'pp']], ['➰ Cerrado wire-o', ['es']], ['📌 Engrapado', ['en']],
+            ['🔩 Ponchado', ['pi', 'pp']], ['➰ Cerrado wire-o', ['es']], ['🕳️ Perforado', ['pf']], ['📌 Engrapado', ['en']],
             ['📕 Pasta dura', ['ap', 'ms', 'cdc', 'cc']], ['📦 Termo / empaque', ['te']],
         ];
         function maquinasEstadoHTML() {
@@ -5317,7 +5348,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 { title: '🖨️ IMPRESIÓN (ppm 330×475)', color: '#fb923c', items: [['OCE 6320 B&N', 'maq.byn_fast'], ['Titan 6180 B&N', 'maq.byn_slow'], ['1352/1351/1353 Color ≤150g', 'maq.color_normal'], ['1352/1351/1353 Color >200g', 'maq.color_grueso'], ['10010 ≤150g', 'maq.color_slow_n'], ['10010 >200g', 'maq.color_slow_g']] },
                 { title: '📐 IMPOSICIÓN', color: '#60a5fa', items: [['Páginas por tabloide (default)', 'pptDefault'], ['Portadas por tabloide (default)', 'portaPptDefault']] },
                 { title: '⚙️ SETUP (min)', color: '#94a3b8', items: [['B&N', 'setup.byn'], ['Color', 'setup.color'], ['Plastificado', 'setup.plastificado'], ['Pegado', 'setup.pegado'], ['Corte final', 'setup.corteFinal']] },
-                { title: '✂️ ACABADOS', color: '#c084fc', items: [['Corte inicial (pág/min)', 'maq.corteInicial'], ['Plastificado (m/min)', 'maq.plast_vel', '0.1'], ['Hoja plast. (m)', 'maq.plast_hoja', '0.01'], ['Pegado 150p', 'maq.pegado_150', '0.1'], ['Pegado 500p', 'maq.pegado_500', '0.1'], ['Corte final 150p', 'maq.cf_150', '0.1'], ['Corte final 500p', 'maq.cf_500', '0.1'], ['Ponchadora (h/min)', 'maq.ponchadora'], ['Engrapadora', 'maq.engrapadora', '0.1'], ['Corte cartón', 'maq.corte_carton', '0.1'], ['Armado PD (port/min)', 'maq.armado_pd', '0.01'], ['Mesa trabajo', 'maq.mesa_trabajo', '0.1'], ['Espiralado', 'maq.espiralado', '0.1']] },
+                { title: '✂️ ACABADOS', color: '#c084fc', items: [['Corte inicial (pág/min)', 'maq.corteInicial'], ['Plastificado (m/min)', 'maq.plast_vel', '0.1'], ['Hoja plast. (m)', 'maq.plast_hoja', '0.01'], ['Pegado 150p', 'maq.pegado_150', '0.1'], ['Pegado 500p', 'maq.pegado_500', '0.1'], ['Corte final 150p', 'maq.cf_150', '0.1'], ['Corte final 500p', 'maq.cf_500', '0.1'], ['Ponchadora (h/min)', 'maq.ponchadora'], ['Perforado (pz/min)', 'maq.perforado', '0.1'], ['Engrapadora', 'maq.engrapadora', '0.1'], ['Corte cartón', 'maq.corte_carton', '0.1'], ['Armado PD (port/min)', 'maq.armado_pd', '0.01'], ['Mesa trabajo', 'maq.mesa_trabajo', '0.1'], ['Espiralado', 'maq.espiralado', '0.1']] },
                 { title: '📦 EMPAQUE', color: '#2dd4bf', items: [['Termo (lib/min)', 'maq.termo', '0.1']] },
             ];
             return `<div class="overlay" onclick="if(event.target===this)closeCfg()">
@@ -5562,6 +5593,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             { pre: 'MT', etapa: 'acab_ms', label: 'Mesa de Trabajo', grupo: true },
             { pre: 'PP', etapa: 'acab_pp', label: 'Ponchado Port' },
             { pre: 'PI', etapa: 'acab_pi', label: 'Ponchado Int' },
+            { pre: 'PF', etapa: 'acab_pf', label: 'Perforado', grupo: true },
             { pre: 'P', etapa: 'acab_pl', label: 'Plastificado' },
             { pre: 'ES', etapa: 'acab_es', label: 'Espiralado', grupo: true },
             { pre: 'EN', etapa: 'acab_en', label: 'Engrapado', grupo: true },
@@ -5738,10 +5770,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             'MQMPD1': 'Mesa de Pasta Dura 1', 'MQMPD2': 'Mesa de Pasta Dura 2', 'MQMPD3': 'Mesa de Pasta Dura 3',
             'MQRENZ1': 'Renz 1 (Ponchado)', 'MQRENZ2': 'Renz 2 (Ponchado)',
             'MQRHINO1': 'Rhinotuff 1 (Ponchado)', 'MQRHINO2': 'Rhinotuff 2 (Ponchado)', 'MQRHINOG': 'Rhinotuff grande (Ponchado)',
-            'MQPONCH3H1': 'Ponchadora 3 hoyos 1', 'MQPONCH3H2': 'Ponchadora 3 hoyos 2',
+            'MQPERF1': 'Perforadora de hoyos manual 1', 'MQPERF2': 'Perforadora de hoyos manual 2',
             'MQWIRE1': 'Cerradora wire-o 1', 'MQWIRE2': 'Cerradora wire-o 2',
-            'MQPONCHMAN': 'Ponchadora manual (hoyo del centro)',
         };
+        // Códigos viejos que pudieron quedar impresos (v9.48–v9.49) → la máquina real
+        const MACHINE_SCAN_ALIAS = { 'MQPONCH3H1': 'Perforadora de hoyos manual 1', 'MQPONCH3H2': 'Perforadora de hoyos manual 2', 'MQPONCHMAN': 'Perforadora de hoyos manual 1' };
         const PERSON_SCAN_CODES = {
             'OPCHUY': 'Chuy', 'OPMALY': 'Maly', 'OPDIANA': 'Diana', 'OPVANE': 'Vane', 'OPLAU': 'Lau',
             'OPVERO': 'Vero', 'OPBELEM': 'Belem', 'OPGABRIEL': 'Gabriel', 'OPFATIMA': 'Fatima',
@@ -5905,6 +5938,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             if ((_cod = codigoDe_(ESPERA_SCAN_CODES))) return marcarEspera_(ESPERA_SCAN_CODES[_cod], silent);
             // ── -1e. Códigos de máquina / persona activa ──
             if ((_cod = codigoDe_(MACHINE_SCAN_CODES))) return activarMaquina_(MACHINE_SCAN_CODES[_cod], silent);
+            if ((_cod = codigoDe_(MACHINE_SCAN_ALIAS))) return activarMaquina_(MACHINE_SCAN_ALIAS[_cod], silent);
             if ((_cod = codigoDe_(PERSON_SCAN_CODES))) return activarPersona_(PERSON_SCAN_CODES[_cod], silent);
             // ── 0. Prefijos especiales: solo mandan última fila a Sheets ──
             const logPre = SCAN_LOG_PRE.find(p => raw2.startsWith(p));
