@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.51';
+        const APP_VERSION = 'v9.52';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -921,6 +921,16 @@
             // perforadoras iguales (una más nueva) — hacen de 1 a 3 hoyos. Paso Perforado (pf).
             { id: 'perf1', label: 'Perforadora de hoyos manual 1', fisica: 'Perforadora de hoyos manual 1', steps: ['pf'], grupo: '✂️ Acabados' },
             { id: 'perf2', label: 'Perforadora de hoyos manual 2', fisica: 'Perforadora de hoyos manual 2', steps: ['pf'], grupo: '✂️ Acabados' },
+            // v9.52 (Kevin 2026-11-23): por ahora MANUALES — se escanean, salen en 🔧 Máquinas y se
+            // pueden marcar descompuestas, pero el motor no les manda trabajo hasta definir con qué
+            // palabra de la columna Acabados se activa cada una (df/hd/fo/re son pasos aún sin flujo).
+            { id: 'digifold', label: 'Morgana DigiFold Pro XL', fisica: 'Morgana DigiFold Pro XL', soloManual: true, steps: ['df'], grupo: '✂️ Acabados' },
+            { id: 'digicreaser', label: 'Morgana DigiCreaser', fisica: 'Morgana DigiCreaser', soloManual: true, steps: ['hd'], grupo: '✂️ Acabados' },
+            { id: 'catenaPoli', label: 'GBC Catena (poliéster)', fisica: 'GBC Catena poliéster', soloManual: true, steps: ['pl'], grupo: '✂️ Acabados' },
+            { id: 'catenaFoil', label: 'GBC Catena (foil)', fisica: 'GBC Catena foil', soloManual: true, steps: ['fo'], grupo: '✂️ Acabados' },
+            { id: 'cornerAuto', label: 'Corner rounder automática', fisica: 'Corner rounder automática', soloManual: true, steps: ['re'], grupo: '✂️ Acabados' },
+            { id: 'cornerMan', label: 'Corner rounder manual', fisica: 'Corner rounder manual', soloManual: true, steps: ['re'], grupo: '✂️ Acabados' },
+            { id: 'vulcan', label: 'Vulcan', fisica: 'Vulcan', soloManual: true, steps: [], grupo: '✂️ Acabados' },
             { id: 'engr', label: 'Engrapadora 1', fisica: 'Engrapadora 1', steps: ['en'], grupo: '✂️ Acabados' },
             { id: 'engr2', label: 'Engrapadora 2', fisica: 'Engrapadora 2', steps: ['en'], grupo: '✂️ Acabados' },
             // La "Espiraladora" eran en realidad estas dos cerradoras (v9.48)
@@ -4122,7 +4132,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         const GRUPOS_PANEL = [
             ['🖨️ Impresión B&N', ['iib']], ['🎨 Impresión color', ['iic', 'ip']], ['🎞️ Plastificado', ['pl']],
             ['🔪 Corte inicial', ['ci', 'cp']], ['🔥 Pegado (Hotmelt)', ['pg']], ['✂️ Corte final', ['cf']],
-            ['🔩 Ponchado', ['pi', 'pp']], ['➰ Cerrado wire-o', ['es']], ['🕳️ Perforado', ['pf']], ['📌 Engrapado', ['en']],
+            ['🔩 Ponchado', ['pi', 'pp']], ['➰ Cerrado wire-o', ['es']], ['🕳️ Perforado', ['pf']], ['📐 Doblez y hendido', ['df', 'hd']], ['✨ Foil', ['fo']], ['🔘 Esquinas redondas', ['re']], ['📌 Engrapado', ['en']],
             ['📕 Pasta dura', ['ap', 'ms', 'cdc', 'cc']], ['📦 Termo / empaque', ['te']],
         ];
         function maquinasEstadoHTML() {
@@ -5771,6 +5781,10 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             'MQRENZ1': 'Renz 1 (Ponchado)', 'MQRENZ2': 'Renz 2 (Ponchado)',
             'MQRHINO1': 'Rhinotuff 1 (Ponchado)', 'MQRHINO2': 'Rhinotuff 2 (Ponchado)', 'MQRHINOG': 'Rhinotuff grande (Ponchado)',
             'MQPERF1': 'Perforadora de hoyos manual 1', 'MQPERF2': 'Perforadora de hoyos manual 2',
+            'MQDIGIFOLD': 'Morgana DigiFold Pro XL', 'MQDIGICREASER': 'Morgana DigiCreaser',
+            'MQCATENAPOLI': 'GBC Catena poliéster', 'MQCATENAFOIL': 'GBC Catena foil',
+            'MQCORNERAUTO': 'Corner rounder automática', 'MQCORNERMAN': 'Corner rounder manual',
+            'MQVULCAN': 'Vulcan',
             'MQWIRE1': 'Cerradora wire-o 1', 'MQWIRE2': 'Cerradora wire-o 2',
         };
         // Códigos viejos que pudieron quedar impresos (v9.48–v9.49) → la máquina real
