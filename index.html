@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.53';
+        const APP_VERSION = 'v9.54';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -930,7 +930,7 @@
             { id: 'catenaFoil', label: 'GBC Catena (foil)', fisica: 'GBC Catena foil', soloManual: true, steps: ['fo'], grupo: '✂️ Acabados' },
             { id: 'cornerAuto', label: 'Corner rounder automática', fisica: 'Corner rounder automática', soloManual: true, steps: ['re'], grupo: '✂️ Acabados' },
             { id: 'cornerMan', label: 'Corner rounder manual', fisica: 'Corner rounder manual', soloManual: true, steps: ['re'], grupo: '✂️ Acabados' },
-            { id: 'vulcan', label: 'Vulcan', fisica: 'Vulcan', soloManual: true, steps: [], grupo: '✂️ Acabados' },
+            { id: 'vulcan', label: 'Vulcan (etiquetas)', fisica: 'Vulcan', soloManual: true, steps: ['ct'], grupo: '✂️ Acabados' }, // corte de contorno de etiquetas
             { id: 'engr', label: 'Engrapadora 1', fisica: 'Engrapadora 1', steps: ['en'], grupo: '✂️ Acabados' },
             { id: 'engr2', label: 'Engrapadora 2', fisica: 'Engrapadora 2', steps: ['en'], grupo: '✂️ Acabados' },
             // La "Espiraladora" eran en realidad estas dos cerradoras (v9.48)
@@ -4132,7 +4132,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         const GRUPOS_PANEL = [
             ['🖨️ Impresión B&N', ['iib']], ['🎨 Impresión color', ['iic', 'ip']], ['🎞️ Plastificado', ['pl']],
             ['🔪 Corte inicial', ['ci', 'cp']], ['🔥 Pegado (Hotmelt)', ['pg']], ['✂️ Corte final', ['cf']],
-            ['🔩 Ponchado', ['pi', 'pp']], ['➰ Cerrado wire-o', ['es']], ['🕳️ Perforado', ['pf']], ['📐 Doblez y hendido', ['df', 'hd']], ['✨ Foil', ['fo']], ['🔘 Esquinas redondas', ['re']], ['📌 Engrapado', ['en']],
+            ['🔩 Ponchado', ['pi', 'pp']], ['➰ Cerrado wire-o', ['es']], ['🕳️ Perforado', ['pf']], ['📐 Doblez y hendido', ['df', 'hd']], ['✨ Foil', ['fo']], ['🔘 Esquinas redondas', ['re']], ['🏷️ Etiquetas (corte de contorno)', ['ct']], ['📌 Engrapado', ['en']],
             ['📕 Pasta dura', ['ap', 'ms', 'cdc', 'cc']], ['📦 Termo / empaque', ['te']],
         ];
         function maquinasEstadoHTML() {
