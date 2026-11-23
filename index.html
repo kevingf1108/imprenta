@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.48';
+        const APP_VERSION = 'v9.49';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -900,6 +900,7 @@
             { id: 'rhinoG', label: 'Rhinotuff grande', fisica: 'Rhinotuff grande (Ponchado)', steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
             { id: 'ponch3h1', label: 'Ponchadora 3 hoyos 1', fisica: 'Ponchadora 3 hoyos 1', soloManual: true, steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
             { id: 'ponch3h2', label: 'Ponchadora 3 hoyos 2', fisica: 'Ponchadora 3 hoyos 2', soloManual: true, steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
+            { id: 'ponchMan', label: 'Ponchadora manual (hoyo centro)', fisica: 'Ponchadora manual (hoyo del centro)', soloManual: true, steps: ['pi', 'pp'], grupo: '✂️ Acabados' },
             { id: 'engr', label: 'Engrapadora 1', fisica: 'Engrapadora 1', steps: ['en'], grupo: '✂️ Acabados' },
             { id: 'engr2', label: 'Engrapadora 2', fisica: 'Engrapadora 2', steps: ['en'], grupo: '✂️ Acabados' },
             // La "Espiraladora" eran en realidad estas dos cerradoras (v9.48)
@@ -1001,6 +1002,16 @@
         // v9.44: además de la compu de impresión, un ADMIN (Kevin, entrando con Google) puede
         // cambiar máquinas desde cualquier computadora.
         function puedeCambiarMaq_() { return esCompuImpresion_() || !!_esAdmin; }
+        // v9.49: compu de ACABADOS — marca el estado de las máquinas de acabados/empaque.
+        // Impresoras: compu de impresión o admin · Acabados: compu de acabados o admin.
+        function esCompuAcabados_() { try { return localStorage.getItem('imp_compu_acabados') === '1'; } catch { return false; } }
+        function setCompuAcabados_(on) { try { if (on) localStorage.setItem('imp_compu_acabados', '1'); else localStorage.removeItem('imp_compu_acabados'); } catch { } render(); }
+        function esMaqImpresion_(m) { return !!m && m.steps.some(s => IMP_STEPS.has(s)); }
+        function puedeMarcarMaq_(machId) {
+            if (_esAdmin) return true;
+            const m = MAQUINAS.find(x => x.id === machId);
+            return esMaqImpresion_(m) ? esCompuImpresion_() : esCompuAcabados_();
+        }
         function setCompuImpresion_(on) { try { if (on) localStorage.setItem('imp_compu_impresion', '1'); else localStorage.removeItem('imp_compu_impresion'); } catch { } render(); }
         function setNotaPersona_(nombre, texto) {
             const k = keyPersona_(nombre), v = String(texto || '').trim();
@@ -3768,7 +3779,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // vista nueva; ya se nos desincronizaron antes entre las dos por olvidar una de las dos.
         const BOARD_VIEWS = {
             kanban: boardHTML, muestras: muestrasHTML,
-            pegado: () => etapaSolaHTML('acab_pg'), faltapg: () => faltanPorHTML('pg'),
+            pegado: () => etapaSolaHTML('acab_pg'), faltapg: () => faltanPorHTML('pg'), maquinas: maquinasEstadoHTML,
             imp_solo: soloImpresionHTML, imp_hoy: imprimirHoyHTML, acab_solo: soloAcabadosHTML,
             urgentes: urgentesHTML, atrasadas: atrasadasHTML,
         };
@@ -3779,7 +3790,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             const opts = [
                 ['kanban', '📋', 'Todas'], ['imp_solo', '🖨️', 'Impresión'], ['imp_hoy', '📅', 'Imprimir hoy'], ['acab_solo', '✂️', 'Acabados'],
                 ['urgentes', '⚡', 'Urgentes'], ['muestras', '🔬', 'Muestras'], ['atrasadas', '🔴', 'Atrasadas'],
-                ['pegado', '🔥', 'Pegado'], ['faltapg', '⏳', 'Faltan por pegar'],
+                ['pegado', '🔥', 'Pegado'], ['faltapg', '⏳', 'Faltan por pegar'], ['maquinas', '🔧', 'Máquinas'],
             ];
             return `<div style="display:flex;gap:5px;flex-wrap:wrap;padding:10px 14px 0">
     ${opts.map(([v, ic, l]) => `<button onclick="setV('${v}')" style="padding:6px 13px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-weight:700;background:${V === v ? '#3b82f6' : '#1e293b'};color:${V === v ? '#fff' : '#94a3b8'};white-space:nowrap">${ic} ${l}</button>`).join('')}
@@ -4044,7 +4055,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-size:14px;font-weight:800;color:${E.color}">${E.icon} ${e(m.label)} — ${E.label.toUpperCase()}</span>
         <span style="font-size:11px;color:#94a3b8">${haceCuanto_(st.ts)}${st.nota ? ' · ' + e(st.nota) : ''}</span>
-        ${compu ? `<button class="btn btn-sm" onclick="setMaqEstado_('${m.id}','');render();showToast('✅ ${e(m.label)} funcionando otra vez')" style="background:#052e16;color:#4ade80;border:1px solid #166534">✅ Ya funciona</button>` : ''}
+        ${puedeMarcarMaq_(m.id) ? `<button class="btn btn-sm" onclick="setMaqEstado_('${m.id}','');render();showToast('✅ ${e(m.label)} funcionando otra vez')" style="background:#052e16;color:#4ade80;border:1px solid #166534">✅ Ya funciona</button>` : ''}
       </div>
       ${mov.length ? `<div style="font-size:12px;color:#fca5a5;margin-top:4px;font-weight:700">⚠️ Hoy hay que hacer en otra máquina ${mov.length} orden${mov.length === 1 ? '' : 'es'} — el motor ya las movió:</div>
       <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px">${mov.map(x => `<span onclick="openOrd('${e(x.o.id)}')" style="cursor:pointer;background:#1e293b;border-radius:6px;padding:3px 8px;font-size:11px;color:#e2e8f0">${e(x.id)} → <b style="color:#4ade80">${e(maqLabel_(x.a))}</b>${x.fijada ? ' 📌' : ''}</span>`).join('')}</div>` : `<div style="font-size:11px;color:#64748b;margin-top:2px">Nada de lo que urge hoy estaba en esta máquina.</div>`}
@@ -4053,9 +4064,50 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
     </div>`; }).join('')}
   </div>`;
         }
+        // ── Panel 🔧 Máquinas (v9.49): todas las máquinas, agrupadas por tipo de trabajo ──
+        const GRUPOS_PANEL = [
+            ['🖨️ Impresión B&N', ['iib']], ['🎨 Impresión color', ['iic', 'ip']], ['🎞️ Plastificado', ['pl']],
+            ['🔪 Corte inicial', ['ci', 'cp']], ['🔥 Pegado (Hotmelt)', ['pg']], ['✂️ Corte final', ['cf']],
+            ['🔩 Ponchado', ['pi', 'pp']], ['➰ Cerrado wire-o', ['es']], ['📌 Engrapado', ['en']],
+            ['📕 Pasta dura', ['ap', 'ms', 'cdc', 'cc']], ['📦 Termo / empaque', ['te']],
+        ];
+        function maquinasEstadoHTML() {
+            const blocks = scheduleMachines(orders, cfg).blocks, usadas = new Set();
+            const tile = m => {
+                const st = maqEstado[m.id], E = st && ESTADOS_MAQ[st.estado], puede = puedeMarcarMaq_(m.id);
+                const cola = blocks.filter(b => b.machId === m.id), mins = cola.reduce((s2, b) => s2 + b.dur, 0);
+                return `<div style="background:${E ? '#2a0a0a' : '#0f172a'};border:${E ? '2px solid ' + E.color : '1px solid #334155'};border-radius:10px;padding:10px;min-width:190px;flex:1 1 190px;max-width:260px">
+        <div style="font-size:13px;font-weight:800;color:#f1f5f9">${e(m.label)}${m.soloManual ? ' <span style="font-size:10px;color:#64748b;font-weight:600">manual</span>' : ''}</div>
+        <div style="font-size:10px;color:#64748b;margin-top:2px">${cola.length ? `${cola.length} en cola · ${mStr(mins)}` : 'Sin cola'}</div>
+        ${puede ? `<select onchange="cambiarEstadoMaq_('${m.id}',this.value)" style="margin-top:6px;width:100%;background:#1e293b;color:${E ? E.color : '#4ade80'};border:1px solid #334155;border-radius:6px;padding:4px;font-size:11px;font-weight:700">
+          <option value="" ${!E ? 'selected' : ''}>🟢 Funcionando</option>
+          <option value="mant" ${st && st.estado === 'mant' ? 'selected' : ''}>🔧 En mantenimiento</option>
+          <option value="fuera" ${st && st.estado === 'fuera' ? 'selected' : ''}>🔴 Fuera de servicio</option></select>`
+                    : `<div style="margin-top:6px;font-size:11px;font-weight:700;color:${E ? E.color : '#4ade80'}">${E ? E.icon + ' ' + E.label : '🟢 Funcionando'} 🔒</div>`}
+        ${E && st.nota ? `<div style="font-size:10px;color:#94a3b8;margin-top:3px">${e(st.nota)} · ${haceCuanto_(st.ts)}</div>` : ''}
+      </div>`;
+            };
+            const secciones = GRUPOS_PANEL.map(([titulo, steps]) => {
+                const ms = MAQUINAS.filter(m => !usadas.has(m.id) && m.steps.some(x => steps.includes(x)));
+                ms.forEach(m => usadas.add(m.id));
+                return ms.length ? `<div style="margin-bottom:14px"><div style="font-size:12px;font-weight:800;color:#94a3b8;margin-bottom:6px">${titulo}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">${ms.map(tile).join('')}</div></div>` : '';
+            }).join('');
+            const resto = MAQUINAS.filter(m => !usadas.has(m.id));
+            const quien = _esAdmin ? '👑 Entraste como admin: puedes marcar todas las máquinas.'
+                : esCompuImpresion_() && esCompuAcabados_() ? 'Esta compu puede marcar impresoras y acabados.'
+                : esCompuImpresion_() ? '🖨️ Compu de impresión: puedes marcar las impresoras (las de acabados las marca la compu de acabados).'
+                : esCompuAcabados_() ? '✂️ Compu de acabados: puedes marcar las máquinas de acabados (las impresoras las marca la compu de impresión).'
+                : '🔒 Esta compu solo puede ver. Impresoras → compu de impresión · Acabados → compu de acabados (se activan en ⚙️).';
+            return `<div style="padding:14px">
+    <div style="font-size:20px;font-weight:800;color:#f1f5f9">🔧 Estado de máquinas</div>
+    <div style="font-size:12px;color:#64748b;margin:2px 0 14px">${quien} Si una se descompone, el motor mueve solo lo que urge ese día y lo demás espera.</div>
+    ${secciones}${resto.length ? `<div style="font-size:12px;font-weight:800;color:#94a3b8;margin-bottom:6px">Otras</div><div style="display:flex;flex-wrap:wrap;gap:8px">${resto.map(tile).join('')}</div>` : ''}
+  </div>`;
+        }
         function cambiarEstadoMaq_(machId, estado) {
-            if (!puedeCambiarMaq_()) { showToast('🔒 Solo la compu de impresión (o un admin con Google) puede cambiar el estado de las máquinas'); render(); return; }
             const m = MAQUINAS.find(x => x.id === machId); if (!m) return;
+            if (!puedeMarcarMaq_(machId)) { showToast(`🔒 Solo la compu de ${esMaqImpresion_(m) ? 'impresión' : 'acabados'} (o un admin con Google) puede cambiar el estado de ${m.label}`); render(); return; }
             if (!ESTADOS_MAQ[estado]) { setMaqEstado_(machId, ''); render(); showToast('✅ ' + m.label + ' funcionando'); return; }
             const nota = prompt(`${ESTADOS_MAQ[estado].icon} ${m.label} — ${ESTADOS_MAQ[estado].label}\n¿Qué le pasó? (opcional)`, '');
             if (nota === null) { render(); return; }
@@ -5251,7 +5303,12 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
       <label style="display:flex;align-items:center;gap:10px;background:#0f172a;border:1px solid ${esCompuImpresion_() ? '#fb923c' : '#334155'};border-radius:10px;padding:10px 12px;margin-bottom:14px;cursor:pointer">
         <input type="checkbox" ${esCompuImpresion_() ? 'checked' : ''} onchange="setCompuImpresion_(this.checked)" style="width:18px;height:18px">
         <div><div style="font-size:13px;font-weight:700;color:#fb923c">🖨️ Esta computadora es la de impresión</div>
-        <div style="font-size:11px;color:#64748b">Solo esta podrá cambiar la máquina de una orden y marcar máquinas fuera o en mantenimiento. Se guarda solo en esta computadora.</div></div>
+        <div style="font-size:11px;color:#64748b">Podrá cambiar la máquina de una orden y marcar IMPRESORAS fuera o en mantenimiento. Se guarda solo en esta computadora.</div></div>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;background:#0f172a;border:1px solid ${esCompuAcabados_() ? '#c084fc' : '#334155'};border-radius:10px;padding:10px 12px;margin-bottom:14px;cursor:pointer">
+        <input type="checkbox" ${esCompuAcabados_() ? 'checked' : ''} onchange="setCompuAcabados_(this.checked)" style="width:18px;height:18px">
+        <div><div style="font-size:13px;font-weight:700;color:#c084fc">✂️ Esta computadora es la de acabados</div>
+        <div style="font-size:11px;color:#64748b">Podrá marcar máquinas de ACABADOS y empaque fuera o en mantenimiento (en 🔧 Máquinas). Se guarda solo en esta computadora.</div></div>
       </label>
       <span class="lbl" style="margin-top:0">Nombre de la imprenta</span>
       <input class="inp" value="${e(cfg.nombreImprenta)}" oninput="cfg.nombreImprenta=this.value;saveBoard()">
@@ -5660,6 +5717,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             'MQRHINO1': 'Rhinotuff 1 (Ponchado)', 'MQRHINO2': 'Rhinotuff 2 (Ponchado)', 'MQRHINOG': 'Rhinotuff grande (Ponchado)',
             'MQPONCH3H1': 'Ponchadora 3 hoyos 1', 'MQPONCH3H2': 'Ponchadora 3 hoyos 2',
             'MQWIRE1': 'Cerradora wire-o 1', 'MQWIRE2': 'Cerradora wire-o 2',
+            'MQPONCHMAN': 'Ponchadora manual (hoyo del centro)',
         };
         const PERSON_SCAN_CODES = {
             'OPCHUY': 'Chuy', 'OPMALY': 'Maly', 'OPDIANA': 'Diana', 'OPVANE': 'Vane', 'OPLAU': 'Lau',
