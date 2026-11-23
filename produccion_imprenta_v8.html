@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.49';
+        const APP_VERSION = 'v9.50';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1646,6 +1646,29 @@
         const MIN_MUESTRAS_MAQUINA = 5;
         let _factorMaqCache = { n: -1, map: {} };
         function mediana_(arr) { const a = [...arr].sort((x, y) => x - y), k = Math.floor(a.length / 2); return !a.length ? null : a.length % 2 ? a[k] : (a[k - 1] + a[k]) / 2; }
+        // v9.50: Interior y Portada del mismo libro que se cierran en el mismo momento, con el
+        // mismo tiempo, en la misma máquina y por la misma persona son UN solo trabajo físico —
+        // antes contaban doble en Personas y máquinas. Mismo grupo = primeros 5 dígitos del ID.
+        function statsDedup_(recs) {
+            const vistos = new Set();
+            return recs.filter(r => {
+                const d = String(r.ordId || '').replace(/\D/g, '');
+                if (d.length < 5) return true;
+                const k = [d.slice(0, 5), r.etapa, r.mins, r.persona || '', r.maquinaFisica || '', Math.round((r.ts || 0) / 120000)].join('|');
+                if (vistos.has(k)) return false;
+                vistos.add(k); return true;
+            });
+        }
+        // v9.50: ¿la máquina física hace este paso? (Vansta no pega). Máquina desconocida → sí.
+        function maqHaceEtapa_(fisica, etapa) {
+            if (!fisica || !etapa) return true;
+            const m = MAQUINAS.find(x => x.fisica === fisica);
+            if (!m) return true;
+            if (etapa === 'impresion') return m.steps.some(st => IMP_STEPS.has(st));
+            if (!String(etapa).startsWith('acab_')) return true;
+            const st = etapa.slice(5);
+            return m.steps.includes(st) || (st === 'ci' && m.steps.includes('cp'));
+        }
         function factoresMaquina_() {
             if (_factorMaqCache.n === statsHistory.length) return _factorMaqCache.map;
             const map = {};
@@ -1653,7 +1676,7 @@
             const steps = [...new Set(MAQUINAS.filter(m => m.fisica).flatMap(m => m.steps))];
             steps.forEach(stepId => {
                 const x = r => porHojas.has(stepId) ? r.hojas : r.cantidad;
-                const recs = statsHistory.filter(r => r.etapa === 'acab_' + stepId && r.mins > 0 && x(r) > 0);
+                const recs = statsDedup_(statsHistory.filter(r => r.etapa === 'acab_' + stepId && r.mins > 0 && x(r) > 0));
                 const medPaso = mediana_(recs.map(r => r.mins / x(r)));
                 if (!medPaso) return;
                 MAQUINAS.filter(m => m.fisica && m.steps.includes(stepId)).forEach(m => {
@@ -3316,16 +3339,16 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         // pegar), en minutos por unidad, contra la mediana de todos en ese paso — así no
         // castiga a quien le tocan trabajos de un paso más lento. Con pocos datos no se
         // muestra porcentaje: un par de tiempos raros no deben etiquetar a nadie.
-        const MIN_MUESTRAS_PERSONA = 3;
+        const MIN_MUESTRAS_PERSONA = 10; // v9.50: antes 3 — con 3 trabajos salían conclusiones injustas
         function unidadPaso_(etapa) { return ['impresion', 'acab_pl', 'acab_ci'].includes(etapa) ? 'hojas' : 'cantidad'; }
         function personasHTML() {
-            const recs = statsHistory.filter(r => r.mins > 0 && r[unidadPaso_(r.etapa)] > 0);
+            const recs = statsDedup_(statsHistory.filter(r => r.mins > 0 && r[unidadPaso_(r.etapa)] > 0));
             const medPaso = {};
             [...new Set(recs.map(r => r.etapa))].forEach(et => {
                 medPaso[et] = mediana_(recs.filter(r => r.etapa === et).map(r => r.mins / r[unidadPaso_(et)]));
             });
             const card = 'background:#1e293b;border-radius:12px;padding:14px 16px;margin-bottom:12px';
-            const pct = (n, rel) => n < MIN_MUESTRAS_PERSONA ? `<span style="color:#64748b">pocos datos</span>`
+            const pct = (n, rel) => n < MIN_MUESTRAS_PERSONA ? `<span style="color:#64748b">juntando datos (${n}/${MIN_MUESTRAS_PERSONA})</span>`
                 : Math.abs(rel - 1) < 0.05 ? `<span style="color:#94a3b8">en el promedio</span>`
                 : rel > 1 ? `<span style="color:#4ade80">${Math.round((rel - 1) * 100)}% más rápido</span>`
                 : `<span style="color:#f59e0b">${Math.round((1 - rel) * 100)}% más lento</span>`;
@@ -5980,6 +6003,9 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             // ── 4. INICIA / PAUSA / REANUDA ─────────────────────────────
             if (isInicio) {
                 let actionLabel = '⏱ Iniciando', actionColor = '#60a5fa';
+                const _etapaIni = proc && proc.etapa ? proc.etapa : matches[0].etapa;
+                const _maqMal = _maquinaActual && !maqHaceEtapa_(_maquinaActual, _etapaIni);
+                const _sinPersona = !_personaActual && isAcabEtapa(_etapaIni);
                 let conteoInfo = ''; // se llena si este "Inicia" activa/retoma el conteo de Empaque
                 matches.forEach(o => {
                     const timerKey = o.id + (proc ? '_' + proc.pre : '');
@@ -6020,7 +6046,14 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 saveTimers(); saveBoard(); render();
                 if (!silent) {
                     showToast(actionLabel + ' ' + procLabel + ': ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + conteoInfo);
-                    showScanFlash(matches[0].titulo, actionLabel + (matches.length > 1 ? ' ×' + matches.length : ''), actionColor);
+                    if (_maqMal && actionLabel === '⏱ Iniciando') {
+                        showToast(`⚠️ Estás en ${_maquinaActual} pero escaneaste ${procLabel} — este tiempo NO va a contar. Escanea el código de la máquina correcta.`, 9000);
+                        showScanFlash(matches[0].titulo, `⚠️ ${_maquinaActual} no hace ${procLabel}`, '#ef4444');
+                    } else if (_sinPersona && actionLabel === '⏱ Iniciando') {
+                        showScanFlash(matches[0].titulo, '👤 ¿Quién eres? Escanea tu código', '#ef4444');
+                    } else {
+                        showScanFlash(matches[0].titulo, actionLabel + (matches.length > 1 ? ' ×' + matches.length : ''), actionColor);
+                    }
                 }
                 return true;
             }
@@ -6032,7 +6065,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             // estación — la orden avanza igual, pero NO se guarda tiempo real para esa etapa
             // (2026-09-07, a pedido de Kevin: solo Plastificado/Corte Inicial estaban mostrando
             // tiempos porque en el resto de estaciones se escaneaba solo "Pasa").
-            let _faltoInicio = false;
+            let _faltoInicio = false, _maqEquivocada = null;
             matches.forEach(o => {
                 const idx = orders.findIndex(x => x.id === o.id);
                 const timerKey = o.id + (proc ? '_' + proc.pre : '');
@@ -6054,7 +6087,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 if (ei < 0 || ei >= flow.length - 1) return;
                 const nextStep = flow[ei + 1];
                 const fromEtapa = oActual.etapa;
-                if (_scanTimers[timerKey]) {
+                if (_scanTimers[timerKey] && !maqHaceEtapa_(ctxPasa.maquina, fromEtapa)) {
+                    // v9.50: máquina equivocada (ej. Vansta en Hotmelt) — avanza, pero el tiempo no cuenta
+                    delete _scanTimers[timerKey]; saveTimers();
+                    _maqEquivocada = ctxPasa.maquina;
+                } else if (_scanTimers[timerKey]) {
                     const tm = _scanTimers[timerKey];
                     const totalMs = typeof tm === 'number' ? (Date.now() - tm)
                         : tm.paused ? tm.acc : tm.acc + (Date.now() - tm.start);
@@ -6099,15 +6136,22 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 movedLabels.push(nextStep.label);
             });
 
+            // v9.50: la persona se borra después de cada "Pasa" — el siguiente trabajo pide escanear
+            // el código otra vez, para que no se cargue a quien escaneó al último (escáner compartido).
+            const _personaQueSalio = _personaActual;
+            if (_personaActual) { _personaActual = null; saveContexto_(); }
             (_tocoLogsFull ? saveS() : saveBoard());
             render();
             const nextLbl = movedLabels[0] || '';
             if (!silent) {
-                if (_faltoInicio) {
+                if (_maqEquivocada) {
+                    showToast(`⚠️ ${_maqEquivocada} no hace ${procLabel} — la orden avanzó pero el tiempo NO se guardó. Escanea la máquina correcta antes de "Inicia".`, 9000);
+                    showScanFlash(matches[0].titulo, '⚠️ ' + nextLbl + ' (máquina equivocada, sin tiempo)', '#ef4444');
+                } else if (_faltoInicio) {
                     showToast('⚠️ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl + ' — SIN tiempo registrado, faltó escanear "Inicia" al llegar a ' + procLabel, 6000);
                     showScanFlash(matches[0].titulo, '⚠️ ' + nextLbl + ' (sin tiempo)' + (matches.length > 1 ? ' ×' + matches.length : ''), '#ef4444');
                 } else {
-                    showToast('✅ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl);
+                    showToast('✅ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl + (_personaQueSalio ? ' · 👤 ' + _personaQueSalio + ': escanea tu código otra vez para el siguiente' : ''), 5000);
                     showScanFlash(matches[0].titulo, nextLbl + (matches.length > 1 ? ' ×' + matches.length : ''), '#f59e0b');
                 }
             }
