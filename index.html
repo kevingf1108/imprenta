@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.54';
+        const APP_VERSION = 'v9.55';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -1008,6 +1008,8 @@
         // maqAsignada/<orden> = { maq, ts } — máquina de impresión que la compu de impresión fijó
         // arrastrando la tarjeta. Clave por clave (mismo motivo que hiddenGroups, v9.22).
         let maqEstado = {}, maqAsignada = {};
+        // v9.55: escáneres personales (Zebra DS2278, uno por persona). escaneres/<ID> = { persona, ts }.
+        let escaneres = {};
         const IMP_STEPS = new Set(['iib', 'iic', 'ip']);
         const ESTADOS_MAQ = { mant: { label: 'En mantenimiento', icon: '🔧', color: '#f59e0b' }, fuera: { label: 'Fuera de servicio', icon: '🔴', color: '#ef4444' } };
         function maqFuera_(machId) { const st = maqEstado[machId]; return !!(st && ESTADOS_MAQ[st.estado]); }
@@ -1142,6 +1144,7 @@
                     maqEstado = data.maqEstado || {};
                     if (!firstLoad) MAQUINAS.forEach(m => { if (_maqAntes[m.id] && !maqEstado[m.id]) showToast('✅ ' + m.label + ' ya funciona otra vez', 6000); });
                     maqAsignada = data.maqAsignada || {};
+                    escaneres = data.escaneres || {};
                     // Restaurar órdenes manuales (union_results) guardadas en Firebase
                     const rawMO = data.manualOrders;
                     if (rawMO) {
@@ -5374,6 +5377,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         <div><div style="font-size:13px;font-weight:700;color:#c084fc">✂️ Esta computadora es la de acabados</div>
         <div style="font-size:11px;color:#64748b">Podrá marcar máquinas de ACABADOS y empaque fuera o en mantenimiento (en 🔧 Máquinas). Se guarda solo en esta computadora.</div></div>
       </label>
+      ${escaneresCfgHTML()}
       <span class="lbl" style="margin-top:0">Nombre de la imprenta</span>
       <input class="inp" value="${e(cfg.nombreImprenta)}" oninput="cfg.nombreImprenta=this.value;saveBoard()">
       <div class="g2">
@@ -5816,6 +5820,59 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
             if (!silent) { showToast('👤 Operador activo: ' + nombre, 4000); showScanFlash('👤 ' + nombre, '✅ Ya puedes escanear la máquina', '#a855f7'); }
             return true;
         }
+        // ── Escáneres personales (v9.55) ──────────────────────────────────────────
+        // Cada Zebra DS2278 está programado (hojas_zebra.py) para mandar  Z + código + ID + Enter,
+        // ID = una letra/número propio del escáner. La persona de cada escáner queda fija (la liga
+        // escaneando su OP… con ese escáner) y la máquina se recuerda por escáner en esta compu.
+        // Así varios escáneres en la misma computadora ya no se mezclan entre personas.
+        let _maqPorEscaner = {};
+        try { _maqPorEscaner = JSON.parse(localStorage.getItem('imp_maq_escaner') || '{}') || {}; } catch { }
+        let _enEscanerPersonal = false;
+        function setEscaner_(id, persona) {
+            const v = persona ? { persona, ts: Date.now() } : null;
+            if (v) escaneres[id] = v; else delete escaneres[id];
+            const patch = {}; patch['escaneres/' + id] = v;
+            _ref.update(patch).catch(() => { });
+        }
+        function quitarEscaner_(id) {
+            if (!confirm('¿Quitar el dueño del escáner ' + id + '? Hasta que alguien escanee su código con él, no guardará persona.')) return;
+            setEscaner_(id, null); render();
+        }
+        function handleScanPersonal_(raw2, silent) {
+            const id = raw2.slice(-1), cuerpo = raw2.slice(1, -1);
+            const persona = PERSON_SCAN_CODES[cuerpo];
+            if (persona) {
+                setEscaner_(id, persona); render();
+                if (!silent) { showToast('📟 Escáner ' + id + ' = ' + persona, 5000); showScanFlash('📟 Escáner ' + id, '✅ Es de ' + persona, '#38bdf8'); }
+                return true;
+            }
+            const maq = MACHINE_SCAN_CODES[cuerpo] || MACHINE_SCAN_ALIAS[cuerpo];
+            if (maq) {
+                _maqPorEscaner[id] = maq;
+                try { localStorage.setItem('imp_maq_escaner', JSON.stringify(_maqPorEscaner)); } catch { }
+                render();
+                const due = escaneres[id] && escaneres[id].persona;
+                if (!silent) { showToast('🏭 Escáner ' + id + (due ? ' (' + due + ')' : '') + ': máquina ' + maq, 4000); showScanFlash('🏭 ' + maq, '✅ Escáner ' + id + (due ? ' · ' + due : ''), '#a855f7'); }
+                return true;
+            }
+            const dueno = (escaneres[id] && escaneres[id].persona) || null;
+            if (!dueno && !silent) showToast('📟 El escáner ' + id + ' no tiene dueño — escanea tu código de persona (OP…) con él', 7000);
+            const gP = _personaActual, gM = _maquinaActual;
+            _personaActual = dueno; _maquinaActual = _maqPorEscaner[id] || null; _enEscanerPersonal = true;
+            try { return handleScan(cuerpo, silent); }
+            finally { _enEscanerPersonal = false; _personaActual = gP; _maquinaActual = gM; saveContexto_(); render(); }
+        }
+        function escaneresCfgHTML() {
+            const ids = Object.keys(escaneres).sort((a, b) => (/\d/.test(a) - /\d/.test(b)) || a.localeCompare(b));
+            const filas = ids.map(id => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-top:1px solid #1e293b;font-size:12px">
+          <b style="width:22px;color:#38bdf8">${e(id)}</b><span style="flex:1;color:#e2e8f0">${e(escaneres[id].persona)}</span>
+          <span style="color:#64748b">${_maqPorEscaner[id] ? '🏭 ' + e(_maqPorEscaner[id]) : ''}</span>
+          <button class="bico" title="Quitar dueño" onclick="quitarEscaner_('${e(id)}')" style="color:#64748b">✕</button></div>`).join('');
+            return `<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px 12px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;color:#38bdf8">📟 Escáneres personales (${ids.length})</div>
+        <div style="font-size:11px;color:#64748b;margin-bottom:4px">Cada escáner Zebra queda ligado a quien escanee su código OP… con él. Para cambiar de dueño, que la otra persona escanee su código.</div>
+        ${filas || '<div style="font-size:12px;color:#475569">Todavía no hay escáneres ligados.</div>'}</div>`;
+        }
         function limpiarContextoMaqPersona_() { _maquinaActual = null; _personaActual = null; saveContexto_(); render(); }
 
         // Suma N piezas a la orden que se está contando actualmente. Solo informa el avance —
@@ -5936,6 +5993,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
 
         function handleScan(raw, silent) {
             const raw2 = raw.trim().toUpperCase();
+            // v9.55: escáner personal → "Z" + código + ID del escáner
+            if (!_enEscanerPersonal && raw2.length >= 4 && raw2[0] === 'Z' && /[A-Z0-9]$/.test(raw2)) return handleScanPersonal_(raw2, silent);
             // Cada escáner antepone la letra de SU estación a todo lo que lee (E en Empaque, L,
             // H…) — confirmado en el log de No encontrados 2026-10-28: OPCHUY llegaba como
             // "LOPCHUY". Los códigos genéricos (persona, máquina, reposición…) se reconocen con
@@ -6199,7 +6258,7 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                     showToast('⚠️ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl + ' — SIN tiempo registrado, faltó escanear "Inicia" al llegar a ' + procLabel, 6000);
                     showScanFlash(matches[0].titulo, '⚠️ ' + nextLbl + ' (sin tiempo)' + (matches.length > 1 ? ' ×' + matches.length : ''), '#ef4444');
                 } else {
-                    showToast('✅ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl + (_personaQueSalio ? ' · 👤 ' + _personaQueSalio + ': escanea tu código otra vez para el siguiente' : ''), 5000);
+                    showToast('✅ ' + matches.map(o => o.titulo.substring(0, 15)).join(', ') + ' → ' + nextLbl + (_personaQueSalio ? ' · 👤 ' + _personaQueSalio + (_enEscanerPersonal ? '' : ': escanea tu código otra vez para el siguiente') : ''), 5000);
                     showScanFlash(matches[0].titulo, nextLbl + (matches.length > 1 ? ' ×' + matches.length : ''), '#f59e0b');
                 }
             }
