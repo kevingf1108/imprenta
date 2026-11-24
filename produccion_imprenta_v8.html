@@ -572,7 +572,7 @@
     <script>
         'use strict';
         // ── Auto-actualización ───────────────────────────────
-        const APP_VERSION = 'v9.55';
+        const APP_VERSION = 'v9.56';
         let _pendingReload = false;
         // Cuántos guardados a Firebase (saveS/saveBoard) siguen en vuelo — si la recarga
         // automática le gana la carrera a un guardado (ej. justo al marcar una orden como
@@ -5377,6 +5377,11 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
         <div><div style="font-size:13px;font-weight:700;color:#c084fc">✂️ Esta computadora es la de acabados</div>
         <div style="font-size:11px;color:#64748b">Podrá marcar máquinas de ACABADOS y empaque fuera o en mantenimiento (en 🔧 Máquinas). Se guarda solo en esta computadora.</div></div>
       </label>
+      <label style="display:flex;align-items:center;gap:10px;background:#0f172a;border:1px solid ${cfg.avisoPersona ? '#38bdf8' : '#334155'};border-radius:10px;padding:10px 12px;margin-bottom:14px;cursor:pointer">
+        <input type="checkbox" ${cfg.avisoPersona ? 'checked' : ''} onchange="cfg.avisoPersona=this.checked;saveBoard();render()" style="width:18px;height:18px">
+        <div><div style="font-size:13px;font-weight:700;color:#38bdf8">👤 Avisar "¿Quién eres?" al iniciar sin persona</div>
+        <div style="font-size:11px;color:#64748b">Prender cuando ya estén los escáneres personales. Aplica a todas las computadoras.</div></div>
+      </label>
       ${escaneresCfgHTML()}
       <span class="lbl" style="margin-top:0">Nombre de la imprenta</span>
       <input class="inp" value="${e(cfg.nombreImprenta)}" oninput="cfg.nombreImprenta=this.value;saveBoard()">
@@ -6112,7 +6117,8 @@ function r(m){return ContentService.createTextOutput(m).setMimeType(ContentServi
                 let actionLabel = '⏱ Iniciando', actionColor = '#60a5fa';
                 const _etapaIni = proc && proc.etapa ? proc.etapa : matches[0].etapa;
                 const _maqMal = _maquinaActual && !maqHaceEtapa_(_maquinaActual, _etapaIni);
-                const _sinPersona = !_personaActual && isAcabEtapa(_etapaIni);
+                // v9.56: el aviso se puede apagar en ⚙️ (apagado mientras llegan los escáneres Zebra)
+                const _sinPersona = !!cfg.avisoPersona && !_personaActual && isAcabEtapa(_etapaIni);
                 let conteoInfo = ''; // se llena si este "Inicia" activa/retoma el conteo de Empaque
                 matches.forEach(o => {
                     const timerKey = o.id + (proc ? '_' + proc.pre : '');
